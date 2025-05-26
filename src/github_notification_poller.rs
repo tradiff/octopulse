@@ -1,5 +1,5 @@
 use crate::github_client::GithubClient;
-use crate::models::{PullRequestComment, PullRequestDetails, PullRequestState};
+use crate::models::{PullRequestComment, PullRequestDetails, PullRequestState, CommentAction};
 use crate::notification_debug::debug_github_notification;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -95,7 +95,7 @@ impl GithubNotificationPoller {
                         &pr.comments
                             .iter()
                             .map(|comment| {
-                                format!("- {}: [{}] {}", comment.user, comment.action, comment.body)
+                                format!("- <b>{}</b>: {} {}", comment.user, comment.action.as_emoji(), comment.body)
                             })
                             .collect::<Vec<_>>()
                             .join("\n"),
@@ -195,7 +195,7 @@ impl GithubNotificationPoller {
                         .map_or("Unknown".to_string(), |u| u.login.clone()),
                     body: comment.body,
                     created_at: Some(comment.created_at),
-                    action: "comment".to_string(),
+                    action: CommentAction::Comment,
                 })
                 .collect::<Vec<_>>(),
         );
@@ -223,7 +223,7 @@ impl GithubNotificationPoller {
                     created_at: review.submitted_at,
                     action: review
                         .state
-                        .map_or("Unknown".to_string(), |s| format!("{:?}", s)),
+                        .map_or(CommentAction::Unknown, CommentAction::from_review_state),
                 })
                 .collect::<Vec<_>>(),
         );
