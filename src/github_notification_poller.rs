@@ -5,6 +5,8 @@ use crate::models::{
 use crate::notification_debug::debug_github_notification;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use image::ImageFormat;
+use image::ImageReader;
 use notify_rust::{Hint, Notification as DesktopNotification};
 use octocrab::{Page, models::activity::Notification};
 use std::fs;
@@ -310,7 +312,7 @@ impl GithubNotificationPoller {
         }
     }
 
-    /// downloads the resized image if not cached and returns a `file:///…` URI.
+    /// Download the resized image if not cached and returns a file uri.
     async fn get_avatar(login: &str, avatar_url: &str) -> anyhow::Result<String> {
         let size = 18;
         let tmp_file =
@@ -318,7 +320,7 @@ impl GithubNotificationPoller {
 
         if tmp_file.exists() {
             debug!("Avatar file already exists: {}", tmp_file.display());
-            return Ok(format!("file://{}", tmp_file.display()));
+            return Self::file_uri_from_path(&tmp_file);
         }
 
         let mut url = Url::parse(avatar_url)?;
@@ -331,8 +333,23 @@ impl GithubNotificationPoller {
         );
         let resp = reqwest::get(url.as_str()).await?;
         let bytes = resp.bytes().await?;
-        std::fs::write(&tmp_file, &bytes)?;
 
-        Ok(format!("file://{}", tmp_file.display()))
+        let img = ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()?
+            .decode()?
+            .resize(size, size, image::imageops::FilterType::Lanczos3);
+
+        let mut file_writer = std::fs::File::create(&tmp_file)?;
+        img.write_to(&mut file_writer, ImageFormat::Png)?;
+
+        Self::file_uri_from_path(&tmp_file)
+    }
+
+    fn file_uri_from_path(path: &PathBuf) -> Result<String> {
+        Url::from_file_path(path)
+            .map(|url| url.to_string())
+            .map_err(|_| {
+                anyhow::anyhow!("Failed to create file uri for path: {}", path.display())
+            })
     }
 }
