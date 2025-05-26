@@ -3,17 +3,20 @@
 #![deny(clippy::panic)]
 #![deny(unused_must_use)]
 
-pub mod github_client;
-pub mod github_notification_poller;
-pub mod models;
-pub mod notification_debug;
+mod avatar_cache;
+mod desktop_notifier;
+mod github_client;
+mod github_notification_poller;
+mod models;
+mod notification_processor;
+mod timestamp_manager;
 
 use crate::github_client::GithubClient;
 use crate::github_notification_poller::GithubNotificationPoller;
 use std::sync::Arc;
 use tokio::task;
-use tracing_subscriber::{fmt, prelude::*};
 use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::{fmt, prelude::*};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), octocrab::Error> {

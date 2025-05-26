@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
-use octocrab::models::{pulls::ReviewState, Author};
+use octocrab::models::{Author, pulls::ReviewState};
 
 pub struct PullRequestDetails {
-    pub pr_number: u64,
-    pub pr_author: GithubUser,
+    pub author: GithubUser,
     pub state: PullRequestState,
     pub comments: Vec<PullRequestComment>,
 }
@@ -24,7 +23,7 @@ impl From<Author> for GithubUser {
     fn from(author: Author) -> Self {
         GithubUser {
             login: author.login,
-            avatar_url: author.avatar_url.to_string()
+            avatar_url: author.avatar_url.to_string(),
         }
     }
 }
