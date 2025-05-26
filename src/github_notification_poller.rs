@@ -1,5 +1,7 @@
 use crate::github_client::GithubClient;
-use crate::models::{CommentAction, PullRequestComment, PullRequestDetails, PullRequestState};
+use crate::models::{
+    CommentAction, GithubUser, PullRequestComment, PullRequestDetails, PullRequestState,
+};
 use crate::notification_debug::debug_github_notification;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -11,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info};
+use url::Url;
 
 const POLL_INTERVAL_SECS: u64 = 10;
 const LAST_SEEN_FILE: &str = "last_seen.txt";
@@ -79,40 +82,54 @@ impl GithubNotificationPoller {
         match &notification.subject.r#type[..] {
             "PullRequest" => {
                 let pr = self.get_pr_details(notification, since).await?;
+                let pr_author_avatar_local_uri =
+                    Self::get_avatar(&pr.pr_author.login, &pr.pr_author.avatar_url)
+                        .await
+                        .unwrap_or_else(|e| {
+                            error!("Failed to fetch avatar for {}: {}", pr.pr_author.login, e);
+                            String::new()
+                        });
 
-                let title = format!(
-                    "[{}] {} ({})",
+                let mut body = String::new();
+                body.push_str(&format!(
+                    "<img src=\"{}\"/> [{}] {} ({})\n<b> </b>\n",
+                    pr_author_avatar_local_uri,
                     notification.repository.name,
                     notification.subject.title,
                     pr.state.as_str()
-                );
+                ));
 
-                let mut body = String::new();
-                if !pr.comments.is_empty() {
-                    body.push_str(
-                        &pr.comments
-                            .iter()
-                            .map(|comment| {
-                                format!(
-                                    "- <b>{}</b>: {} {}",
-                                    comment.user,
-                                    comment.action.as_emoji(),
-                                    comment.body
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    );
-                    body.push_str("\n\n");
+                for comment in pr.comments {
+                    let (login, avatar_url) = comment
+                        .user
+                        .as_ref()
+                        .map(|u| (u.login.clone(), u.avatar_url.clone()))
+                        .unwrap_or_default();
+
+                    let avatar_local_uri = Self::get_avatar(&login, &avatar_url)
+                        .await
+                        .unwrap_or_else(|e| {
+                            error!("Failed to fetch avatar for {}: {}", login, e);
+                            String::new()
+                        });
+
+                    body.push_str(&format!(
+                        "<img src=\"{}\"/> <b>{}</b> {} {}\n\n",
+                        avatar_local_uri,
+                        login,
+                        comment.action.as_emoji(),
+                        comment.body
+                    ));
                 }
 
-                let icon = if pr.state.icon_path().is_empty() {
-                    ""
-                } else {
-                    &Self::resolve_image_path(pr.state.icon_path())
-                };
+                let icon = pr
+                    .state
+                    .icon_path()
+                    .is_empty()
+                    .then(String::new)
+                    .unwrap_or_else(|| Self::resolve_image_path(pr.state.icon_path()));
 
-                Self::show_desktop_notification(&title, &body, icon)?;
+                Self::show_desktop_notification("", &body, &icon)?;
             }
             _ => {
                 let title = format!(
@@ -186,10 +203,7 @@ impl GithubNotificationPoller {
                 .into_iter()
                 .filter(|comment| since.is_none_or(|since| comment.created_at > since))
                 .map(|comment| PullRequestComment {
-                    user: comment
-                        .user
-                        .as_ref()
-                        .map_or("Unknown".to_string(), |u| u.login.clone()),
+                    user: comment.user.map(GithubUser::from),
                     body: comment.body,
                     created_at: Some(comment.created_at),
                     action: CommentAction::Comment,
@@ -212,10 +226,7 @@ impl GithubNotificationPoller {
                     })
                 })
                 .map(|review| PullRequestComment {
-                    user: review
-                        .user
-                        .as_ref()
-                        .map_or("Unknown".to_string(), |u| u.login.clone()),
+                    user: review.user.map(GithubUser::from),
                     body: review.body.as_deref().unwrap_or("").to_string(),
                     created_at: review.submitted_at,
                     action: review
@@ -227,8 +238,17 @@ impl GithubNotificationPoller {
 
         comments.sort_by_key(|f| f.created_at);
 
+        let pr_author = match pr.user {
+            Some(user) => GithubUser::from(*user),
+            None => GithubUser {
+                login: "unknown".to_string(),
+                avatar_url: String::default(),
+            },
+        };
+
         Ok(PullRequestDetails {
             pr_number,
+            pr_author,
             state,
             comments,
         })
@@ -252,11 +272,12 @@ impl GithubNotificationPoller {
 
         let desktop_notification_result = DesktopNotification::new()
             .summary(title)
-            .body(body) // Supports Markdown-like formatting
+            .body(body)
             .appname("octopulse")
-            .icon(icon) // Icon for the notification
+            .icon(icon)
             .urgency(notify_rust::Urgency::Normal)
             .hint(Hint::DesktopEntry("org.mozilla.firefox".to_string()))
+            .timeout(0)
             .show();
 
         match desktop_notification_result {
@@ -287,5 +308,31 @@ impl GithubNotificationPoller {
                 error!("Failed to create file `last_seen.txt`: {}", e);
             }
         }
+    }
+
+    /// downloads the resized image if not cached and returns a `file:///…` URI.
+    async fn get_avatar(login: &str, avatar_url: &str) -> anyhow::Result<String> {
+        let size = 18;
+        let tmp_file =
+            std::env::temp_dir().join(format!("octopulse-avatar-{}-{}.png", login, size));
+
+        if tmp_file.exists() {
+            debug!("Avatar file already exists: {}", tmp_file.display());
+            return Ok(format!("file://{}", tmp_file.display()));
+        }
+
+        let mut url = Url::parse(avatar_url)?;
+        url.query_pairs_mut().append_pair("s", &size.to_string());
+
+        debug!(
+            "Avatar file does not exist: {} Downloading avatar from: {}",
+            tmp_file.display(),
+            url
+        );
+        let resp = reqwest::get(url.as_str()).await?;
+        let bytes = resp.bytes().await?;
+        std::fs::write(&tmp_file, &bytes)?;
+
+        Ok(format!("file://{}", tmp_file.display()))
     }
 }

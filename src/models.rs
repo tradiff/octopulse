@@ -1,17 +1,32 @@
 use chrono::{DateTime, Utc};
-use octocrab::models::pulls::ReviewState;
+use octocrab::models::{pulls::ReviewState, Author};
 
 pub struct PullRequestDetails {
     pub pr_number: u64,
+    pub pr_author: GithubUser,
     pub state: PullRequestState,
     pub comments: Vec<PullRequestComment>,
 }
 
 pub struct PullRequestComment {
     pub created_at: Option<DateTime<Utc>>,
-    pub user: String,
+    pub user: Option<GithubUser>,
     pub action: CommentAction,
     pub body: String,
+}
+
+pub struct GithubUser {
+    pub login: String,
+    pub avatar_url: String,
+}
+
+impl From<Author> for GithubUser {
+    fn from(author: Author) -> Self {
+        GithubUser {
+            login: author.login,
+            avatar_url: author.avatar_url.to_string()
+        }
+    }
 }
 
 pub enum PullRequestState {
