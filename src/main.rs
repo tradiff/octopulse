@@ -5,6 +5,9 @@
 
 pub mod github_client;
 pub mod github_notification_poller;
+pub mod models;
+pub mod notification_debug;
+
 use crate::github_client::GithubClient;
 use crate::github_notification_poller::GithubNotificationPoller;
 use std::sync::Arc;

@@ -1,15 +1,19 @@
 use crate::github_client::GithubClient;
+use crate::models::{PullRequestComment, PullRequestDetails, PullRequestState};
+use crate::notification_debug::debug_github_notification;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use notify_rust::Notification as DesktopNotification;
+use notify_rust::{Hint, Notification as DesktopNotification};
 use octocrab::{Page, models::activity::Notification};
-use serde::Serialize;
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info};
 
 const POLL_INTERVAL_SECS: u64 = 10;
+const LAST_SEEN_FILE: &str = "last_seen.txt";
 
 pub struct GithubNotificationPoller {
     github_client: Arc<GithubClient>,
@@ -31,12 +35,14 @@ impl GithubNotificationPoller {
             {
                 Ok(n) => n,
                 Err(e) => {
-                    debug!("Failed to fetch notifications: {}", e);
+                    error!("Failed to fetch notifications: {}", e);
                     sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
                     continue;
                 }
             };
-            let max_seen = Self::process_notifications(notifications.clone());
+            let max_seen = self
+                .process_notifications(notifications.clone(), last_seen)
+                .await;
             if let Some(mut ts) = max_seen {
                 // Add 1 second to avoid retrieving the same notification
                 ts += chrono::Duration::seconds(1);
@@ -49,30 +55,211 @@ impl GithubNotificationPoller {
         }
     }
 
-    fn show_desktop_notification(
-        github_notification: &octocrab::models::activity::Notification,
-    ) -> Result<(), notify_rust::error::Error> {
-        let title = format!(
-            "[{}] {}",
-            github_notification
-                .repository
-                .full_name
-                .as_deref()
-                .unwrap_or_default(),
-            github_notification.subject.title
-        );
-        let body = format!(
-            "{}\nType: {}\nReason: {}",
-            github_notification.subject.title,
-            github_notification.subject.r#type,
-            github_notification.reason
+    async fn process_notifications(
+        &self,
+        notifications: Page<Notification>,
+        since: Option<DateTime<Utc>>,
+    ) -> Option<DateTime<Utc>> {
+        for notification in &notifications.items {
+            self.process_notification(notification, since).await;
+        }
+
+        // return max updated_at
+        notifications.items.into_iter().map(|n| n.updated_at).max()
+    }
+
+    async fn process_notification(
+        &self,
+        notification: &Notification,
+        since: Option<DateTime<Utc>>,
+    ) {
+        debug_github_notification(notification);
+        match &notification.subject.r#type[..] {
+            "PullRequest" => {
+                let pr_result = self.get_pr_details(notification, since).await;
+                if let Err(e) = &pr_result {
+                    error!("Failed to fetch PR details: {}", e);
+                }
+                let pr = pr_result.unwrap();
+
+                let title = format!(
+                    "[{}] {} ({})",
+                    notification.repository.name,
+                    notification.subject.title,
+                    pr.state.as_str()
+                );
+
+                let mut body = String::new();
+                if !pr.comments.is_empty() {
+                    body.push_str(
+                        &pr.comments
+                            .iter()
+                            .map(|comment| {
+                                format!("- {}: [{}] {}", comment.user, comment.action, comment.body)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    );
+                    body.push_str("\n\n");
+                }
+
+                let icon = if pr.state.icon_path().is_empty() {
+                    ""
+                } else {
+                    &Self::resolve_image_path(pr.state.icon_path())
+                };
+
+                let result = Self::show_desktop_notification(&title, &body, icon);
+                if let Err(e) = result {
+                    error!("Failed to show desktop notification: {}", e);
+                }
+            }
+            _ => {
+                let title = format!(
+                    "[{}] {}",
+                    notification.repository.name, notification.subject.title
+                );
+                let body = format!(
+                    "Type: {}\nReason: {}",
+                    notification.subject.r#type, notification.reason
+                );
+
+                let result = Self::show_desktop_notification(&title, &body, "");
+
+                if let Err(e) = result {
+                    error!("Failed to show desktop notification: {}", e);
+                }
+            }
+        }
+    }
+
+    pub async fn get_pr_details(
+        &self,
+        notification: &Notification,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<PullRequestDetails> {
+        let owner = notification
+            .repository
+            .owner
+            .as_ref()
+            .map(|o| o.login.clone())
+            .context("repository owner is missing")?;
+
+        let repo = notification.repository.name.clone();
+
+        let pr_number = notification
+            .subject
+            .url
+            .as_ref()
+            .context("notification has no subject URL")?
+            .path_segments()
+            .context("invalid URL path segments")?
+            .skip_while(|seg| *seg != "pulls")
+            .nth(1)
+            .context("could not find pull request number in URL")?
+            .parse::<u64>()
+            .context("pull request number was not a valid u64")?;
+
+        let pr = self
+            .github_client
+            .get_pull_request(&owner, &repo, pr_number)
+            .await
+            .context("failed to fetch pull request details from GitHub")?;
+
+        let state = if pr.merged.unwrap_or(false) {
+            PullRequestState::Merged
+        } else if pr.draft.unwrap_or(false) {
+            PullRequestState::Draft
+        } else if pr.state == Some(octocrab::models::IssueState::Closed) {
+            PullRequestState::Closed
+        } else if pr.state == Some(octocrab::models::IssueState::Open) {
+            PullRequestState::Open
+        } else {
+            PullRequestState::Unknown
+        };
+
+        let mut comments: Vec<PullRequestComment> = Vec::new();
+
+        comments.extend(
+            self.github_client
+                .get_pr_comments(&owner, &repo, pr_number)
+                .await
+                .context("failed to fetch pull request comments")?
+                .items
+                .into_iter()
+                .filter(|comment| since.is_none_or(|since| comment.created_at > since))
+                .map(|comment| PullRequestComment {
+                    user: comment
+                        .user
+                        .as_ref()
+                        .map_or("Unknown".to_string(), |u| u.login.clone()),
+                    body: comment.body,
+                    created_at: Some(comment.created_at),
+                    action: "comment".to_string(),
+                })
+                .collect::<Vec<_>>(),
         );
 
+        comments.extend(
+            self.github_client
+                .get_reviews(owner.clone(), repo.clone(), pr_number)
+                .await
+                .context("failed to fetch pull request reviews")?
+                .items
+                .into_iter()
+                .filter(|review| {
+                    since.is_none_or(|since| {
+                        review
+                            .submitted_at
+                            .is_some_and(|submitted_at| submitted_at > since)
+                    })
+                })
+                .map(|review| PullRequestComment {
+                    user: review
+                        .user
+                        .as_ref()
+                        .map_or("Unknown".to_string(), |u| u.login.clone()),
+                    body: review.body.as_deref().unwrap_or("").to_string(),
+                    created_at: review.submitted_at,
+                    action: review
+                        .state
+                        .map_or("Unknown".to_string(), |s| format!("{:?}", s)),
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        comments.sort_by_key(|f| f.created_at);
+
+        Ok(PullRequestDetails {
+            pr_number,
+            state,
+            comments,
+        })
+    }
+
+    fn resolve_image_path(relative_path: &str) -> String {
+        let base_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        base_path
+            .join(relative_path)
+            .to_str()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    fn show_desktop_notification(
+        title: &str,
+        body: &str,
+        icon: &str,
+    ) -> std::result::Result<(), notify_rust::error::Error> {
         info!("New github notification: {} - {}", title, body);
 
         let desktop_notification_result = DesktopNotification::new()
-            .summary(&title)
-            .body(&body)
+            .summary(title)
+            .body(body) // Supports Markdown-like formatting
+            .appname("octopulse")
+            .icon(icon) // Icon for the notification
+            .urgency(notify_rust::Urgency::Normal)
+            .hint(Hint::DesktopEntry("org.mozilla.firefox".to_string()))
             .show();
 
         match desktop_notification_result {
@@ -84,32 +271,16 @@ impl GithubNotificationPoller {
         }
     }
 
-    fn process_notifications(notifications: Page<Notification>) -> Option<DateTime<Utc>> {
-        for notification in &notifications.items {
-            Self::process_notification(notification);
-        }
-
-        // return max updated_at
-        notifications.items.into_iter().map(|n| n.updated_at).max()
-    }
-
-    fn process_notification(notification: &Notification) {
-        Self::debug_github_notification(notification);
-        if let Err(e) = Self::show_desktop_notification(notification) {
-            error!("failed to show desktop notification: {:?}", e);
-        }
-    }
-
     // For now, we are using a simple file to store the last seen timestamp. In the future, probably a db.
     fn get_last_seen_timestamp() -> Option<DateTime<Utc>> {
-        fs::read_to_string("last_seen.txt")
+        fs::read_to_string(LAST_SEEN_FILE)
             .ok()
             .and_then(|s| DateTime::parse_from_rfc3339(s.trim()).ok())
             .map(|dt| dt.with_timezone(&Utc))
     }
 
     fn write_last_seen_timestamp(ts: &DateTime<Utc>) {
-        match fs::File::create("last_seen.txt") {
+        match fs::File::create(LAST_SEEN_FILE) {
             Ok(mut file) => {
                 if let Err(e) = writeln!(file, "{}", ts.to_rfc3339()) {
                     error!("Failed to store last seen timestamp: {}", e);
@@ -119,61 +290,5 @@ impl GithubNotificationPoller {
                 error!("Failed to create file `last_seen.txt`: {}", e);
             }
         }
-    }
-
-    fn debug_github_notification(notification: &Notification) {
-        #[derive(Serialize)]
-        struct MinimalRepo {
-            name: String,
-            full_name: String,
-        }
-        #[derive(Serialize)]
-        struct NotificationWithTrimmedRepo<'a> {
-            #[serde(flatten)]
-            #[serde(with = "trimmed_notification")]
-            notification: &'a octocrab::models::activity::Notification,
-            repository: MinimalRepo,
-        }
-        mod trimmed_notification {
-            use serde::ser::{SerializeStruct, Serializer};
-            pub fn serialize<S>(
-                notification: &octocrab::models::activity::Notification,
-                s: S,
-            ) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                let mut state = s.serialize_struct("Notification", 7)?;
-                state.serialize_field("id", &notification.id)?;
-                state.serialize_field("unread", &notification.unread)?;
-                state.serialize_field("reason", &notification.reason)?;
-                state.serialize_field("updated_at", &notification.updated_at)?;
-                state.serialize_field("last_read_at", &notification.last_read_at)?;
-                state.serialize_field("subject", &notification.subject)?;
-                // repository intentionally omitted
-                state.serialize_field("url", &notification.url)?;
-                state.end()
-            }
-        }
-        let minimal = NotificationWithTrimmedRepo {
-            notification,
-            repository: MinimalRepo {
-                name: notification.repository.name.clone(),
-                full_name: notification
-                    .repository
-                    .full_name
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_string(),
-            },
-        };
-        let json = match serde_json::to_string(&minimal) {
-            Ok(json) => json,
-            Err(e) => {
-                debug!("Failed to serialize notification: {}", e);
-                return;
-            }
-        };
-        debug!("JSON: {}", json);
     }
 }
