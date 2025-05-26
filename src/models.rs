@@ -53,15 +53,6 @@ pub enum CommentAction {
 }
 
 impl CommentAction {
-    pub fn from_review_state(review_state: ReviewState) -> Self {
-        match review_state {
-            ReviewState::Approved => CommentAction::ReviewApproved,
-            ReviewState::ChangesRequested => CommentAction::ReviewChangesRequested,
-            ReviewState::Dismissed => CommentAction::ReviewDismissed,
-            _ => CommentAction::Unknown,
-        }
-    }
-
     pub fn as_emoji(&self) -> &str {
         match self {
             CommentAction::Comment => "💬",
@@ -69,6 +60,17 @@ impl CommentAction {
             CommentAction::ReviewChangesRequested => "❗",
             CommentAction::ReviewDismissed => "🚫",
             CommentAction::Unknown => "❓",
+        }
+    }
+}
+
+impl From<ReviewState> for CommentAction {
+    fn from(review_state: ReviewState) -> Self {
+        match review_state {
+            ReviewState::Approved => CommentAction::ReviewApproved,
+            ReviewState::ChangesRequested => CommentAction::ReviewChangesRequested,
+            ReviewState::Dismissed => CommentAction::ReviewDismissed,
+            _ => CommentAction::Unknown,
         }
     }
 }

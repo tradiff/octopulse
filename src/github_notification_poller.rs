@@ -220,7 +220,7 @@ impl GithubNotificationPoller {
                     created_at: review.submitted_at,
                     action: review
                         .state
-                        .map_or(CommentAction::Unknown, CommentAction::from_review_state),
+                        .map_or(CommentAction::Unknown, CommentAction::from),
                 })
                 .collect::<Vec<_>>(),
         );
