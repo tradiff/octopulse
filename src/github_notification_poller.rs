@@ -348,8 +348,6 @@ impl GithubNotificationPoller {
     fn file_uri_from_path(path: &PathBuf) -> Result<String> {
         Url::from_file_path(path)
             .map(|url| url.to_string())
-            .map_err(|_| {
-                anyhow::anyhow!("Failed to create file uri for path: {}", path.display())
-            })
+            .map_err(|_| anyhow::anyhow!("Failed to create file uri for path: {}", path.display()))
     }
 }
