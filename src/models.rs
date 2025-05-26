@@ -85,6 +85,7 @@ impl From<ReviewState> for CommentAction {
             ReviewState::Approved => CommentAction::ReviewApproved,
             ReviewState::ChangesRequested => CommentAction::ReviewChangesRequested,
             ReviewState::Dismissed => CommentAction::ReviewDismissed,
+            ReviewState::Commented => CommentAction::Comment,
             _ => CommentAction::Unknown,
         }
     }
