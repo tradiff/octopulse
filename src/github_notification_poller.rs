@@ -1,5 +1,5 @@
 use crate::github_client::GithubClient;
-use crate::models::{PullRequestComment, PullRequestDetails, PullRequestState, CommentAction};
+use crate::models::{CommentAction, PullRequestComment, PullRequestDetails, PullRequestState};
 use crate::notification_debug::debug_github_notification;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -61,7 +61,9 @@ impl GithubNotificationPoller {
         since: Option<DateTime<Utc>>,
     ) -> Option<DateTime<Utc>> {
         for notification in &notifications.items {
-            self.process_notification(notification, since).await;
+            if let Err(e) = self.process_notification(notification, since).await {
+                error!("Failed to process notification: {}", e);
+            }
         }
 
         // return max updated_at
@@ -72,15 +74,11 @@ impl GithubNotificationPoller {
         &self,
         notification: &Notification,
         since: Option<DateTime<Utc>>,
-    ) {
+    ) -> Result<()> {
         debug_github_notification(notification);
         match &notification.subject.r#type[..] {
             "PullRequest" => {
-                let pr_result = self.get_pr_details(notification, since).await;
-                if let Err(e) = &pr_result {
-                    error!("Failed to fetch PR details: {}", e);
-                }
-                let pr = pr_result.unwrap();
+                let pr = self.get_pr_details(notification, since).await?;
 
                 let title = format!(
                     "[{}] {} ({})",
@@ -95,7 +93,12 @@ impl GithubNotificationPoller {
                         &pr.comments
                             .iter()
                             .map(|comment| {
-                                format!("- <b>{}</b>: {} {}", comment.user, comment.action.as_emoji(), comment.body)
+                                format!(
+                                    "- <b>{}</b>: {} {}",
+                                    comment.user,
+                                    comment.action.as_emoji(),
+                                    comment.body
+                                )
                             })
                             .collect::<Vec<_>>()
                             .join("\n"),
@@ -109,10 +112,7 @@ impl GithubNotificationPoller {
                     &Self::resolve_image_path(pr.state.icon_path())
                 };
 
-                let result = Self::show_desktop_notification(&title, &body, icon);
-                if let Err(e) = result {
-                    error!("Failed to show desktop notification: {}", e);
-                }
+                Self::show_desktop_notification(&title, &body, icon)?;
             }
             _ => {
                 let title = format!(
@@ -124,13 +124,10 @@ impl GithubNotificationPoller {
                     notification.subject.r#type, notification.reason
                 );
 
-                let result = Self::show_desktop_notification(&title, &body, "");
-
-                if let Err(e) = result {
-                    error!("Failed to show desktop notification: {}", e);
-                }
+                Self::show_desktop_notification(&title, &body, "")?;
             }
         }
+        Ok(())
     }
 
     pub async fn get_pr_details(
