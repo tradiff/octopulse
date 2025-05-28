@@ -9,11 +9,24 @@ const POLL_INTERVAL_SECS: u64 = 10;
 
 pub struct GithubNotificationPoller {
     github_client: Arc<GithubClient>,
+    current_user_login: String,
 }
 
 impl GithubNotificationPoller {
-    pub fn new(github_client: Arc<GithubClient>) -> Self {
-        Self { github_client }
+    pub async fn new(github_client: Arc<GithubClient>) -> Self {
+        let mut poller = Self {
+            github_client,
+            current_user_login: String::new(),
+        };
+        poller.initialize_current_user().await;
+        poller
+    }
+
+    pub async fn initialize_current_user(&mut self) {
+        match self.github_client.get_current_user().await {
+            Ok(user) => self.current_user_login = user.login,
+            Err(e) => error!("Failed to fetch current user: {}", e),
+        }
     }
 
     pub async fn run(&self) {
@@ -37,6 +50,7 @@ impl GithubNotificationPoller {
                 &self.github_client,
                 notifications.clone(),
                 last_seen,
+                &self.current_user_login,
             )
             .await;
             if let Some(mut ts) = max_seen {

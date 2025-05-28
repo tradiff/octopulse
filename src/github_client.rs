@@ -172,4 +172,8 @@ impl GithubClient {
             .send()
             .await
     }
+
+    pub async fn get_current_user(&self) -> Result<GithubUser, octocrab::Error> {
+        self.octocrab.current().user().await.map(GithubUser::from)
+    }
 }

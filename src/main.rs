@@ -42,7 +42,7 @@ async fn main() -> Result<(), octocrab::Error> {
     };
     let github_client = Arc::new(GithubClient::new(&token)?);
 
-    let poller = GithubNotificationPoller::new(github_client.clone());
+    let poller = GithubNotificationPoller::new(github_client.clone()).await;
     let poller_handle = task::spawn(async move {
         poller.run().await;
     });

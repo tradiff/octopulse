@@ -15,12 +15,19 @@ impl NotificationProcessor {
         github_client: &Arc<GithubClient>,
         notifications: Page<Notification>,
         since: Option<DateTime<Utc>>,
+        current_user_login: &str,
     ) -> Option<DateTime<Utc>> {
         let avatar_cache = AvatarCache::new();
 
         for notification in &notifications.items {
-            if let Err(e) =
-                Self::process_notification(github_client, &avatar_cache, notification, since).await
+            if let Err(e) = Self::process_notification(
+                github_client,
+                &avatar_cache,
+                notification,
+                since,
+                current_user_login,
+            )
+            .await
             {
                 error!("Failed to process notification: {}", e);
             }
@@ -34,6 +41,7 @@ impl NotificationProcessor {
         avatar_cache: &AvatarCache,
         notification: &Notification,
         since: Option<DateTime<Utc>>,
+        current_user_login: &str,
     ) -> Result<()> {
         match &notification.subject.r#type[..] {
             "PullRequest" => {
@@ -50,7 +58,12 @@ impl NotificationProcessor {
                     }
                 }
 
-                DesktopNotifier::notify_pull_request(&pr, notification, avatar_cache)
+                DesktopNotifier::notify_pull_request(
+                    &pr,
+                    notification,
+                    avatar_cache,
+                    current_user_login,
+                )
             }
             _ => DesktopNotifier::notify_generic(notification),
         }

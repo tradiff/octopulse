@@ -12,6 +12,7 @@ impl DesktopNotifier {
         pr: &PullRequestDetails,
         notification: &Notification,
         avatar_cache: &AvatarCache,
+        current_user_login: &str,
     ) -> anyhow::Result<()> {
         let pr_author_avatar_local_uri = avatar_cache
             .get_avatar_local_uri(pr.author.login.as_str())
@@ -32,6 +33,10 @@ impl DesktopNotifier {
                 .as_ref()
                 .map(|u| u.login.clone())
                 .unwrap_or_else(|| "unknown".to_string());
+
+            if user_login == current_user_login {
+                continue;
+            }
 
             let avatar_local_uri = avatar_cache
                 .get_avatar_local_uri(user_login.as_str())
