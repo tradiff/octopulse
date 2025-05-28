@@ -46,7 +46,7 @@ impl DesktopNotifier {
                     .map(|u| u.login.clone())
                     .unwrap_or_default(),
                 comment.action.as_emoji(),
-                comment.body
+                Self::truncate_string(&comment.body)
             ));
         }
 
@@ -103,5 +103,14 @@ impl DesktopNotifier {
             .to_str()
             .unwrap_or("")
             .to_string()
+    }
+
+    fn truncate_string(s: &str) -> String {
+        const MAX_LENGTH: usize = 100;
+        if s.len() > MAX_LENGTH {
+            format!("{}…", &s[..MAX_LENGTH])
+        } else {
+            s.to_string()
+        }
     }
 }
