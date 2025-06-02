@@ -1,6 +1,7 @@
 use crate::avatar_cache::AvatarCache;
 use crate::desktop_notifier::DesktopNotifier;
 use crate::github_client::GithubClient;
+use crate::models::Sound;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use octocrab::Page;
@@ -63,6 +64,7 @@ impl NotificationProcessor {
                     notification,
                     avatar_cache,
                     current_user_login,
+                    Some(Sound::Comment),
                 )
             }
             _ => DesktopNotifier::notify_generic(notification),

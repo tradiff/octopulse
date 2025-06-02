@@ -66,6 +66,11 @@ pub enum CommentAction {
     Unknown,
 }
 
+pub enum Sound {
+    Comment,
+    Approved,
+}
+
 impl CommentAction {
     pub fn as_emoji(&self) -> &str {
         match self {
