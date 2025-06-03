@@ -1,7 +1,7 @@
 use crate::avatar_cache::AvatarCache;
 use crate::desktop_notifier::DesktopNotifier;
 use crate::github_client::GithubClient;
-use crate::models::Sound;
+use crate::models::{CommentAction, Sound};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use octocrab::Page;
@@ -47,27 +47,44 @@ impl NotificationProcessor {
         match &notification.subject.r#type[..] {
             "PullRequest" => {
                 let pr = github_client.get_pr_details(notification, since).await?;
-                avatar_cache
-                    .ensure_avatar(&pr.author.login, &pr.author.avatar_url)
-                    .await?;
+                ensure_avatars(avatar_cache, &pr).await?;
 
-                for comment in &pr.comments {
-                    if let Some(user) = &comment.user {
-                        avatar_cache
-                            .ensure_avatar(&user.login, &user.avatar_url)
-                            .await?;
-                    }
-                }
+                let approved: bool = pr
+                    .comments
+                    .iter()
+                    .any(|c| matches!(c.action, CommentAction::ReviewApproved));
+
+                let sound = if approved {
+                    Some(Sound::Approved)
+                } else {
+                    Some(Sound::Comment)
+                };
 
                 DesktopNotifier::notify_pull_request(
                     &pr,
                     notification,
                     avatar_cache,
                     current_user_login,
-                    Some(Sound::Comment),
+                    sound,
                 )
             }
             _ => DesktopNotifier::notify_generic(notification),
         }
     }
+}
+
+async fn ensure_avatars(
+    avatar_cache: &AvatarCache,
+    pr: &crate::models::PullRequestDetails,
+) -> Result<(), anyhow::Error> {
+    avatar_cache
+        .ensure_avatar(&pr.author.login, &pr.author.avatar_url)
+        .await?;
+    Ok(for comment in &pr.comments {
+        if let Some(user) = &comment.user {
+            avatar_cache
+                .ensure_avatar(&user.login, &user.avatar_url)
+                .await?;
+        }
+    })
 }
