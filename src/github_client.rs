@@ -106,6 +106,22 @@ impl GithubClient {
         );
 
         comments.extend(
+            self.get_issue_comments(&owner, &repo, pr_number)
+                .await
+                .context("failed to fetch issue comments")?
+                .items
+                .into_iter()
+                .filter(|comment| since.is_none_or(|since| comment.created_at > since))
+                .map(|comment| PullRequestComment {
+                    user: Some(GithubUser::from(comment.user)),
+                    body: comment.body.unwrap_or_default(),
+                    created_at: Some(comment.created_at),
+                    action: CommentAction::Comment,
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        comments.extend(
             self.get_reviews(owner.clone(), repo.clone(), pr_number)
                 .await
                 .context("failed to fetch pull request reviews")?
@@ -156,6 +172,20 @@ impl GithubClient {
         self.octocrab
             .pulls(owner, repo)
             .list_comments(Some(pr_number))
+            .send()
+            .await
+    }
+
+    // Gets comments on an issue, which can include PR bot comments
+    async fn get_issue_comments(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: u64,
+    ) -> Result<octocrab::Page<octocrab::models::issues::Comment>, octocrab::Error> {
+        self.octocrab
+            .issues(owner, repo)
+            .list_comments(issue_number)
             .send()
             .await
     }
