@@ -147,10 +147,13 @@ impl GithubClient {
 
         comments.sort_by_key(|f| f.created_at);
 
+        let html_url = format!("https://github.com/{}/{}/pull/{}", owner, repo, pr_number);
+
         Ok(PullRequestDetails {
             author,
             state,
             comments,
+            html_url,
         })
     }
 

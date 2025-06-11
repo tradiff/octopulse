@@ -5,6 +5,7 @@ pub struct PullRequestDetails {
     pub author: GithubUser,
     pub state: PullRequestState,
     pub comments: Vec<PullRequestComment>,
+    pub html_url: String,
 }
 
 pub struct PullRequestComment {
