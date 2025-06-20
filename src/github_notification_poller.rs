@@ -32,7 +32,10 @@ impl GithubNotificationPoller {
     pub async fn run(&self) {
         loop {
             debug!("Fetching notifications...");
-            let last_seen = TimestampManager::get_last_seen_timestamp();
+            let last_seen = TimestampManager::get_last_seen_timestamp()
+                // Add a few seconds becuase github's API can be a bit flaky and will send events updated before the
+                // request time, resulting in endless duplicates being returned.
+                .map(|ts| ts + chrono::Duration::seconds(3));
             let notifications = match self
                 .github_client
                 .get_participating_notifications(last_seen.as_ref())
@@ -53,8 +56,7 @@ impl GithubNotificationPoller {
                 &self.current_user_login,
             )
             .await;
-            if let Some(mut ts) = max_seen {
-                ts += chrono::Duration::seconds(1);
+            if let Some(ts) = max_seen {
                 debug!("Updating last seen timestamp to {}", ts);
                 TimestampManager::write_last_seen_timestamp(&ts);
             }
