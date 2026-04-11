@@ -340,6 +340,11 @@ function NotificationHistoryPanel({
                     Delivered {formatHistoryTimestamp(entry.deliveredAt)}
                   </span>
                 ) : null}
+                <form method="post" action={`/notification-records/${entry.id}/resend`}>
+                  <button type="submit" className="action-button small-button">
+                    Resend
+                  </button>
+                </form>
               </div>
             </li>
           ))}

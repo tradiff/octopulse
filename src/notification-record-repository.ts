@@ -144,6 +144,11 @@ export class NotificationRecordRepository {
     return rows.map((row) => mapNotificationRecordRow(row));
   }
 
+  getNotificationRecordById(id: number): NotificationRecord | null {
+    const row = this.database.prepare("SELECT * FROM NotificationRecord WHERE id = ?").get(id);
+    return row === undefined ? null : mapNotificationRecordRow(row);
+  }
+
   updateNotificationRecordDelivery(
     id: number,
     input: UpdateNotificationRecordDeliveryInput,
@@ -167,6 +172,30 @@ export class NotificationRecordRepository {
 
       throw new NotificationRecordRepositoryError(
         `Failed to update notification record ${id} delivery: ${getErrorMessage(error)}`,
+      );
+    }
+  }
+
+  resetNotificationRecordDelivery(id: number): NotificationRecord {
+    try {
+      this.database
+        .prepare(
+          `
+            UPDATE NotificationRecord
+            SET delivery_status = 'pending', delivered_at = NULL
+            WHERE id = ?
+          `,
+        )
+        .run(id);
+
+      return this.requireNotificationRecordById(id);
+    } catch (error) {
+      if (error instanceof NotificationRecordRepositoryError) {
+        throw error;
+      }
+
+      throw new NotificationRecordRepositoryError(
+        `Failed to reset notification record ${id} delivery: ${getErrorMessage(error)}`,
       );
     }
   }

@@ -1,20 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import {
   LinuxNotificationAdapter,
   LinuxNotificationAdapterError,
-  type CommandRunner,
+  type LinuxNotificationDispatchResult,
+  type LinuxNotification,
 } from "../src/linux-notification-adapter.js";
 
+vi.mock("node:child_process", () => ({
+  spawn: vi.fn().mockReturnValue({
+    once: vi.fn(),
+  }),
+}));
+
 describe("LinuxNotificationAdapter", () => {
-  it("dispatches a notification without opening a URL when no click URL is provided", async () => {
-    const runCommand = vi.fn<CommandRunner>().mockResolvedValue({
-      exitCode: 0,
-      stdout: "",
-      stderr: "",
-      signal: null,
-    });
-    const adapter = new LinuxNotificationAdapter({ runCommand });
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("dispatches a notification via custom dispatch function", async () => {
+    const dispatchNotification = vi
+      .fn<(_notification: LinuxNotification) => Promise<LinuxNotificationDispatchResult>>()
+      .mockResolvedValue({ openedClickUrl: false });
+
+    const adapter = new LinuxNotificationAdapter({ dispatchNotification });
 
     await expect(
       adapter.dispatchNotification({
@@ -25,31 +34,18 @@ describe("LinuxNotificationAdapter", () => {
       openedClickUrl: false,
     });
 
-    expect(runCommand).toHaveBeenCalledTimes(1);
-    expect(runCommand).toHaveBeenCalledWith("notify-send", [
-      "--app-name=Octopulse",
-      "--",
-      "acme/octopulse PR #7",
-      "alice approved review\nShip notifications",
-    ]);
+    expect(dispatchNotification).toHaveBeenCalledWith({
+      title: "acme/octopulse PR #7",
+      body: "alice approved review\nShip notifications",
+    });
   });
 
-  it("opens the PR URL when the notification action is activated", async () => {
-    const runCommand = vi
-      .fn<CommandRunner>()
-      .mockResolvedValueOnce({
-        exitCode: 0,
-        stdout: "default\n",
-        stderr: "",
-        signal: null,
-      })
-      .mockResolvedValueOnce({
-        exitCode: 0,
-        stdout: "",
-        stderr: "",
-        signal: null,
-      });
-    const adapter = new LinuxNotificationAdapter({ runCommand });
+  it("passes clickUrl to custom dispatch when present", async () => {
+    const dispatchNotification = vi
+      .fn<(_notification: LinuxNotification) => Promise<LinuxNotificationDispatchResult>>()
+      .mockResolvedValue({ openedClickUrl: true });
+
+    const adapter = new LinuxNotificationAdapter({ dispatchNotification });
 
     await expect(
       adapter.dispatchNotification({
@@ -61,65 +57,25 @@ describe("LinuxNotificationAdapter", () => {
       openedClickUrl: true,
     });
 
-    expect(runCommand).toHaveBeenNthCalledWith(1, "notify-send", [
-      "--app-name=Octopulse",
-      "--action=default=Open",
-      "--",
-      "acme/octopulse PR #7",
-      "alice approved review\nShip notifications",
-    ]);
-    expect(runCommand).toHaveBeenNthCalledWith(2, "xdg-open", [
-      "https://github.com/acme/octopulse/pull/7",
-    ]);
-  });
-
-  it("surfaces notify-send failures as adapter errors", async () => {
-    const adapter = new LinuxNotificationAdapter({
-      runCommand: vi.fn<CommandRunner>().mockResolvedValue({
-        exitCode: 1,
-        stdout: "",
-        stderr: "notification daemon unavailable",
-        signal: null,
-      }),
+    expect(dispatchNotification).toHaveBeenCalledWith({
+      title: "acme/octopulse PR #7",
+      body: "alice approved review\nShip notifications",
+      clickUrl: "https://github.com/acme/octopulse/pull/7",
     });
-
-    await expect(
-      adapter.dispatchNotification({
-        title: "acme/octopulse PR #7",
-        body: "alice approved review\nShip notifications",
-      }),
-    ).rejects.toThrowError(
-      new LinuxNotificationAdapterError(
-        "Command notify-send exited with code 1: notification daemon unavailable",
-      ),
-    );
   });
 
-  it("surfaces xdg-open failures after a notification click", async () => {
-    const runCommand = vi
-      .fn<CommandRunner>()
-      .mockResolvedValueOnce({
-        exitCode: 0,
-        stdout: "default\n",
-        stderr: "",
-        signal: null,
-      })
-      .mockResolvedValueOnce({
-        exitCode: 3,
-        stdout: "",
-        stderr: "no browser available",
-        signal: null,
-      });
-    const adapter = new LinuxNotificationAdapter({ runCommand });
+  it("wraps custom dispatch errors in LinuxNotificationAdapterError", async () => {
+    const dispatchNotification = vi
+      .fn<(_notification: LinuxNotification) => Promise<LinuxNotificationDispatchResult>>()
+      .mockRejectedValue(new Error("notification daemon unavailable"));
+
+    const adapter = new LinuxNotificationAdapter({ dispatchNotification });
 
     await expect(
       adapter.dispatchNotification({
         title: "acme/octopulse PR #7",
         body: "alice approved review\nShip notifications",
-        clickUrl: "https://github.com/acme/octopulse/pull/7",
       }),
-    ).rejects.toThrowError(
-      new LinuxNotificationAdapterError("Command xdg-open exited with code 3: no browser available"),
-    );
+    ).rejects.toThrowError("Notification failed: Error: notification daemon unavailable");
   });
 });

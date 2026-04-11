@@ -98,6 +98,7 @@ describe("renderAppDocument", () => {
     expect(html).toContain("AI fallback");
     expect(html).toContain(`Created ${formatExpectedLocalHistoryTimestamp("2026-04-10 12:02:30")}`);
     expect(html).toContain(`Delivered ${formatExpectedLocalHistoryTimestamp("2026-04-10T12:02:45.000Z")}`);
+    expect(html).toContain('action="/notification-records/9/resend"');
     expect(html).toContain('name="event-type"');
     expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
     expect(html).not.toContain('class="pull-request-panel"');

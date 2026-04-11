@@ -18,6 +18,7 @@ import {
 } from "./logger.js";
 import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request-tracking.js";
 import { listNotificationHistory } from "./notification-history.js";
+import { resendNotificationRecord } from "./notification-dispatch.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
 import { listRawEvents } from "./raw-events.js";
 import { readServerOrigin, startServer } from "./server.js";
@@ -90,6 +91,8 @@ async function main(): Promise<void> {
         untrackPullRequest(currentDatabase, githubPullRequestId, {
           pullRequestRepository,
         }),
+      resendNotificationRecord: (notificationRecordId: number) =>
+        resendNotificationRecord(currentDatabase, { notificationRecordId }),
     });
     recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(currentDatabase, githubAuth, {
       intervalMs: config.timings.discoveryPollMs,

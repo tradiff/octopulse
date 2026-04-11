@@ -1,3 +1,4 @@
+import freedesktopNotifications from "freedesktop-notifications";
 import { spawn } from "node:child_process";
 
 export interface LinuxNotification {
@@ -10,20 +11,10 @@ export interface LinuxNotificationDispatchResult {
   openedClickUrl: boolean;
 }
 
-export interface CommandRunnerResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  signal: NodeJS.Signals | null;
-}
-
-export type CommandRunner = (
-  command: string,
-  args: readonly string[],
-) => Promise<CommandRunnerResult>;
-
 export interface LinuxNotificationAdapterOptions {
-  runCommand?: CommandRunner;
+  dispatchNotification?: (
+    notification: LinuxNotification,
+  ) => Promise<LinuxNotificationDispatchResult>;
 }
 
 export class LinuxNotificationAdapterError extends Error {
@@ -34,119 +25,101 @@ export class LinuxNotificationAdapterError extends Error {
 }
 
 export class LinuxNotificationAdapter {
-  private readonly runCommand: CommandRunner;
+  private readonly dispatchNotificationImpl: (
+    notification: LinuxNotification,
+  ) => Promise<LinuxNotificationDispatchResult>;
 
   constructor(options: LinuxNotificationAdapterOptions = {}) {
-    this.runCommand = options.runCommand ?? runCommand;
+    this.dispatchNotificationImpl =
+      options.dispatchNotification ?? this.defaultDispatch.bind(this);
   }
 
   async dispatchNotification(
     notification: LinuxNotification,
   ): Promise<LinuxNotificationDispatchResult> {
-    const notifySendArgs = ["--app-name=Octopulse"];
-
-    if (notification.clickUrl) {
-      notifySendArgs.push("--action=default=Open");
+    try {
+      return await this.dispatchNotificationImpl(notification);
+    } catch (err) {
+      throw new LinuxNotificationAdapterError(`Notification failed: ${err}`);
     }
-
-    notifySendArgs.push("--", notification.title, notification.body);
-
-    const notifySendResult = await this.runRequiredCommand("notify-send", notifySendArgs);
-
-    if (!notification.clickUrl || notifySendResult.stdout.trim() !== "default") {
-      return {
-        openedClickUrl: false,
-      };
-    }
-
-    await this.runRequiredCommand("xdg-open", [notification.clickUrl]);
-
-    return {
-      openedClickUrl: true,
-    };
   }
 
-  private async runRequiredCommand(
-    command: string,
-    args: readonly string[],
-  ): Promise<CommandRunnerResult> {
-    let result: CommandRunnerResult;
+  private async defaultDispatch(
+    notification: LinuxNotification,
+  ): Promise<LinuxNotificationDispatchResult> {
+    const notif = new freedesktopNotifications.Notification({
+      appName: "Octopulse",
+      summary: notification.title,
+      body: notification.body,
+      actions: notification.clickUrl
+        ? { default: "Open" }
+        : {},
+    });
 
-    try {
-      result = await this.runCommand(command, args);
-    } catch (error) {
-      throw new LinuxNotificationAdapterError(
-        `Failed to execute ${command}: ${getErrorMessage(error)}`,
-      );
+    if (!notification.clickUrl) {
+      await notif.push();
+      return { openedClickUrl: false };
     }
 
-    if (result.signal !== null) {
-      throw new LinuxNotificationAdapterError(
-        `Command ${command} exited due to signal ${result.signal}: ${formatCommandFailure(result)}`,
-      );
+    const clicked = await new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      const finish = (value: boolean): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        resolve(value);
+      };
+
+      const fail = (error: unknown): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      };
+
+      const timeout = setTimeout(() => finish(false), 30000);
+
+      notif.on("action", (action: string) => {
+        if (action === "default") {
+          finish(true);
+        }
+      });
+
+      notif.on("close", () => {
+        finish(false);
+      });
+
+      notif.push().catch((err: unknown) => {
+        fail(err);
+      });
+    });
+
+    if (clicked && notification.clickUrl) {
+      await openUrl(notification.clickUrl);
+      return { openedClickUrl: true };
     }
 
-    if (result.exitCode !== 0) {
-      throw new LinuxNotificationAdapterError(
-        `Command ${command} exited with code ${result.exitCode}: ${formatCommandFailure(result)}`,
-      );
-    }
-
-    return result;
+    return { openedClickUrl: false };
   }
 }
 
-async function runCommand(
-  command: string,
-  args: readonly string[],
-): Promise<CommandRunnerResult> {
-  return await new Promise<CommandRunnerResult>((resolve, reject) => {
-    const child = spawn(command, [...args], {
+async function openUrl(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("xdg-open", [url], {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.once("error", (error) => {
-      reject(error);
-    });
-
-    child.once("close", (code, signal) => {
-      resolve({
-        exitCode: code ?? -1,
-        stdout,
-        stderr,
-        signal,
-      });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`xdg-open exited with code ${code}`));
+      }
     });
   });
-}
-
-function formatCommandFailure(result: CommandRunnerResult): string {
-  const stderr = result.stderr.trim();
-
-  if (stderr.length > 0) {
-    return stderr;
-  }
-
-  return "no error output";
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }

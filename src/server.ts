@@ -47,6 +47,7 @@ export interface StartServerOptions {
   manualUntrackPullRequest?: (
     githubPullRequestId: number,
   ) => Promise<UntrackPullRequestResult>;
+  resendNotificationRecord?: (notificationRecordId: number) => Promise<void>;
 }
 
 export class ServerError extends Error {
@@ -116,6 +117,9 @@ async function handleRequest(
   const logLevelFilter = readLogLevelFilter(searchParams);
   const trackedPullRequestMatch = pathname.match(/^\/api\/tracked-pull-requests\/(\d+)$/);
   const documentUntrackMatch = pathname.match(/^\/tracked-pull-requests\/(\d+)\/untrack$/);
+  const documentNotificationRecordResendMatch = pathname.match(
+    /^\/notification-records\/(\d+)\/resend$/,
+  );
 
   if (request.method === "GET" && pathname === "/api/tracked-pull-requests") {
     await handlePullRequestListRequest(
@@ -180,6 +184,28 @@ async function handleRequest(
       request,
       response,
       options.manualTrackPullRequestByUrl,
+    );
+    return;
+  }
+
+  if (request.method === "POST" && documentNotificationRecordResendMatch) {
+    await handleDocumentNotificationRecordResendRequest(
+      request,
+      response,
+      options.resendNotificationRecord,
+      documentNotificationRecordResendMatch[1]!,
+    );
+    return;
+  }
+
+  const notificationRecordResendMatch = pathname.match(/^\/api\/notification-records\/(\d+)\/resend$/);
+
+  if (request.method === "POST" && notificationRecordResendMatch) {
+    await handleNotificationRecordResendRequest(
+      request,
+      response,
+      options.resendNotificationRecord,
+      notificationRecordResendMatch[1]!,
     );
     return;
   }
@@ -637,6 +663,94 @@ function createUntrackFlashMessage(result: UntrackPullRequestResult): AppFlashMe
         ? `Stopped tracking ${pullRequestLabel}.`
         : `${pullRequestLabel} is already inactive.`,
   };
+}
+
+async function handleNotificationRecordResendRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  resendNotificationRecord: StartServerOptions["resendNotificationRecord"],
+  notificationRecordIdSegment: string,
+): Promise<void> {
+  if (!resendNotificationRecord) {
+    respond(
+      response,
+      request.method,
+      503,
+      "application/json; charset=utf-8",
+      JSON.stringify({ error: "Notification record resend is not configured" }),
+    );
+    return;
+  }
+
+  try {
+    const notificationRecordId = readPositiveInteger(notificationRecordIdSegment, "Notification record id");
+    await resendNotificationRecord(notificationRecordId);
+
+    getLogger().info("Resent notification record via API", {
+      notificationRecordId,
+    });
+
+    respond(
+      response,
+      request.method,
+      200,
+      "application/json; charset=utf-8",
+      JSON.stringify({ success: true }),
+    );
+  } catch (error) {
+    getLogger().warn("Failed to resend notification record via API", {
+      notificationRecordId: notificationRecordIdSegment,
+      error,
+    });
+
+    respond(
+      response,
+      request.method,
+      500,
+      "application/json; charset=utf-8",
+      JSON.stringify({
+        error: getErrorMessage(error),
+      }),
+    );
+  }
+}
+
+async function handleDocumentNotificationRecordResendRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  resendNotificationRecord: StartServerOptions["resendNotificationRecord"],
+  notificationRecordIdSegment: string,
+): Promise<void> {
+  if (!resendNotificationRecord) {
+    redirectToDocumentMessage(request, response, {
+      kind: "error",
+      text: "Notification record resend is not configured",
+    });
+    return;
+  }
+
+  try {
+    const notificationRecordId = readPositiveInteger(notificationRecordIdSegment, "Notification record id");
+    await resendNotificationRecord(notificationRecordId);
+
+    getLogger().info("Resent notification record from document flow", {
+      notificationRecordId,
+    });
+
+    redirectToDocumentMessage(request, response, {
+      kind: "success",
+      text: "Notification resent.",
+    });
+  } catch (error) {
+    getLogger().warn("Failed to resend notification record from document flow", {
+      notificationRecordId: notificationRecordIdSegment,
+      error,
+    });
+    redirectToDocumentMessage(request, response, {
+      kind: "error",
+      text: getErrorMessage(error),
+    });
+  }
 }
 
 function readPositiveInteger(value: string, fieldName: string): number {

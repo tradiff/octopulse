@@ -20,6 +20,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "freedesktop-notifications": "^2.1.1",
     "octokit": "^5.0.5",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

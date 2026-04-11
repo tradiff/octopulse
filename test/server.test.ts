@@ -475,6 +475,45 @@ describe("startServer", () => {
     expect(retrackHtml).toContain("Keep inactive list visible");
   });
 
+  it("handles notification resend form submissions with document redirect", async () => {
+    const resendNotificationRecord = vi.fn(async (_notificationRecordId: number) => undefined);
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      resendNotificationRecord,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/notification-records/9/resend`, {
+      method: "POST",
+      redirect: "follow",
+    });
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Notification resent.");
+    expect(resendNotificationRecord).toHaveBeenCalledWith(9);
+  });
+
+  it("keeps resend API endpoint returning json", async () => {
+    const resendNotificationRecord = vi.fn(async (_notificationRecordId: number) => undefined);
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      resendNotificationRecord,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/api/notification-records/9/resend`, {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({ success: true });
+    expect(resendNotificationRecord).toHaveBeenCalledWith(9);
+  });
+
   it("accepts manual pull request tracking requests", async () => {
     const manualTrackPullRequestByUrl = vi.fn(async (pullRequestUrl: string) => ({
       outcome: "tracked" as const,

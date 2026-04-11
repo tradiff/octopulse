@@ -108,6 +108,64 @@ export async function dispatchPullRequestNotifications(
   return result;
 }
 
+export interface ResendNotificationRecordOptions {
+  notificationRecordId: number;
+  dispatchedAt?: string;
+  notificationDispatcher?: NotificationDispatcher;
+  notificationRecordRepository?: Pick<
+    NotificationRecordRepository,
+    | "resetNotificationRecordDelivery"
+    | "getNotificationRecordById"
+    | "updateNotificationRecordDelivery"
+  >;
+  onError?: (error: NotificationDispatchError) => void;
+}
+
+export async function resendNotificationRecord(
+  database: DatabaseSync,
+  options: ResendNotificationRecordOptions,
+): Promise<void> {
+  const dispatchedAt = options.dispatchedAt ?? new Date().toISOString();
+  const notificationDispatcher = options.notificationDispatcher ?? new LinuxNotificationAdapter();
+  const notificationRecordRepository =
+    options.notificationRecordRepository ?? new NotificationRecordRepository(database);
+  const onError = options.onError ?? logNotificationDispatchError;
+
+  const record = notificationRecordRepository.getNotificationRecordById(options.notificationRecordId);
+
+  if (!record) {
+    throw new NotificationDispatchError(
+      `Notification record ${options.notificationRecordId} not found`,
+    );
+  }
+
+  notificationRecordRepository.resetNotificationRecordDelivery(record.id);
+
+  try {
+    await notificationDispatcher.dispatchNotification({
+      title: record.title,
+      body: record.body,
+      clickUrl: record.clickUrl,
+    });
+    notificationRecordRepository.updateNotificationRecordDelivery(record.id, {
+      deliveryStatus: "sent",
+      deliveredAt: dispatchedAt,
+    });
+    getLogger().info("Resent notification record", { notificationRecordId: record.id });
+  } catch (error) {
+    notificationRecordRepository.updateNotificationRecordDelivery(record.id, {
+      deliveryStatus: "failed",
+      deliveredAt: null,
+    });
+    onError(
+      new NotificationDispatchError(
+        `Failed to resend notification record ${record.id}: ${getErrorMessage(error)}`,
+      ),
+    );
+    throw error;
+  }
+}
+
 function formatPullRequestLabel(
   pullRequest: Pick<PullRequestRecord, "repositoryOwner" | "repositoryName" | "number">,
 ): string {
