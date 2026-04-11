@@ -15,6 +15,7 @@ import {
   type PullRequestRecord,
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
+import { RawEventRepository } from "../src/raw-event-repository.js";
 
 const POLLING_INTERVAL_MS = 60_000;
 const OBSERVED_AT = "2026-04-10T12:00:00.000Z";
@@ -122,6 +123,127 @@ describe("pollTrackedPullRequests", () => {
       });
 
       expect(polledPullRequestIds.sort((left, right) => left - right)).toEqual([101, 202, 303]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("ingests raw pull request activity by default during polling", async () => {
+    const { database, repository } = createRepository();
+    const rawEventRepository = new RawEventRepository(database);
+    const request = vi.fn(async (route: string) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+          return {
+            data: [
+              {
+                id: 8101,
+                user: {
+                  login: "alice",
+                },
+                created_at: "2026-04-10T12:01:00.000Z",
+              },
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+          return {
+            data: [
+              {
+                id: 8201,
+                user: {
+                  login: "bob",
+                },
+                state: "APPROVED",
+                submitted_at: "2026-04-10T12:02:00.000Z",
+              },
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+          return {
+            data: [
+              {
+                id: 8301,
+                user: {
+                  login: "carol",
+                },
+                created_at: "2026-04-10T12:03:00.000Z",
+              },
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return {
+            data: [
+              {
+                id: 8401,
+                actor: {
+                  login: "octocat",
+                },
+                event: "merged",
+                created_at: "2026-04-10T12:04:00.000Z",
+              },
+            ],
+          };
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      repository.upsertPullRequest(createPullRequestInput());
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      expect(request).toHaveBeenCalledTimes(4);
+
+      const pullRequest = repository.listTrackedPullRequests()[0];
+
+      expect(pullRequest).toBeDefined();
+      expect(
+        rawEventRepository.listRawEventsForPullRequest(pullRequest?.id ?? -1).map((rawEvent) => ({
+          source: rawEvent.source,
+          sourceId: rawEvent.sourceId,
+          eventType: rawEvent.eventType,
+        })),
+      ).toEqual([
+        {
+          source: "github_issue_comment",
+          sourceId: "8101",
+          eventType: "issue_comment",
+        },
+        {
+          source: "github_pull_request_review",
+          sourceId: "8201",
+          eventType: "pull_request_review",
+        },
+        {
+          source: "github_pull_request_review_comment",
+          sourceId: "8301",
+          eventType: "pull_request_review_comment",
+        },
+        {
+          source: "github_issue_timeline",
+          sourceId: "8401",
+          eventType: "merged",
+        },
+      ]);
     } finally {
       database.close();
     }

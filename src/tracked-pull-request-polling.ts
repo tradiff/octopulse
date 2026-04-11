@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { Octokit } from "octokit";
 
 import type { GitHubAuthContext } from "./github.js";
+import { ingestPullRequestActivity } from "./pull-request-activity-ingestion.js";
 import {
   PullRequestRepository,
   type PullRequestRecord,
@@ -45,7 +46,8 @@ export async function pollTrackedPullRequests<TClient>(
   const pullRequestRepository = options.pullRequestRepository ?? new PullRequestRepository(database);
   const pollPullRequest =
     options.pollPullRequest ??
-    (async (_client: TClient, _pullRequest: PullRequestRecord): Promise<void> => {});
+    ((client: TClient, pullRequest: PullRequestRecord) =>
+      ingestPullRequestActivity(database, client, pullRequest).then(() => undefined));
   const onError = options.onError ?? logTrackedPullRequestPollingError;
   const observedAt = options.observedAt ?? new Date().toISOString();
 
