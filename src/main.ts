@@ -11,6 +11,7 @@ import { initializeDatabase } from "./database.js";
 import { initializeGitHubAuth } from "./github.js";
 import { LinuxNotificationAdapter } from "./linux-notification-adapter.js";
 import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request-tracking.js";
+import { listNotificationHistory } from "./notification-history.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
 import { readServerOrigin, startServer } from "./server.js";
 import {
@@ -38,6 +39,7 @@ async function main(): Promise<void> {
     server = await startServer({
       listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
       listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
+      listNotificationHistory: async () => listNotificationHistory(currentDatabase),
       manualTrackPullRequestByUrl: (pullRequestUrl: string) =>
         trackPullRequestByUrl(currentDatabase, githubAuth, pullRequestUrl, {
           pullRequestRepository,

@@ -50,6 +50,19 @@ describe("startServer", () => {
           isStickyUntracked: true,
         }),
       ],
+      listNotificationHistory: async () => [
+        {
+          id: 1,
+          title: "acme/octopulse PR #7",
+          body: "alice approved review\nAdd pull request polling",
+          clickUrl: "https://github.com/acme/octopulse/pull/7",
+          deliveryStatus: "pending" as const,
+          createdAt: "2026-04-10 12:03:00",
+          deliveredAt: null,
+          decisionStates: ["notified" as const],
+          sourceKind: "immediate" as const,
+        },
+      ],
     });
     servers.push(server);
 
@@ -64,6 +77,9 @@ describe("startServer", () => {
     expect(html).toContain('action="/tracked-pull-requests/manual-track"');
     expect(html).toContain("Untrack");
     expect(html).toContain("Track Again");
+    expect(html).toContain("Notification History");
+    expect(html).toContain("alice approved review");
+    expect(html).toContain("Pending");
   });
 
   it("handles manual track form submissions and shows a success message", async () => {

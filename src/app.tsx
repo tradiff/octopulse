@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 
 export interface AppFlashMessage {
@@ -11,12 +12,14 @@ export interface AppFlashMessage {
 interface RenderAppDocumentOptions {
   trackedPullRequests?: PullRequestRecord[];
   inactivePullRequests?: PullRequestRecord[];
+  notificationHistory?: NotificationHistoryEntry[];
   flashMessage?: AppFlashMessage | undefined;
 }
 
 function AppShell({
   trackedPullRequests,
   inactivePullRequests,
+  notificationHistory,
   flashMessage,
 }: Required<RenderAppDocumentOptions>) {
   return (
@@ -81,16 +84,67 @@ function AppShell({
             </form>
           )}
         />
-        <section className="panel">
-          <h2>Notification History</h2>
-          <p>Bundled notifications and delivery records will appear here.</p>
-        </section>
+        <NotificationHistoryPanel notificationHistory={notificationHistory} />
         <section className="panel">
           <h2>Raw Events</h2>
           <p>Normalized activity and raw GitHub payloads will be available here.</p>
         </section>
       </div>
     </main>
+  );
+}
+
+function NotificationHistoryPanel({
+  notificationHistory,
+}: {
+  notificationHistory: NotificationHistoryEntry[];
+}) {
+  return (
+    <section className="panel notification-history-panel">
+      <div className="panel-header">
+        <h2>Notification History</h2>
+        <span className="count">{notificationHistory.length}</span>
+      </div>
+      {notificationHistory.length === 0 ? (
+        <p>No notification history yet.</p>
+      ) : (
+        <ul className="notification-history-list">
+          {notificationHistory.map((entry) => (
+            <li key={entry.id} className="notification-history-item">
+              <div className="notification-history-header">
+                {entry.clickUrl ? (
+                  <a href={entry.clickUrl} className="pull-request-link">
+                    {entry.title}
+                  </a>
+                ) : (
+                  <strong className="notification-history-title">{entry.title}</strong>
+                )}
+                <span className={`delivery-pill delivery-${entry.deliveryStatus}`}>
+                  {formatDeliveryStatusLabel(entry.deliveryStatus)}
+                </span>
+              </div>
+              <p className="notification-history-body">{entry.body}</p>
+              <div className="notification-history-meta-row">
+                <span className="history-pill">{formatSourceKindLabel(entry.sourceKind)}</span>
+                {entry.decisionStates.map((decisionState) => (
+                  <span key={`${entry.id}-${decisionState}`} className="history-pill">
+                    {formatDecisionStateLabel(decisionState)}
+                  </span>
+                ))}
+                <span className="notification-history-time">
+                  Created {formatHistoryTimestamp(entry.createdAt)}
+                </span>
+                {entry.deliveredAt ? (
+                  <span className="notification-history-time">
+                    Delivered {formatHistoryTimestamp(entry.deliveredAt)}
+                  </span>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -155,6 +209,7 @@ function formatStateLabel(pullRequest: PullRequestRecord): string {
 export function renderAppDocument(options: RenderAppDocumentOptions = {}): string {
   const trackedPullRequests = options.trackedPullRequests ?? [];
   const inactivePullRequests = options.inactivePullRequests ?? [];
+  const notificationHistory = options.notificationHistory ?? [];
   const flashMessage = options.flashMessage;
 
   return [
@@ -274,11 +329,30 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               list-style: none;
             }
 
+            .notification-history-list {
+              display: grid;
+              gap: 12px;
+              margin: 0;
+              padding: 0;
+              list-style: none;
+            }
+
             .pull-request-item {
               padding: 14px;
               border-radius: 12px;
               background: rgba(30, 41, 59, 0.72);
               border: 1px solid rgba(148, 163, 184, 0.18);
+            }
+
+            .notification-history-item {
+              padding: 14px;
+              border-radius: 12px;
+              background: rgba(30, 41, 59, 0.72);
+              border: 1px solid rgba(148, 163, 184, 0.18);
+            }
+
+            .notification-history-panel {
+              grid-column: 1 / -1;
             }
 
             .track-form {
@@ -342,11 +416,70 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               text-decoration: underline;
             }
 
+            .notification-history-header {
+              display: flex;
+              align-items: flex-start;
+              justify-content: space-between;
+              gap: 12px;
+            }
+
+            .notification-history-title {
+              margin: 0;
+            }
+
+            .notification-history-body {
+              margin-top: 10px;
+              white-space: pre-line;
+            }
+
+            .notification-history-meta-row {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 8px;
+              margin-top: 12px;
+            }
+
             .state-pill {
               padding: 4px 8px;
               background: rgba(148, 163, 184, 0.14);
               color: #cbd5e1;
               white-space: nowrap;
+            }
+
+            .history-pill,
+            .delivery-pill {
+              display: inline-flex;
+              align-items: center;
+              border-radius: 999px;
+              padding: 4px 8px;
+              font-size: 0.75rem;
+              font-weight: 600;
+              white-space: nowrap;
+            }
+
+            .history-pill {
+              background: rgba(148, 163, 184, 0.14);
+              color: #cbd5e1;
+            }
+
+            .delivery-pending {
+              background: rgba(250, 204, 21, 0.14);
+              color: #fde68a;
+            }
+
+            .delivery-sent {
+              background: rgba(34, 197, 94, 0.12);
+              color: #86efac;
+            }
+
+            .delivery-failed {
+              background: rgba(248, 113, 113, 0.12);
+              color: #fca5a5;
+            }
+
+            .notification-history-time {
+              color: #94a3b8;
+              font-size: 0.8rem;
             }
 
             .pull-request-subtle {
@@ -407,6 +540,10 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
                 align-items: flex-start;
                 flex-direction: column;
               }
+
+              .notification-history-header {
+                flex-direction: column;
+              }
             }
           `}</style>
         </head>
@@ -415,6 +552,7 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
             <AppShell
               trackedPullRequests={trackedPullRequests}
               inactivePullRequests={inactivePullRequests}
+              notificationHistory={notificationHistory}
               flashMessage={flashMessage}
             />
           </div>
@@ -422,4 +560,54 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
       </html>,
     ),
   ].join("");
+}
+
+function formatDeliveryStatusLabel(deliveryStatus: NotificationHistoryEntry["deliveryStatus"]): string {
+  if (deliveryStatus === "sent") {
+    return "Sent";
+  }
+
+  if (deliveryStatus === "failed") {
+    return "Failed";
+  }
+
+  return "Pending";
+}
+
+function formatSourceKindLabel(sourceKind: NotificationHistoryEntry["sourceKind"]): string {
+  return sourceKind === "bundle" ? "Bundled" : "Immediate";
+}
+
+function formatDecisionStateLabel(
+  decisionState: NotificationHistoryEntry["decisionStates"][number],
+): string {
+  if (decisionState === "notified_ai") {
+    return "AI notified";
+  }
+
+  if (decisionState === "notified_ai_fallback") {
+    return "AI fallback";
+  }
+
+  if (decisionState === "suppressed_self_action") {
+    return "Self suppressed";
+  }
+
+  if (decisionState === "suppressed_rule") {
+    return "Rule suppressed";
+  }
+
+  if (decisionState === "error") {
+    return "Decision error";
+  }
+
+  return "Notified";
+}
+
+function formatHistoryTimestamp(timestamp: string): string {
+  if (timestamp.includes("T")) {
+    return timestamp.replace("T", " ").replace(/\.\d+Z$/, " UTC").replace(/Z$/, " UTC");
+  }
+
+  return `${timestamp} UTC`;
 }

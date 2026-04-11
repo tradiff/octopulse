@@ -138,6 +138,12 @@ export class NormalizedEventRepository {
     return rows.map((row) => mapNormalizedEventRow(row));
   }
 
+  getNormalizedEventById(id: number): NormalizedEventRecord | null {
+    const row = this.database.prepare("SELECT * FROM NormalizedEvent WHERE id = ?").get(id);
+
+    return row === undefined ? null : mapNormalizedEventRow(row);
+  }
+
   listNormalizedEventsForBundle(eventBundleId: number): NormalizedEventRecord[] {
     const rows = this.database
       .prepare(

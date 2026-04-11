@@ -41,6 +41,20 @@ export class NotificationRecordRepositoryError extends Error {
 export class NotificationRecordRepository {
   constructor(private readonly database: DatabaseSync) {}
 
+  listNotificationRecords(): NotificationRecord[] {
+    const rows = this.database
+      .prepare(
+        `
+          SELECT *
+          FROM NotificationRecord
+          ORDER BY created_at DESC, id DESC
+        `,
+      )
+      .all();
+
+    return rows.map((row) => mapNotificationRecordRow(row));
+  }
+
   createNotificationRecord(input: CreateNotificationRecordInput): NotificationRecord {
     validateNotificationTarget(input);
 

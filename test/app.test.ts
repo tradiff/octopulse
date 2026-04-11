@@ -60,6 +60,33 @@ describe("renderAppDocument", () => {
     expect(html).toContain("flash-success");
     expect(html).toContain("acme/octopulse #7 is already tracked.");
   });
+
+  it("renders notification history with delivery and decision details", () => {
+    const html = renderAppDocument({
+      notificationHistory: [
+        {
+          id: 9,
+          title: "acme/octopulse PR #7",
+          body: "1 comment, CI failed\nAdd notifications",
+          clickUrl: "https://github.com/acme/octopulse/pull/7",
+          deliveryStatus: "sent",
+          createdAt: "2026-04-10 12:02:30",
+          deliveredAt: "2026-04-10T12:02:45.000Z",
+          decisionStates: ["notified", "notified_ai_fallback"],
+          sourceKind: "bundle",
+        },
+      ],
+    });
+
+    expect(html).toContain("Notification History");
+    expect(html).toContain("acme/octopulse PR #7");
+    expect(html).toContain("1 comment, CI failed");
+    expect(html).toContain("Sent");
+    expect(html).toContain("Bundled");
+    expect(html).toContain("Notified");
+    expect(html).toContain("AI fallback");
+    expect(html).toContain("Delivered 2026-04-10 12:02:45 UTC");
+  });
 });
 
 function createPullRequestRecord(
