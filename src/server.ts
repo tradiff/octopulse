@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { renderAppDocument } from "./app.js";
+import { renderAppDocument, type AppFlashMessage } from "./app.js";
 import {
   ManualPullRequestTrackingError,
   type TrackPullRequestByUrlResult,
@@ -81,8 +81,10 @@ async function handleRequest(
   response: ServerResponse,
   options: StartServerOptions,
 ): Promise<void> {
-  const { pathname } = new URL(request.url ?? "/", "http://127.0.0.1");
+  const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+  const { pathname, searchParams } = requestUrl;
   const trackedPullRequestMatch = pathname.match(/^\/api\/tracked-pull-requests\/(\d+)$/);
+  const documentUntrackMatch = pathname.match(/^\/tracked-pull-requests\/(\d+)\/untrack$/);
 
   if (request.method === "GET" && pathname === "/api/tracked-pull-requests") {
     await handlePullRequestListRequest(
@@ -123,6 +125,34 @@ async function handleRequest(
     return;
   }
 
+  if (request.method === "POST" && pathname === "/tracked-pull-requests/manual-track") {
+    await handleDocumentManualTrackPullRequestRequest(
+      request,
+      response,
+      options.manualTrackPullRequestByUrl,
+    );
+    return;
+  }
+
+  if (request.method === "POST" && documentUntrackMatch) {
+    await handleDocumentManualUntrackPullRequestRequest(
+      request,
+      response,
+      options.manualUntrackPullRequest,
+      documentUntrackMatch[1]!,
+    );
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/inactive-pull-requests/retrack") {
+    await handleDocumentManualTrackPullRequestRequest(
+      request,
+      response,
+      options.manualTrackPullRequestByUrl,
+    );
+    return;
+  }
+
   if (supportsDocumentResponse(request) && pathname === "/health") {
     respond(
       response,
@@ -141,18 +171,79 @@ async function handleRequest(
     const inactivePullRequests = options.listInactivePullRequests
       ? await options.listInactivePullRequests()
       : [];
+    const flashMessage = readFlashMessage(searchParams);
 
     respond(
       response,
       request.method,
       200,
       "text/html; charset=utf-8",
-      renderAppDocument({ trackedPullRequests, inactivePullRequests }),
+      renderAppDocument({
+        trackedPullRequests,
+        inactivePullRequests,
+        ...(flashMessage ? { flashMessage } : {}),
+      }),
     );
     return;
   }
 
   respond(response, request.method, 404, "text/plain; charset=utf-8", "Not Found");
+}
+
+async function handleDocumentManualTrackPullRequestRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  manualTrackPullRequestByUrl: StartServerOptions["manualTrackPullRequestByUrl"],
+): Promise<void> {
+  if (!manualTrackPullRequestByUrl) {
+    redirectToDocumentMessage(request, response, {
+      kind: "error",
+      text: "Manual pull request tracking is not configured",
+    });
+    return;
+  }
+
+  try {
+    const requestBody = readManualTrackRequestBody(await readFormRequestBody(request));
+    const result = await manualTrackPullRequestByUrl(requestBody.url);
+
+    redirectToDocumentMessage(request, response, createTrackFlashMessage(result));
+  } catch (error) {
+    redirectToDocumentMessage(request, response, {
+      kind: "error",
+      text: getErrorMessage(error),
+    });
+  }
+}
+
+async function handleDocumentManualUntrackPullRequestRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  manualUntrackPullRequest: StartServerOptions["manualUntrackPullRequest"],
+  githubPullRequestIdSegment: string,
+): Promise<void> {
+  if (!manualUntrackPullRequest) {
+    redirectToDocumentMessage(request, response, {
+      kind: "error",
+      text: "Manual pull request untracking is not configured",
+    });
+    return;
+  }
+
+  try {
+    const githubPullRequestId = readPositiveInteger(
+      githubPullRequestIdSegment,
+      "Pull request id",
+    );
+    const result = await manualUntrackPullRequest(githubPullRequestId);
+
+    redirectToDocumentMessage(request, response, createUntrackFlashMessage(result));
+  } catch (error) {
+    redirectToDocumentMessage(request, response, {
+      kind: "error",
+      text: getErrorMessage(error),
+    });
+  }
 }
 
 async function handleManualTrackPullRequestRequest(
@@ -317,6 +408,11 @@ async function readJsonRequestBody(request: IncomingMessage): Promise<unknown> {
   }
 }
 
+async function readFormRequestBody(request: IncomingMessage): Promise<unknown> {
+  const body = await readRequestBody(request);
+  return Object.fromEntries(new URLSearchParams(body).entries()) as unknown;
+}
+
 async function readRequestBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
 
@@ -342,6 +438,55 @@ function readManualTrackRequestBody(body: unknown): { url: string } {
   return { url: url.trim() };
 }
 
+function readFlashMessage(searchParams: URLSearchParams): AppFlashMessage | undefined {
+  const kind = searchParams.get("flash-kind");
+  const text = searchParams.get("flash-text");
+
+  if ((kind !== "success" && kind !== "error") || !text) {
+    return undefined;
+  }
+
+  return { kind, text };
+}
+
+function redirectToDocumentMessage(
+  request: IncomingMessage,
+  response: ServerResponse,
+  flashMessage: AppFlashMessage,
+): void {
+  const location = new URL("/", "http://127.0.0.1");
+  location.searchParams.set("flash-kind", flashMessage.kind);
+  location.searchParams.set("flash-text", flashMessage.text);
+
+  response.statusCode = 303;
+  response.setHeader("Location", `${location.pathname}${location.search}`);
+  response.end(request.method === "HEAD" ? undefined : "");
+}
+
+function createTrackFlashMessage(result: TrackPullRequestByUrlResult): AppFlashMessage {
+  const pullRequestLabel = formatPullRequestLabel(result.pullRequest);
+
+  return {
+    kind: "success",
+    text:
+      result.outcome === "tracked"
+        ? `Now tracking ${pullRequestLabel}.`
+        : `${pullRequestLabel} is already tracked.`,
+  };
+}
+
+function createUntrackFlashMessage(result: UntrackPullRequestResult): AppFlashMessage {
+  const pullRequestLabel = formatPullRequestLabel(result.pullRequest);
+
+  return {
+    kind: "success",
+    text:
+      result.outcome === "untracked"
+        ? `Stopped tracking ${pullRequestLabel}.`
+        : `${pullRequestLabel} is already inactive.`,
+  };
+}
+
 function readPositiveInteger(value: string, fieldName: string): number {
   const numericValue = Number(value);
 
@@ -350,6 +495,20 @@ function readPositiveInteger(value: string, fieldName: string): number {
   }
 
   return numericValue;
+}
+
+function formatPullRequestLabel(
+  pullRequest: Pick<PullRequestRecord, "repositoryOwner" | "repositoryName" | "number">,
+): string {
+  return `${pullRequest.repositoryOwner}/${pullRequest.repositoryName} #${pullRequest.number}`;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }
 
 function formatAddress(address: AddressInfo): string {

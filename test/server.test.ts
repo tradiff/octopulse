@@ -61,6 +61,152 @@ describe("startServer", () => {
     expect(html).toContain("Octopulse");
     expect(html).toContain("Add pull request polling");
     expect(html).toContain("Keep inactive list visible");
+    expect(html).toContain('action="/tracked-pull-requests/manual-track"');
+    expect(html).toContain("Untrack");
+    expect(html).toContain("Track Again");
+  });
+
+  it("handles manual track form submissions and shows a success message", async () => {
+    const trackedPullRequests = [createPullRequestResponseRecord()];
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listTrackedPullRequests: async () => trackedPullRequests,
+      listInactivePullRequests: async () => [],
+      manualTrackPullRequestByUrl: async (pullRequestUrl: string) => {
+        const trackedPullRequest = createPullRequestResponseRecord({
+          githubPullRequestId: 303,
+          repositoryName: "api",
+          number: 19,
+          url: pullRequestUrl,
+          title: "Track a pull request from the UI",
+        });
+        trackedPullRequests.push(trackedPullRequest);
+        return {
+          outcome: "tracked" as const,
+          pullRequest: trackedPullRequest,
+        };
+      },
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/tracked-pull-requests/manual-track`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        url: "https://github.com/acme/api/pull/19",
+      }),
+    });
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Now tracking acme/api #19.");
+    expect(html).toContain("Track a pull request from the UI");
+  });
+
+  it("shows a clear no-op message when a tracked PR is submitted again from the UI", async () => {
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listTrackedPullRequests: async () => [createPullRequestResponseRecord()],
+      listInactivePullRequests: async () => [],
+      manualTrackPullRequestByUrl: async (pullRequestUrl: string) => ({
+        outcome: "already_tracked" as const,
+        pullRequest: createPullRequestResponseRecord({ url: pullRequestUrl }),
+      }),
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/tracked-pull-requests/manual-track`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        url: "https://github.com/acme/octopulse/pull/7",
+      }),
+    });
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("acme/octopulse #7 is already tracked.");
+  });
+
+  it("handles manual untrack and re-track form submissions", async () => {
+    const retrackedPullRequest = createPullRequestResponseRecord({
+      githubPullRequestId: 202,
+      repositoryName: "worker",
+      number: 12,
+      title: "Keep inactive list visible",
+      url: "https://github.com/acme/worker/pull/12",
+      isTracked: false,
+      isStickyUntracked: true,
+    });
+    let trackedPullRequests = [createPullRequestResponseRecord()];
+    let inactivePullRequests = [retrackedPullRequest];
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listTrackedPullRequests: async () => trackedPullRequests,
+      listInactivePullRequests: async () => inactivePullRequests,
+      manualUntrackPullRequest: async (githubPullRequestId: number) => {
+        const pullRequest = createPullRequestResponseRecord({
+          githubPullRequestId,
+          isTracked: false,
+          isStickyUntracked: true,
+        });
+        trackedPullRequests = [];
+        inactivePullRequests = [pullRequest, ...inactivePullRequests];
+        return {
+          outcome: "untracked" as const,
+          pullRequest,
+        };
+      },
+      manualTrackPullRequestByUrl: async (pullRequestUrl: string) => {
+        trackedPullRequests = [
+          createPullRequestResponseRecord({
+            ...retrackedPullRequest,
+            url: pullRequestUrl,
+            isTracked: true,
+            isStickyUntracked: false,
+          }),
+        ];
+        inactivePullRequests = [];
+        return {
+          outcome: "tracked" as const,
+          pullRequest: trackedPullRequests[0]!,
+        };
+      },
+    });
+    servers.push(server);
+
+    const untrackResponse = await fetch(
+      `${readServerOrigin(server)}/tracked-pull-requests/101/untrack`,
+      {
+        method: "POST",
+      },
+    );
+    const untrackHtml = await untrackResponse.text();
+
+    expect(untrackResponse.status).toBe(200);
+    expect(untrackHtml).toContain("Stopped tracking acme/octopulse #7.");
+
+    const retrackResponse = await fetch(`${readServerOrigin(server)}/inactive-pull-requests/retrack`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        url: "https://github.com/acme/worker/pull/12",
+      }),
+    });
+    const retrackHtml = await retrackResponse.text();
+
+    expect(retrackResponse.status).toBe(200);
+    expect(retrackHtml).toContain("Now tracking acme/worker #12.");
+    expect(retrackHtml).toContain("Keep inactive list visible");
   });
 
   it("accepts manual pull request tracking requests", async () => {

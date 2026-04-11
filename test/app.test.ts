@@ -30,12 +30,16 @@ describe("renderAppDocument", () => {
 
     expect(html).toContain("Tracked Pull Requests");
     expect(html).toContain("Inactive Pull Requests");
+    expect(html).toContain("Track Pull Request");
+    expect(html).toContain('action="/tracked-pull-requests/manual-track"');
     expect(html).toContain("acme/octopulse #7");
     expect(html).toContain("acme/worker #18");
     expect(html).toContain("Track recurring discovery output");
     expect(html).toContain("Keep merged pull requests visible during grace period");
     expect(html).toContain("Open");
     expect(html).toContain("Closed");
+    expect(html).toContain("Untrack");
+    expect(html).toContain("Track Again");
   });
 
   it("renders empty-state messages when no pull requests are available", () => {
@@ -43,6 +47,18 @@ describe("renderAppDocument", () => {
 
     expect(html).toContain("No tracked pull requests yet.");
     expect(html).toContain("No inactive pull requests yet.");
+  });
+
+  it("renders flash messages for UI actions", () => {
+    const html = renderAppDocument({
+      flashMessage: {
+        kind: "success",
+        text: "acme/octopulse #7 is already tracked.",
+      },
+    });
+
+    expect(html).toContain("flash-success");
+    expect(html).toContain("acme/octopulse #7 is already tracked.");
   });
 });
 
