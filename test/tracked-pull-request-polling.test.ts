@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveAppPaths } from "../src/config.js";
 import { initializeDatabase } from "../src/database.js";
+import { NormalizedEventRepository } from "../src/normalized-event-repository.js";
 import {
   pollTrackedPullRequests,
   startRecurringTrackedPullRequestPolling,
@@ -131,6 +132,7 @@ describe("pollTrackedPullRequests", () => {
   it("ingests raw pull request activity by default during polling", async () => {
     const { database, repository } = createRepository();
     const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
     const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
       switch (route) {
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
@@ -298,6 +300,36 @@ describe("pollTrackedPullRequests", () => {
           eventType: "workflow_run",
         },
       ]);
+      expect(
+        normalizedEventRepository
+          .listNormalizedEventsForPullRequest(pullRequest?.id ?? -1)
+          .map((event) => ({
+            eventType: event.eventType,
+            actorLogin: event.actorLogin,
+            actorClass: event.actorClass,
+          })),
+      ).toEqual([
+        {
+          eventType: "issue_comment",
+          actorLogin: "alice",
+          actorClass: "human_other",
+        },
+        {
+          eventType: "review_approved",
+          actorLogin: "bob",
+          actorClass: "human_other",
+        },
+        {
+          eventType: "review_inline_comment",
+          actorLogin: "carol",
+          actorClass: "human_other",
+        },
+        {
+          eventType: "pr_merged",
+          actorLogin: "octocat",
+          actorClass: "self",
+        },
+      ]);
     } finally {
       database.close();
     }
@@ -306,6 +338,7 @@ describe("pollTrackedPullRequests", () => {
   it("keeps repeated polling idempotent and reuses comment fetch cursors", async () => {
     const { database, repository } = createRepository();
     const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
     const issueCommentSinceValues: Array<string | undefined> = [];
     const reviewCommentSinceValues: Array<string | undefined> = [];
     const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
@@ -483,6 +516,36 @@ describe("pollTrackedPullRequests", () => {
           source: "github_actions_workflow_run",
           sourceId: "9501:2026-04-10T12:15:00.000Z",
           eventType: "workflow_run",
+        },
+      ]);
+      expect(
+        normalizedEventRepository
+          .listNormalizedEventsForPullRequest(pullRequest?.id ?? -1)
+          .map((event) => ({
+            eventType: event.eventType,
+            actorLogin: event.actorLogin,
+            actorClass: event.actorClass,
+          })),
+      ).toEqual([
+        {
+          eventType: "issue_comment",
+          actorLogin: "alice",
+          actorClass: "human_other",
+        },
+        {
+          eventType: "review_approved",
+          actorLogin: "bob",
+          actorClass: "human_other",
+        },
+        {
+          eventType: "review_inline_comment",
+          actorLogin: "carol",
+          actorClass: "human_other",
+        },
+        {
+          eventType: "pr_merged",
+          actorLogin: "octocat",
+          actorClass: "self",
         },
       ]);
     } finally {

@@ -4,6 +4,7 @@ import { Octokit } from "octokit";
 
 import type { GitHubAuthContext } from "./github.js";
 import { ingestPullRequestActivity } from "./pull-request-activity-ingestion.js";
+import { normalizePullRequestActivity } from "./pull-request-activity-normalization.js";
 import {
   PullRequestRepository,
   type PullRequestRecord,
@@ -46,8 +47,10 @@ export async function pollTrackedPullRequests<TClient>(
   const pullRequestRepository = options.pullRequestRepository ?? new PullRequestRepository(database);
   const pollPullRequest =
     options.pollPullRequest ??
-    ((client: TClient, pullRequest: PullRequestRecord) =>
-      ingestPullRequestActivity(database, client, pullRequest).then(() => undefined));
+    (async (client: TClient, pullRequest: PullRequestRecord) => {
+      await ingestPullRequestActivity(database, client, pullRequest);
+      normalizePullRequestActivity(database, pullRequest, githubAuth.currentUserLogin);
+    });
   const onError = options.onError ?? logTrackedPullRequestPollingError;
   const observedAt = options.observedAt ?? new Date().toISOString();
 

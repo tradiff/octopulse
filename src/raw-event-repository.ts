@@ -100,6 +100,24 @@ export class RawEventRepository {
     return rows.map((row) => mapRawEventRow(row));
   }
 
+  listUnnormalizedRawEventsForPullRequest(pullRequestId: number): RawEventRecord[] {
+    const rows = this.database
+      .prepare(
+        `
+          SELECT RawEvent.*
+          FROM RawEvent
+          LEFT JOIN NormalizedEvent
+            ON NormalizedEvent.raw_event_id = RawEvent.id
+          WHERE RawEvent.pull_request_id = ?
+            AND NormalizedEvent.id IS NULL
+          ORDER BY RawEvent.occurred_at ASC, RawEvent.id ASC
+        `,
+      )
+      .all(pullRequestId);
+
+    return rows.map((row) => mapRawEventRow(row));
+  }
+
   private requireRawEventById(id: number): RawEventRecord {
     const row = this.database.prepare("SELECT * FROM RawEvent WHERE id = ?").get(id);
 
