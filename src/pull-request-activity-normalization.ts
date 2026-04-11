@@ -146,6 +146,12 @@ function buildNormalizedPayload(
         path: readOptionalString(payload.path),
         url: readOptionalString(payload.html_url),
       };
+    case "committed":
+      return {
+        commitSha: readOptionalString(payload.sha),
+        messageHeadline: readCommitMessageHeadline(payload),
+        url: readOptionalString(payload.html_url),
+      };
     default:
       return undefined;
   }
@@ -170,8 +176,11 @@ function mapNormalizedEventType(
       return "pr_reopened";
     case "ready_for_review":
       return "ready_for_review";
+    case "convert_to_draft":
     case "converted_to_draft":
       return "converted_to_draft";
+    case "committed":
+      return "commit_pushed";
     case "workflow_run":
       // CI needs cross-run derivation in later slice.
       return undefined;
@@ -236,7 +245,12 @@ function parseRawPayload(rawEvent: RawEventRecord): Record<string, unknown> {
 }
 
 function readActorType(payload: Record<string, unknown>): string | null {
-  return readOptionalActorType(payload.user) ?? readOptionalActorType(payload.actor);
+  return (
+    readOptionalActorType(payload.user) ??
+    readOptionalActorType(payload.actor) ??
+    readOptionalActorType(payload.committer) ??
+    readOptionalActorType(payload.author)
+  );
 }
 
 function readOptionalActorType(value: unknown): string | null {
@@ -253,6 +267,25 @@ function readOptionalString(value: unknown): string | null {
 
 function readOptionalInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+}
+
+function readCommitMessageHeadline(payload: Record<string, unknown>): string | null {
+  const message = readOptionalString(payload.message) ?? readOptionalString(readOptionalRecord(payload.commit)?.message);
+
+  if (message === null) {
+    return null;
+  }
+
+  const headline = message.split(/\r?\n/u, 1)[0]?.trim() ?? "";
+  return headline.length > 0 ? headline : null;
+}
+
+function readOptionalRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function normalizeReviewState(state: string | null): string | null {

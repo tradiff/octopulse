@@ -552,6 +552,154 @@ describe("pollTrackedPullRequests", () => {
       database.close();
     }
   });
+
+  it("ignores comment and review edits during repeated polling", async () => {
+    const { database, repository } = createRepository();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    let includeEditedBodies = false;
+    const request = vi.fn(async (route: string) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+          return {
+            data: [
+              {
+                id: 9601,
+                user: {
+                  login: "alice",
+                },
+                created_at: "2026-04-10T12:21:00.000Z",
+                updated_at: includeEditedBodies
+                  ? "2026-04-10T12:25:00.000Z"
+                  : "2026-04-10T12:21:00.000Z",
+                body: includeEditedBodies ? "Ship it now" : "Ship it",
+                html_url: "https://github.com/acme/octopulse/pull/7#issuecomment-9601",
+              },
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+          return {
+            data: [
+              {
+                id: 9602,
+                user: {
+                  login: "bob",
+                },
+                state: "APPROVED",
+                submitted_at: "2026-04-10T12:22:00.000Z",
+                body: includeEditedBodies ? "Still looks great" : "Looks good",
+                html_url: "https://github.com/acme/octopulse/pull/7#pullrequestreview-9602",
+              },
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+          return {
+            data: [
+              {
+                id: 9603,
+                user: {
+                  login: "carol",
+                },
+                created_at: "2026-04-10T12:23:00.000Z",
+                updated_at: includeEditedBodies
+                  ? "2026-04-10T12:26:00.000Z"
+                  : "2026-04-10T12:23:00.000Z",
+                body: includeEditedBodies ? "Inline note updated" : "Inline note",
+                path: "src/main.ts",
+                html_url: "https://github.com/acme/octopulse/pull/7#discussion_r9603",
+              },
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return {
+            data: [],
+          };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          return {
+            data: {
+              total_count: 0,
+              workflow_runs: [],
+            },
+          };
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      repository.upsertPullRequest(createPullRequestInput());
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      includeEditedBodies = true;
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      const pullRequest = repository.listTrackedPullRequests()[0];
+
+      expect(pullRequest).toBeDefined();
+      expect(rawEventRepository.listRawEventsForPullRequest(pullRequest?.id ?? -1)).toHaveLength(3);
+      expect(
+        normalizedEventRepository
+          .listNormalizedEventsForPullRequest(pullRequest?.id ?? -1)
+          .map((event) => ({
+            eventType: event.eventType,
+            bodyText: (JSON.parse(event.payloadJson) as { bodyText?: string }).bodyText ?? null,
+          })),
+      ).toEqual([
+        {
+          eventType: "issue_comment",
+          bodyText: "Ship it",
+        },
+        {
+          eventType: "review_approved",
+          bodyText: "Looks good",
+        },
+        {
+          eventType: "review_inline_comment",
+          bodyText: "Inline note",
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 describe("startRecurringTrackedPullRequestPolling", () => {

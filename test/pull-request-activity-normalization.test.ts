@@ -315,6 +315,175 @@ describe("normalizePullRequestActivity", () => {
     }
   });
 
+  it("maps pull request state changes and commit pushes from timeline activity", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_timeline",
+        sourceId: "4101",
+        eventType: "closed",
+        actorLogin: "alice",
+        payloadJson: JSON.stringify(
+          createTimelineEventPayload({
+            id: 4101,
+            actorLogin: "alice",
+            actorType: "User",
+            event: "closed",
+            createdAt: "2026-04-10T12:21:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:21:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_timeline",
+        sourceId: "4102",
+        eventType: "merged",
+        actorLogin: "bob",
+        payloadJson: JSON.stringify(
+          createTimelineEventPayload({
+            id: 4102,
+            actorLogin: "bob",
+            actorType: "User",
+            event: "merged",
+            createdAt: "2026-04-10T12:22:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:22:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_timeline",
+        sourceId: "4103",
+        eventType: "reopened",
+        actorLogin: "carol",
+        payloadJson: JSON.stringify(
+          createTimelineEventPayload({
+            id: 4103,
+            actorLogin: "carol",
+            actorType: "User",
+            event: "reopened",
+            createdAt: "2026-04-10T12:23:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:23:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_timeline",
+        sourceId: "4104",
+        eventType: "ready_for_review",
+        actorLogin: "dave",
+        payloadJson: JSON.stringify(
+          createTimelineEventPayload({
+            id: 4104,
+            actorLogin: "dave",
+            actorType: "User",
+            event: "ready_for_review",
+            createdAt: "2026-04-10T12:24:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:24:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_timeline",
+        sourceId: "4105",
+        eventType: "convert_to_draft",
+        actorLogin: "erin",
+        payloadJson: JSON.stringify(
+          createTimelineEventPayload({
+            id: 4105,
+            actorLogin: "erin",
+            actorType: "User",
+            event: "convert_to_draft",
+            createdAt: "2026-04-10T12:25:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:25:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_timeline",
+        sourceId: "feedface",
+        eventType: "committed",
+        actorLogin: "frank",
+        payloadJson: JSON.stringify(
+          createCommittedTimelinePayload({
+            actorLogin: "frank",
+            actorType: "User",
+            sha: "feedface",
+            message: "Refactor notification bundle\n\nTighten event grouping.",
+            committedAt: "2026-04-10T12:26:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:26:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 6,
+        normalizedCount: 6,
+        skippedCount: 0,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          actorLogin: event.actorLogin,
+          actorClass: event.actorClass,
+          payload: parseNormalizedPayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          eventType: "pr_closed",
+          actorLogin: "alice",
+          actorClass: "human_other",
+          payload: {},
+        },
+        {
+          eventType: "pr_merged",
+          actorLogin: "bob",
+          actorClass: "human_other",
+          payload: {},
+        },
+        {
+          eventType: "pr_reopened",
+          actorLogin: "carol",
+          actorClass: "human_other",
+          payload: {},
+        },
+        {
+          eventType: "ready_for_review",
+          actorLogin: "dave",
+          actorClass: "human_other",
+          payload: {},
+        },
+        {
+          eventType: "converted_to_draft",
+          actorLogin: "erin",
+          actorClass: "human_other",
+          payload: {},
+        },
+        {
+          eventType: "commit_pushed",
+          actorLogin: "frank",
+          actorClass: "human_other",
+          payload: {
+            commitSha: "feedface",
+            messageHeadline: "Refactor notification bundle",
+            url: "https://github.com/acme/octopulse/commit/feedface",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("maps review states to normalized review event types", () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);
@@ -543,5 +712,55 @@ function createReviewCommentPayload(overrides: {
     path: overrides.path,
     created_at: overrides.createdAt,
     html_url: `https://github.com/acme/octopulse/pull/7#discussion_r${overrides.id}`,
+  };
+}
+
+function createTimelineEventPayload(overrides: {
+  id: number;
+  actorLogin: string;
+  actorType: string;
+  event: string;
+  createdAt: string;
+}): Record<string, unknown> {
+  return {
+    id: overrides.id,
+    actor: {
+      login: overrides.actorLogin,
+      type: overrides.actorType,
+    },
+    event: overrides.event,
+    created_at: overrides.createdAt,
+  };
+}
+
+function createCommittedTimelinePayload(overrides: {
+  actorLogin: string;
+  actorType: string;
+  sha: string;
+  message: string;
+  committedAt: string;
+}): Record<string, unknown> {
+  return {
+    event: "committed",
+    sha: overrides.sha,
+    node_id: `C_${overrides.sha}`,
+    html_url: `https://github.com/acme/octopulse/commit/${overrides.sha}`,
+    author: {
+      login: overrides.actorLogin,
+      type: overrides.actorType,
+    },
+    committer: {
+      login: overrides.actorLogin,
+      type: overrides.actorType,
+    },
+    commit: {
+      message: overrides.message,
+      author: {
+        date: overrides.committedAt,
+      },
+      committer: {
+        date: overrides.committedAt,
+      },
+    },
   };
 }

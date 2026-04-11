@@ -60,26 +60,38 @@ describe("ingestPullRequestActivity", () => {
           fetchPullRequestReviewComments: async () => [
             createReviewCommentFixture(),
           ],
-          fetchPullRequestTimeline: async () => [
-            createTimelineEventFixture({
-              id: 4001,
-              actorLogin: "octocat",
-              event: "closed",
-              createdAt: "2026-04-10T12:05:00.000Z",
-            }),
-            createTimelineEventFixture({
-              id: 4002,
-              actorLogin: "octocat",
-              event: "ready_for_review",
-              createdAt: "2026-04-10T12:06:00.000Z",
-            }),
-            createTimelineEventFixture({
-              id: 4003,
-              actorLogin: "octocat",
-              event: "labeled",
-              createdAt: "2026-04-10T12:07:00.000Z",
-            }),
-          ],
+           fetchPullRequestTimeline: async () => [
+             createTimelineEventFixture({
+               id: 4001,
+               actorLogin: "octocat",
+               event: "closed",
+               createdAt: "2026-04-10T12:05:00.000Z",
+             }),
+             createTimelineEventFixture({
+               id: 4002,
+               actorLogin: "octocat",
+               event: "ready_for_review",
+               createdAt: "2026-04-10T12:06:00.000Z",
+             }),
+             createCommittedTimelineEventFixture({
+               actorLogin: "octocat",
+               sha: "feedface",
+               message: "Refactor notification bundle\n\nTighten event grouping.",
+               committedAt: "2026-04-10T12:07:00.000Z",
+             }),
+             createTimelineEventFixture({
+               id: 4004,
+               actorLogin: "octocat",
+               event: "convert_to_draft",
+               createdAt: "2026-04-10T12:08:00.000Z",
+             }),
+             createTimelineEventFixture({
+               id: 4003,
+               actorLogin: "octocat",
+               event: "labeled",
+               createdAt: "2026-04-10T12:09:00.000Z",
+             }),
+           ],
           fetchWorkflowRuns: async (_client, requestedPullRequest) => {
             fetchedWorkflowHeadSha = requestedPullRequest.lastSeenHeadSha;
 
@@ -104,8 +116,8 @@ describe("ingestPullRequestActivity", () => {
           },
         }),
       ).resolves.toEqual({
-        processedCount: 8,
-        insertedCount: 8,
+        processedCount: 10,
+        insertedCount: 10,
         duplicateCount: 0,
       });
 
@@ -163,6 +175,20 @@ describe("ingestPullRequestActivity", () => {
           occurredAt: "2026-04-10T12:06:00.000Z",
         },
         {
+          source: "github_issue_timeline",
+          sourceId: "feedface",
+          eventType: "committed",
+          actorLogin: "octocat",
+          occurredAt: "2026-04-10T12:07:00.000Z",
+        },
+        {
+          source: "github_issue_timeline",
+          sourceId: "4004",
+          eventType: "convert_to_draft",
+          actorLogin: "octocat",
+          occurredAt: "2026-04-10T12:08:00.000Z",
+        },
+        {
           source: "github_actions_workflow_run",
           sourceId: "5001:2026-04-10T12:08:00.000Z",
           eventType: "workflow_run",
@@ -181,10 +207,14 @@ describe("ingestPullRequestActivity", () => {
       expect(fetchedWorkflowHeadSha).toBe("abc123");
       expect(JSON.parse(rawEvents[0]?.payloadJson ?? "null")).toEqual(createIssueCommentFixture());
       expect(JSON.parse(rawEvents[6]?.payloadJson ?? "null")).toMatchObject({
+        sha: "feedface",
+        event: "committed",
+      });
+      expect(JSON.parse(rawEvents[8]?.payloadJson ?? "null")).toMatchObject({
         head_sha: "abc123",
         conclusion: "failure",
       });
-      expect(JSON.parse(rawEvents[7]?.payloadJson ?? "null")).toMatchObject({
+      expect(JSON.parse(rawEvents[9]?.payloadJson ?? "null")).toMatchObject({
         head_sha: "abc123",
         conclusion: "success",
       });
@@ -344,6 +374,35 @@ function createTimelineEventFixture(overrides: {
     },
     event: overrides.event,
     created_at: overrides.createdAt,
+  };
+}
+
+function createCommittedTimelineEventFixture(overrides: {
+  actorLogin: string;
+  sha: string;
+  message: string;
+  committedAt: string;
+}): Record<string, unknown> {
+  return {
+    event: "committed",
+    sha: overrides.sha,
+    node_id: `C_${overrides.sha}`,
+    html_url: `https://github.com/acme/octopulse/commit/${overrides.sha}`,
+    author: {
+      login: overrides.actorLogin,
+    },
+    committer: {
+      login: overrides.actorLogin,
+    },
+    commit: {
+      message: overrides.message,
+      author: {
+        date: overrides.committedAt,
+      },
+      committer: {
+        date: overrides.committedAt,
+      },
+    },
   };
 }
 

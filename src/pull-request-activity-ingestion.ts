@@ -23,7 +23,8 @@ const SUPPORTED_TIMELINE_EVENT_TYPES = new Set([
   "merged",
   "reopened",
   "ready_for_review",
-  "converted_to_draft",
+  "convert_to_draft",
+  "committed",
 ]);
 
 type ActivityFetchCursorSource =
@@ -425,11 +426,11 @@ function mapPullRequestTimelineRawEvent(
   return {
     pullRequestId,
     source: ISSUE_TIMELINE_SOURCE,
-    sourceId: readSourceId(value, "pull request timeline event"),
+    sourceId: readPullRequestTimelineSourceId(value, eventType),
     eventType,
-    actorLogin: readNullableLogin(value.actor, "pull request timeline event.actor"),
+    actorLogin: readPullRequestTimelineActorLogin(value, eventType),
     payloadJson: serializePayload(data, "pull request timeline event"),
-    occurredAt: readString(value.created_at, "pull request timeline event.created_at"),
+    occurredAt: readPullRequestTimelineOccurredAt(value, eventType),
   };
 }
 
@@ -460,6 +461,59 @@ function mapWorkflowRunRawEvent(
   };
 }
 
+function readPullRequestTimelineSourceId(
+  value: Record<string, unknown>,
+  eventType: string,
+): string {
+  if (eventType === "committed") {
+    const sha = readOptionalNonEmptyString(value.sha);
+
+    if (sha !== null) {
+      return sha;
+    }
+  }
+
+  return readSourceId(value, "pull request timeline event");
+}
+
+function readPullRequestTimelineActorLogin(
+  value: Record<string, unknown>,
+  eventType: string,
+): string | null {
+  if (eventType === "committed") {
+    return (
+      readNullableLogin(value.committer, "pull request timeline event.committer") ??
+      readNullableLogin(value.author, "pull request timeline event.author")
+    );
+  }
+
+  return readNullableLogin(value.actor, "pull request timeline event.actor");
+}
+
+function readPullRequestTimelineOccurredAt(
+  value: Record<string, unknown>,
+  eventType: string,
+): string {
+  if (eventType !== "committed") {
+    return readString(value.created_at, "pull request timeline event.created_at");
+  }
+
+  const occurredAt =
+    readOptionalNonEmptyString(value.created_at) ??
+    readOptionalNestedString(readOptionalRecord(value.commit)?.committer, "date") ??
+    readOptionalNestedString(readOptionalRecord(value.commit)?.author, "date") ??
+    readOptionalNestedString(value.committer, "date") ??
+    readOptionalNestedString(value.author, "date");
+
+  if (occurredAt !== null) {
+    return occurredAt;
+  }
+
+  throw new PullRequestActivityIngestionError(
+    "pull request timeline event.committed must include created_at or commit author/committer date",
+  );
+}
+
 function readArray(value: unknown, fieldName: string): unknown[] {
   if (!Array.isArray(value)) {
     throw new PullRequestActivityIngestionError(`${fieldName} must be an array`);
@@ -476,6 +530,14 @@ function readWorkflowRunsResponse(value: unknown): unknown[] {
 function requireRecord(value: unknown, fieldName: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new PullRequestActivityIngestionError(`${fieldName} must be an object`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readOptionalRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
   }
 
   return value as Record<string, unknown>;
@@ -522,6 +584,20 @@ function readNullableLogin(value: unknown, fieldName: string): string | null {
   }
 
   return readString(login, `${fieldName}.login`);
+}
+
+function readOptionalNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readOptionalNestedString(value: unknown, fieldName: string): string | null {
+  const record = readOptionalRecord(value);
+
+  if (record === null) {
+    return null;
+  }
+
+  return readOptionalNonEmptyString(record[fieldName]);
 }
 
 function readActivityFetchCursor(
