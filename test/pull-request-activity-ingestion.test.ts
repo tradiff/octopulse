@@ -13,6 +13,14 @@ import {
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
 import { RawEventRepository } from "../src/raw-event-repository.js";
+import {
+  createCommittedTimelineEventFixture,
+  createIssueCommentFixture,
+  createReviewCommentFixture,
+  createReviewFixture,
+  createTimelineEventFixture,
+  createWorkflowRunFixture,
+} from "./fixtures/github-pull-request-activity.js";
 
 const tempDirs: string[] = [];
 
@@ -31,9 +39,7 @@ describe("ingestPullRequestActivity", () => {
     try {
       await expect(
         ingestPullRequestActivity(database, { kind: "fake-client" }, pullRequest, {
-          fetchIssueComments: async () => [
-            createIssueCommentFixture(),
-          ],
+          fetchIssueComments: async () => [createIssueCommentFixture()],
           fetchPullRequestReviews: async () => [
             createReviewFixture({
               id: 2001,
@@ -58,40 +64,42 @@ describe("ingestPullRequestActivity", () => {
             }),
           ],
           fetchPullRequestReviewComments: async () => [
-            createReviewCommentFixture(),
+            createReviewCommentFixture({
+              actorLogin: "dave",
+            }),
           ],
-           fetchPullRequestTimeline: async () => [
-             createTimelineEventFixture({
-               id: 4001,
-               actorLogin: "octocat",
-               event: "closed",
-               createdAt: "2026-04-10T12:05:00.000Z",
-             }),
-             createTimelineEventFixture({
-               id: 4002,
-               actorLogin: "octocat",
-               event: "ready_for_review",
-               createdAt: "2026-04-10T12:06:00.000Z",
-             }),
-             createCommittedTimelineEventFixture({
-               actorLogin: "octocat",
-               sha: "feedface",
-               message: "Refactor notification bundle\n\nTighten event grouping.",
-               committedAt: "2026-04-10T12:07:00.000Z",
-             }),
-             createTimelineEventFixture({
-               id: 4004,
-               actorLogin: "octocat",
-               event: "convert_to_draft",
-               createdAt: "2026-04-10T12:08:00.000Z",
-             }),
-             createTimelineEventFixture({
-               id: 4003,
-               actorLogin: "octocat",
-               event: "labeled",
-               createdAt: "2026-04-10T12:09:00.000Z",
-             }),
-           ],
+          fetchPullRequestTimeline: async () => [
+            createTimelineEventFixture({
+              id: 4001,
+              actorLogin: "octocat",
+              event: "closed",
+              createdAt: "2026-04-10T12:05:00.000Z",
+            }),
+            createTimelineEventFixture({
+              id: 4002,
+              actorLogin: "octocat",
+              event: "ready_for_review",
+              createdAt: "2026-04-10T12:06:00.000Z",
+            }),
+            createCommittedTimelineEventFixture({
+              actorLogin: "octocat",
+              sha: "feedface",
+              message: "Refactor notification bundle\n\nTighten event grouping.",
+              committedAt: "2026-04-10T12:07:00.000Z",
+            }),
+            createTimelineEventFixture({
+              id: 4004,
+              actorLogin: "octocat",
+              event: "convert_to_draft",
+              createdAt: "2026-04-10T12:08:00.000Z",
+            }),
+            createTimelineEventFixture({
+              id: 4003,
+              actorLogin: "octocat",
+              event: "labeled",
+              createdAt: "2026-04-10T12:09:00.000Z",
+            }),
+          ],
           fetchWorkflowRuns: async (_client, requestedPullRequest) => {
             fetchedWorkflowHeadSha = requestedPullRequest.lastSeenHeadSha;
 
@@ -239,7 +247,7 @@ describe("ingestPullRequestActivity", () => {
           fetchPullRequestReviews: async () => [],
           fetchPullRequestReviewComments: async (_client, _pullRequest, since) => {
             reviewCommentSinceValues.push(since);
-            return [createReviewCommentFixture()];
+            return [createReviewCommentFixture({ actorLogin: "dave" })];
           },
           fetchPullRequestTimeline: async () => [],
           fetchWorkflowRuns: async () => [],
@@ -259,7 +267,7 @@ describe("ingestPullRequestActivity", () => {
           fetchPullRequestReviews: async () => [],
           fetchPullRequestReviewComments: async (_client, _pullRequest, since) => {
             reviewCommentSinceValues.push(since);
-            return [createReviewCommentFixture()];
+            return [createReviewCommentFixture({ actorLogin: "dave" })];
           },
           fetchPullRequestTimeline: async () => [],
           fetchWorkflowRuns: async () => [],
@@ -315,118 +323,6 @@ function createTempDir(prefix: string): string {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), prefix));
   tempDirs.push(tempDir);
   return tempDir;
-}
-
-function createIssueCommentFixture(): Record<string, unknown> {
-  return {
-    id: 1001,
-    user: {
-      login: "alice",
-    },
-    created_at: "2026-04-10T12:01:00.000Z",
-    body: "Ship it",
-    html_url: "https://github.com/acme/octopulse/pull/7#issuecomment-1001",
-  };
-}
-
-function createReviewFixture(overrides: {
-  id: number;
-  actorLogin: string;
-  state: string;
-  submittedAt: string | null;
-  body: string;
-}): Record<string, unknown> {
-  return {
-    id: overrides.id,
-    user: {
-      login: overrides.actorLogin,
-    },
-    state: overrides.state,
-    submitted_at: overrides.submittedAt,
-    body: overrides.body,
-    html_url: `https://github.com/acme/octopulse/pull/7#pullrequestreview-${overrides.id}`,
-  };
-}
-
-function createReviewCommentFixture(): Record<string, unknown> {
-  return {
-    id: 3001,
-    user: {
-      login: "dave",
-    },
-    created_at: "2026-04-10T12:04:00.000Z",
-    body: "Inline note",
-    path: "src/main.ts",
-    html_url: "https://github.com/acme/octopulse/pull/7#discussion_r3001",
-  };
-}
-
-function createTimelineEventFixture(overrides: {
-  id: number;
-  actorLogin: string;
-  event: string;
-  createdAt: string;
-}): Record<string, unknown> {
-  return {
-    id: overrides.id,
-    actor: {
-      login: overrides.actorLogin,
-    },
-    event: overrides.event,
-    created_at: overrides.createdAt,
-  };
-}
-
-function createCommittedTimelineEventFixture(overrides: {
-  actorLogin: string;
-  sha: string;
-  message: string;
-  committedAt: string;
-}): Record<string, unknown> {
-  return {
-    event: "committed",
-    sha: overrides.sha,
-    node_id: `C_${overrides.sha}`,
-    html_url: `https://github.com/acme/octopulse/commit/${overrides.sha}`,
-    author: {
-      login: overrides.actorLogin,
-    },
-    committer: {
-      login: overrides.actorLogin,
-    },
-    commit: {
-      message: overrides.message,
-      author: {
-        date: overrides.committedAt,
-      },
-      committer: {
-        date: overrides.committedAt,
-      },
-    },
-  };
-}
-
-function createWorkflowRunFixture(overrides: {
-  id: number;
-  actorLogin: string;
-  headSha: string;
-  status: string;
-  conclusion: string | null;
-  updatedAt: string;
-}): Record<string, unknown> {
-  return {
-    id: overrides.id,
-    name: `CI run ${overrides.id}`,
-    head_sha: overrides.headSha,
-    status: overrides.status,
-    conclusion: overrides.conclusion,
-    actor: {
-      login: overrides.actorLogin,
-    },
-    updated_at: overrides.updatedAt,
-    created_at: overrides.updatedAt,
-    html_url: `https://github.com/acme/octopulse/actions/runs/${overrides.id}`,
-  };
 }
 
 function createPullRequestInput(

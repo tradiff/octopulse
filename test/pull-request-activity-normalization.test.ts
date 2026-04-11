@@ -17,6 +17,14 @@ import {
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
 import { RawEventRepository } from "../src/raw-event-repository.js";
+import {
+  createCommittedTimelineEventFixture,
+  createIssueCommentFixture,
+  createReviewCommentFixture,
+  createReviewFixture,
+  createTimelineEventFixture,
+  createWorkflowRunFixture,
+} from "./fixtures/github-pull-request-activity.js";
 
 const tempDirs: string[] = [];
 
@@ -73,7 +81,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "issue_comment",
         actorLogin: "alice",
         payloadJson: JSON.stringify(
-          createIssueCommentPayload({
+          createIssueCommentFixture({
             id: 1001,
             actorLogin: "alice",
             actorType: "User",
@@ -90,7 +98,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "issue_comment",
         actorLogin: "renovate[bot]",
         payloadJson: JSON.stringify(
-          createIssueCommentPayload({
+          createIssueCommentFixture({
             id: 1002,
             actorLogin: "renovate[bot]",
             actorType: "Bot",
@@ -107,7 +115,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "pull_request_review",
         actorLogin: "bob",
         payloadJson: JSON.stringify(
-          createReviewPayload({
+          createReviewFixture({
             id: 2001,
             actorLogin: "bob",
             actorType: "User",
@@ -125,7 +133,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "pull_request_review",
         actorLogin: "carol",
         payloadJson: JSON.stringify(
-          createReviewPayload({
+          createReviewFixture({
             id: 2002,
             actorLogin: "carol",
             actorType: "User",
@@ -143,7 +151,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "pull_request_review",
         actorLogin: "review-bot[bot]",
         payloadJson: JSON.stringify(
-          createReviewPayload({
+          createReviewFixture({
             id: 2003,
             actorLogin: "review-bot[bot]",
             actorType: "Bot",
@@ -161,7 +169,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "pull_request_review_comment",
         actorLogin: "review-bot[bot]",
         payloadJson: JSON.stringify(
-          createReviewCommentPayload({
+          createReviewCommentFixture({
             id: 3001,
             actorLogin: "review-bot[bot]",
             actorType: "Bot",
@@ -197,7 +205,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "workflow_run",
         actorLogin: "github-actions[bot]",
         payloadJson: JSON.stringify(
-          createWorkflowRunPayload({
+          createWorkflowRunFixture({
             id: 4001,
             actorLogin: "github-actions[bot]",
             actorType: "Bot",
@@ -344,7 +352,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "workflow_run",
         actorLogin: "octocat",
         payloadJson: JSON.stringify(
-          createWorkflowRunPayload({
+          createWorkflowRunFixture({
             id: 5101,
             actorLogin: "octocat",
             actorType: "User",
@@ -363,7 +371,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "workflow_run",
         actorLogin: "octocat",
         payloadJson: JSON.stringify(
-          createWorkflowRunPayload({
+          createWorkflowRunFixture({
             id: 5102,
             actorLogin: "octocat",
             actorType: "User",
@@ -422,7 +430,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "workflow_run",
         actorLogin: "octocat",
         payloadJson: JSON.stringify(
-          createWorkflowRunPayload({
+          createWorkflowRunFixture({
             id: 5201,
             actorLogin: "octocat",
             actorType: "User",
@@ -448,7 +456,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "workflow_run",
         actorLogin: "octocat",
         payloadJson: JSON.stringify(
-          createWorkflowRunPayload({
+          createWorkflowRunFixture({
             id: 5201,
             actorLogin: "octocat",
             actorType: "User",
@@ -515,7 +523,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "workflow_run",
         actorLogin: "octocat",
         payloadJson: JSON.stringify(
-          createWorkflowRunPayload({
+          createWorkflowRunFixture({
             id: 5301,
             actorLogin: "octocat",
             actorType: "User",
@@ -541,7 +549,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "workflow_run",
         actorLogin: "octocat",
         payloadJson: JSON.stringify(
-          createWorkflowRunPayload({
+          createWorkflowRunFixture({
             id: 5302,
             actorLogin: "octocat",
             actorType: "User",
@@ -596,7 +604,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "closed",
         actorLogin: "alice",
         payloadJson: JSON.stringify(
-          createTimelineEventPayload({
+          createTimelineEventFixture({
             id: 4101,
             actorLogin: "alice",
             actorType: "User",
@@ -613,7 +621,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "merged",
         actorLogin: "bob",
         payloadJson: JSON.stringify(
-          createTimelineEventPayload({
+          createTimelineEventFixture({
             id: 4102,
             actorLogin: "bob",
             actorType: "User",
@@ -630,7 +638,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "reopened",
         actorLogin: "carol",
         payloadJson: JSON.stringify(
-          createTimelineEventPayload({
+          createTimelineEventFixture({
             id: 4103,
             actorLogin: "carol",
             actorType: "User",
@@ -647,7 +655,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "ready_for_review",
         actorLogin: "dave",
         payloadJson: JSON.stringify(
-          createTimelineEventPayload({
+          createTimelineEventFixture({
             id: 4104,
             actorLogin: "dave",
             actorType: "User",
@@ -664,7 +672,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "convert_to_draft",
         actorLogin: "erin",
         payloadJson: JSON.stringify(
-          createTimelineEventPayload({
+          createTimelineEventFixture({
             id: 4105,
             actorLogin: "erin",
             actorType: "User",
@@ -681,7 +689,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "committed",
         actorLogin: "frank",
         payloadJson: JSON.stringify(
-          createCommittedTimelinePayload({
+          createCommittedTimelineEventFixture({
             actorLogin: "frank",
             actorType: "User",
             sha: "feedface",
@@ -765,7 +773,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "pull_request_review",
         actorLogin: "alice",
         payloadJson: JSON.stringify(
-          createReviewPayload({
+          createReviewFixture({
             id: 2101,
             actorLogin: "alice",
             actorType: "User",
@@ -783,7 +791,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "pull_request_review",
         actorLogin: "bob",
         payloadJson: JSON.stringify(
-          createReviewPayload({
+          createReviewFixture({
             id: 2102,
             actorLogin: "bob",
             actorType: "User",
@@ -801,7 +809,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "pull_request_review",
         actorLogin: "carol",
         payloadJson: JSON.stringify(
-          createReviewPayload({
+          createReviewFixture({
             id: 2103,
             actorLogin: "carol",
             actorType: "User",
@@ -819,7 +827,7 @@ describe("normalizePullRequestActivity", () => {
         eventType: "pull_request_review",
         actorLogin: "dave",
         payloadJson: JSON.stringify(
-          createReviewPayload({
+          createReviewFixture({
             id: 2104,
             actorLogin: "dave",
             actorType: "User",
@@ -917,142 +925,5 @@ function createPullRequestInput(
   return {
     ...input,
     ...overrides,
-  };
-}
-
-function createIssueCommentPayload(overrides: {
-  id: number;
-  actorLogin: string;
-  actorType: string;
-  body: string;
-  createdAt: string;
-}): Record<string, unknown> {
-  return {
-    id: overrides.id,
-    user: {
-      login: overrides.actorLogin,
-      type: overrides.actorType,
-    },
-    body: overrides.body,
-    created_at: overrides.createdAt,
-    html_url: `https://github.com/acme/octopulse/pull/7#issuecomment-${overrides.id}`,
-  };
-}
-
-function createReviewPayload(overrides: {
-  id: number;
-  actorLogin: string;
-  actorType: string;
-  state: string;
-  body: string;
-  submittedAt: string;
-}): Record<string, unknown> {
-  return {
-    id: overrides.id,
-    user: {
-      login: overrides.actorLogin,
-      type: overrides.actorType,
-    },
-    state: overrides.state,
-    body: overrides.body,
-    submitted_at: overrides.submittedAt,
-    html_url: `https://github.com/acme/octopulse/pull/7#pullrequestreview-${overrides.id}`,
-  };
-}
-
-function createReviewCommentPayload(overrides: {
-  id: number;
-  actorLogin: string;
-  actorType: string;
-  reviewId: number;
-  body: string;
-  path: string;
-  createdAt: string;
-}): Record<string, unknown> {
-  return {
-    id: overrides.id,
-    user: {
-      login: overrides.actorLogin,
-      type: overrides.actorType,
-    },
-    pull_request_review_id: overrides.reviewId,
-    body: overrides.body,
-    path: overrides.path,
-    created_at: overrides.createdAt,
-    html_url: `https://github.com/acme/octopulse/pull/7#discussion_r${overrides.id}`,
-  };
-}
-
-function createTimelineEventPayload(overrides: {
-  id: number;
-  actorLogin: string;
-  actorType: string;
-  event: string;
-  createdAt: string;
-}): Record<string, unknown> {
-  return {
-    id: overrides.id,
-    actor: {
-      login: overrides.actorLogin,
-      type: overrides.actorType,
-    },
-    event: overrides.event,
-    created_at: overrides.createdAt,
-  };
-}
-
-function createCommittedTimelinePayload(overrides: {
-  actorLogin: string;
-  actorType: string;
-  sha: string;
-  message: string;
-  committedAt: string;
-}): Record<string, unknown> {
-  return {
-    event: "committed",
-    sha: overrides.sha,
-    node_id: `C_${overrides.sha}`,
-    html_url: `https://github.com/acme/octopulse/commit/${overrides.sha}`,
-    author: {
-      login: overrides.actorLogin,
-      type: overrides.actorType,
-    },
-    committer: {
-      login: overrides.actorLogin,
-      type: overrides.actorType,
-    },
-    commit: {
-      message: overrides.message,
-      author: {
-        date: overrides.committedAt,
-      },
-      committer: {
-        date: overrides.committedAt,
-      },
-    },
-  };
-}
-
-function createWorkflowRunPayload(overrides: {
-  id: number;
-  actorLogin: string;
-  actorType: string;
-  headSha: string;
-  status: string;
-  conclusion: string | null;
-  updatedAt: string;
-}): Record<string, unknown> {
-  return {
-    id: overrides.id,
-    name: "CI",
-    actor: {
-      login: overrides.actorLogin,
-      type: overrides.actorType,
-    },
-    head_sha: overrides.headSha,
-    status: overrides.status,
-    conclusion: overrides.conclusion,
-    updated_at: overrides.updatedAt,
-    html_url: `https://github.com/acme/octopulse/actions/runs/${overrides.id}`,
   };
 }

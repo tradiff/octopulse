@@ -17,6 +17,13 @@ import {
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
 import { RawEventRepository } from "../src/raw-event-repository.js";
+import {
+  createIssueCommentFixture,
+  createReviewCommentFixture,
+  createReviewFixture,
+  createTimelineEventFixture,
+  createWorkflowRunFixture,
+} from "./fixtures/github-pull-request-activity.js";
 
 const POLLING_INTERVAL_MS = 60_000;
 const OBSERVED_AT = "2026-04-10T12:00:00.000Z";
@@ -138,51 +145,43 @@ describe("pollTrackedPullRequests", () => {
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
-              {
+              createIssueCommentFixture({
                 id: 8101,
-                user: {
-                  login: "alice",
-                },
-                created_at: "2026-04-10T12:01:00.000Z",
-              },
+                actorLogin: "alice",
+                createdAt: "2026-04-10T12:01:00.000Z",
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
           return {
             data: [
-              {
+              createReviewFixture({
                 id: 8201,
-                user: {
-                  login: "bob",
-                },
+                actorLogin: "bob",
                 state: "APPROVED",
-                submitted_at: "2026-04-10T12:02:00.000Z",
-              },
+                submittedAt: "2026-04-10T12:02:00.000Z",
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
           return {
             data: [
-              {
+              createReviewCommentFixture({
                 id: 8301,
-                user: {
-                  login: "carol",
-                },
-                created_at: "2026-04-10T12:03:00.000Z",
-              },
+                actorLogin: "carol",
+                createdAt: "2026-04-10T12:03:00.000Z",
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
           return {
             data: [
-              {
+              createTimelineEventFixture({
                 id: 8401,
-                actor: {
-                  login: "octocat",
-                },
+                actorLogin: "octocat",
                 event: "merged",
-                created_at: "2026-04-10T12:04:00.000Z",
-              },
+                createdAt: "2026-04-10T12:04:00.000Z",
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/actions/runs":
@@ -196,26 +195,24 @@ describe("pollTrackedPullRequests", () => {
             data: {
               total_count: 2,
               workflow_runs: [
-                {
+                createWorkflowRunFixture({
                   id: 8501,
-                  head_sha: "abc123",
-                  actor: {
-                    login: "octocat",
-                  },
+                  actorLogin: "octocat",
+                  actorType: "User",
+                  headSha: "abc123",
                   status: "completed",
                   conclusion: "failure",
-                  updated_at: "2026-04-10T12:05:00.000Z",
-                },
-                {
+                  updatedAt: "2026-04-10T12:05:00.000Z",
+                }),
+                createWorkflowRunFixture({
                   id: 8502,
-                  head_sha: "abc123",
-                  actor: {
-                    login: "octocat",
-                  },
+                  actorLogin: "octocat",
+                  actorType: "User",
+                  headSha: "abc123",
                   status: "completed",
                   conclusion: "success",
-                  updated_at: "2026-04-10T12:06:00.000Z",
-                },
+                  updatedAt: "2026-04-10T12:06:00.000Z",
+                }),
               ],
             },
           };
@@ -356,13 +353,11 @@ describe("pollTrackedPullRequests", () => {
             data:
               since === undefined
                 ? [
-                    {
+                    createIssueCommentFixture({
                       id: 9101,
-                      user: {
-                        login: "alice",
-                      },
-                      created_at: "2026-04-10T12:11:00.000Z",
-                    },
+                      actorLogin: "alice",
+                      createdAt: "2026-04-10T12:11:00.000Z",
+                    }),
                   ]
                 : [],
           };
@@ -370,14 +365,12 @@ describe("pollTrackedPullRequests", () => {
         case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
           return {
             data: [
-              {
+              createReviewFixture({
                 id: 9201,
-                user: {
-                  login: "bob",
-                },
+                actorLogin: "bob",
                 state: "APPROVED",
-                submitted_at: "2026-04-10T12:12:00.000Z",
-              },
+                submittedAt: "2026-04-10T12:12:00.000Z",
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments": {
@@ -388,13 +381,11 @@ describe("pollTrackedPullRequests", () => {
             data:
               since === undefined
                 ? [
-                    {
+                    createReviewCommentFixture({
                       id: 9301,
-                      user: {
-                        login: "carol",
-                      },
-                      created_at: "2026-04-10T12:13:00.000Z",
-                    },
+                      actorLogin: "carol",
+                      createdAt: "2026-04-10T12:13:00.000Z",
+                    }),
                   ]
                 : [],
           };
@@ -402,14 +393,12 @@ describe("pollTrackedPullRequests", () => {
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
           return {
             data: [
-              {
+              createTimelineEventFixture({
                 id: 9401,
-                actor: {
-                  login: "octocat",
-                },
+                actorLogin: "octocat",
                 event: "merged",
-                created_at: "2026-04-10T12:14:00.000Z",
-              },
+                createdAt: "2026-04-10T12:14:00.000Z",
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/actions/runs":
@@ -417,16 +406,15 @@ describe("pollTrackedPullRequests", () => {
             data: {
               total_count: 1,
               workflow_runs: [
-                {
+                createWorkflowRunFixture({
                   id: 9501,
-                  head_sha: "abc123",
-                  actor: {
-                    login: "octocat",
-                  },
+                  actorLogin: "octocat",
+                  actorType: "User",
+                  headSha: "abc123",
                   status: "completed",
                   conclusion: "success",
-                  updated_at: "2026-04-10T12:15:00.000Z",
-                },
+                  updatedAt: "2026-04-10T12:15:00.000Z",
+                }),
               ],
             },
           };
@@ -573,51 +561,42 @@ describe("pollTrackedPullRequests", () => {
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
-              {
+              createIssueCommentFixture({
                 id: 9601,
-                user: {
-                  login: "alice",
-                },
-                created_at: "2026-04-10T12:21:00.000Z",
-                updated_at: includeEditedBodies
+                actorLogin: "alice",
+                createdAt: "2026-04-10T12:21:00.000Z",
+                updatedAt: includeEditedBodies
                   ? "2026-04-10T12:25:00.000Z"
                   : "2026-04-10T12:21:00.000Z",
                 body: includeEditedBodies ? "Ship it now" : "Ship it",
-                html_url: "https://github.com/acme/octopulse/pull/7#issuecomment-9601",
-              },
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
           return {
             data: [
-              {
+              createReviewFixture({
                 id: 9602,
-                user: {
-                  login: "bob",
-                },
+                actorLogin: "bob",
                 state: "APPROVED",
-                submitted_at: "2026-04-10T12:22:00.000Z",
+                submittedAt: "2026-04-10T12:22:00.000Z",
                 body: includeEditedBodies ? "Still looks great" : "Looks good",
-                html_url: "https://github.com/acme/octopulse/pull/7#pullrequestreview-9602",
-              },
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
           return {
             data: [
-              {
+              createReviewCommentFixture({
                 id: 9603,
-                user: {
-                  login: "carol",
-                },
-                created_at: "2026-04-10T12:23:00.000Z",
-                updated_at: includeEditedBodies
+                actorLogin: "carol",
+                createdAt: "2026-04-10T12:23:00.000Z",
+                updatedAt: includeEditedBodies
                   ? "2026-04-10T12:26:00.000Z"
                   : "2026-04-10T12:23:00.000Z",
                 body: includeEditedBodies ? "Inline note updated" : "Inline note",
                 path: "src/main.ts",
-                html_url: "https://github.com/acme/octopulse/pull/7#discussion_r9603",
-              },
+              }),
             ],
           };
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
