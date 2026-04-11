@@ -38,6 +38,10 @@ export interface IngestPullRequestActivityOptions<TClient = Octokit> {
     client: TClient,
     pullRequest: PullRequestRecord,
   ) => Promise<unknown[]>;
+  fetchWorkflowRuns?: (
+    client: TClient,
+    pullRequest: PullRequestRecord,
+  ) => Promise<unknown[]>;
 }
 
 export interface IngestPullRequestActivityResult {
@@ -88,8 +92,20 @@ export async function ingestPullRequestActivity<TClient>(
         client as unknown as Octokit,
         pullRequest,
       ) as Promise<unknown[]>);
+  const fetchWorkflowRuns =
+    options.fetchWorkflowRuns ??
+    ((client: TClient, pullRequest: PullRequestRecord) =>
+      fetchWorkflowRunsFromGitHub(
+        client as unknown as Octokit,
+        pullRequest,
+      ) as Promise<unknown[]>);
+  const headSha = pullRequest.lastSeenHeadSha;
+  const workflowRunsPromise =
+    headSha === null
+      ? Promise.resolve<unknown[]>([])
+      : loadActivity("workflow runs", pullRequest, () => fetchWorkflowRuns(client, pullRequest));
 
-  const [issueComments, reviews, reviewComments, timelineEvents] = await Promise.all([
+  const [issueComments, reviews, reviewComments, timelineEvents, workflowRuns] = await Promise.all([
     loadActivity("issue comments", pullRequest, () => fetchIssueComments(client, pullRequest)),
     loadActivity("pull request reviews", pullRequest, () => fetchPullRequestReviews(client, pullRequest)),
     loadActivity("pull request review comments", pullRequest, () =>
@@ -98,6 +114,7 @@ export async function ingestPullRequestActivity<TClient>(
     loadActivity("pull request timeline events", pullRequest, () =>
       fetchPullRequestTimeline(client, pullRequest),
     ),
+    workflowRunsPromise,
   ]);
   const rawEvents = [
     ...issueComments.map((comment) => mapIssueCommentRawEvent(comment, pullRequest.id)),
@@ -110,6 +127,9 @@ export async function ingestPullRequestActivity<TClient>(
       const rawEvent = mapPullRequestTimelineRawEvent(event, pullRequest.id);
       return rawEvent ? [rawEvent] : [];
     }),
+    ...(headSha === null
+      ? []
+      : workflowRuns.map((workflowRun) => mapWorkflowRunRawEvent(workflowRun, pullRequest.id, headSha))),
   ];
 
   let insertedCount = 0;
@@ -204,6 +224,36 @@ async function fetchPullRequestTimelineFromGitHub(
     },
     "pull request timeline response",
   );
+}
+
+async function fetchWorkflowRunsFromGitHub(
+  client: Octokit,
+  pullRequest: Pick<PullRequestRecord, "repositoryOwner" | "repositoryName" | "lastSeenHeadSha">,
+): Promise<unknown[]> {
+  const headSha = pullRequest.lastSeenHeadSha;
+
+  if (headSha === null) {
+    return [];
+  }
+
+  const items: unknown[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const response = await client.request("GET /repos/{owner}/{repo}/actions/runs", {
+      owner: pullRequest.repositoryOwner,
+      repo: pullRequest.repositoryName,
+      head_sha: headSha,
+      per_page: GITHUB_PAGE_SIZE,
+      page,
+      headers: GITHUB_API_HEADERS,
+    });
+    const pageItems = readWorkflowRunsResponse(response.data as unknown);
+    items.push(...pageItems);
+
+    if (pageItems.length < GITHUB_PAGE_SIZE) {
+      return items;
+    }
+  }
 }
 
 async function fetchAllPagesFromGitHub(
@@ -324,12 +374,44 @@ function mapPullRequestTimelineRawEvent(
   };
 }
 
+function mapWorkflowRunRawEvent(
+  data: unknown,
+  pullRequestId: number,
+  headSha: string,
+): InsertRawEventInput {
+  const value = requireRecord(data, "workflow run");
+  const workflowRunHeadSha = readString(value.head_sha, "workflow run.head_sha");
+
+  if (workflowRunHeadSha !== headSha) {
+    throw new PullRequestActivityIngestionError(
+      `workflow run.head_sha must match pull request head SHA ${headSha}`,
+    );
+  }
+
+  const updatedAt = readString(value.updated_at, "workflow run.updated_at");
+
+  return {
+    pullRequestId,
+    source: "github_actions_workflow_run",
+    sourceId: `${readSourceId(value, "workflow run")}:${updatedAt}`,
+    eventType: "workflow_run",
+    actorLogin: readNullableLogin(value.actor, "workflow run.actor"),
+    payloadJson: serializePayload(data, "workflow run"),
+    occurredAt: updatedAt,
+  };
+}
+
 function readArray(value: unknown, fieldName: string): unknown[] {
   if (!Array.isArray(value)) {
     throw new PullRequestActivityIngestionError(`${fieldName} must be an array`);
   }
 
   return value;
+}
+
+function readWorkflowRunsResponse(value: unknown): unknown[] {
+  const response = requireRecord(value, "workflow runs response");
+  return readArray(response.workflow_runs, "workflow runs response.workflow_runs");
 }
 
 function requireRecord(value: unknown, fieldName: string): Record<string, unknown> {

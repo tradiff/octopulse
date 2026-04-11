@@ -26,6 +26,7 @@ describe("ingestPullRequestActivity", () => {
   it("persists raw pull request activity with source ids", async () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);
+    let fetchedWorkflowHeadSha: string | null = null;
 
     try {
       await expect(
@@ -79,10 +80,32 @@ describe("ingestPullRequestActivity", () => {
               createdAt: "2026-04-10T12:07:00.000Z",
             }),
           ],
+          fetchWorkflowRuns: async (_client, requestedPullRequest) => {
+            fetchedWorkflowHeadSha = requestedPullRequest.lastSeenHeadSha;
+
+            return [
+              createWorkflowRunFixture({
+                id: 5001,
+                actorLogin: "octocat",
+                headSha: "abc123",
+                status: "completed",
+                conclusion: "failure",
+                updatedAt: "2026-04-10T12:08:00.000Z",
+              }),
+              createWorkflowRunFixture({
+                id: 5002,
+                actorLogin: "octocat",
+                headSha: "abc123",
+                status: "completed",
+                conclusion: "success",
+                updatedAt: "2026-04-10T12:09:00.000Z",
+              }),
+            ];
+          },
         }),
       ).resolves.toEqual({
-        processedCount: 6,
-        insertedCount: 6,
+        processedCount: 8,
+        insertedCount: 8,
         duplicateCount: 0,
       });
 
@@ -139,9 +162,32 @@ describe("ingestPullRequestActivity", () => {
           actorLogin: "octocat",
           occurredAt: "2026-04-10T12:06:00.000Z",
         },
+        {
+          source: "github_actions_workflow_run",
+          sourceId: "5001:2026-04-10T12:08:00.000Z",
+          eventType: "workflow_run",
+          actorLogin: "octocat",
+          occurredAt: "2026-04-10T12:08:00.000Z",
+        },
+        {
+          source: "github_actions_workflow_run",
+          sourceId: "5002:2026-04-10T12:09:00.000Z",
+          eventType: "workflow_run",
+          actorLogin: "octocat",
+          occurredAt: "2026-04-10T12:09:00.000Z",
+        },
       ]);
 
+      expect(fetchedWorkflowHeadSha).toBe("abc123");
       expect(JSON.parse(rawEvents[0]?.payloadJson ?? "null")).toEqual(createIssueCommentFixture());
+      expect(JSON.parse(rawEvents[6]?.payloadJson ?? "null")).toMatchObject({
+        head_sha: "abc123",
+        conclusion: "failure",
+      });
+      expect(JSON.parse(rawEvents[7]?.payloadJson ?? "null")).toMatchObject({
+        head_sha: "abc123",
+        conclusion: "success",
+      });
     } finally {
       database.close();
     }
@@ -225,6 +271,29 @@ function createTimelineEventFixture(overrides: {
     },
     event: overrides.event,
     created_at: overrides.createdAt,
+  };
+}
+
+function createWorkflowRunFixture(overrides: {
+  id: number;
+  actorLogin: string;
+  headSha: string;
+  status: string;
+  conclusion: string | null;
+  updatedAt: string;
+}): Record<string, unknown> {
+  return {
+    id: overrides.id,
+    name: `CI run ${overrides.id}`,
+    head_sha: overrides.headSha,
+    status: overrides.status,
+    conclusion: overrides.conclusion,
+    actor: {
+      login: overrides.actorLogin,
+    },
+    updated_at: overrides.updatedAt,
+    created_at: overrides.updatedAt,
+    html_url: `https://github.com/acme/octopulse/actions/runs/${overrides.id}`,
   };
 }
 

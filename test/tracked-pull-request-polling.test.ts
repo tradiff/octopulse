@@ -131,7 +131,7 @@ describe("pollTrackedPullRequests", () => {
   it("ingests raw pull request activity by default during polling", async () => {
     const { database, repository } = createRepository();
     const rawEventRepository = new RawEventRepository(database);
-    const request = vi.fn(async (route: string) => {
+    const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
       switch (route) {
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
@@ -183,6 +183,40 @@ describe("pollTrackedPullRequests", () => {
               },
             ],
           };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          expect(parameters).toMatchObject({
+            owner: "acme",
+            repo: "octopulse",
+            head_sha: "abc123",
+          });
+
+          return {
+            data: {
+              total_count: 2,
+              workflow_runs: [
+                {
+                  id: 8501,
+                  head_sha: "abc123",
+                  actor: {
+                    login: "octocat",
+                  },
+                  status: "completed",
+                  conclusion: "failure",
+                  updated_at: "2026-04-10T12:05:00.000Z",
+                },
+                {
+                  id: 8502,
+                  head_sha: "abc123",
+                  actor: {
+                    login: "octocat",
+                  },
+                  status: "completed",
+                  conclusion: "success",
+                  updated_at: "2026-04-10T12:06:00.000Z",
+                },
+              ],
+            },
+          };
         default:
           throw new Error(`Unexpected GitHub route: ${route}`);
       }
@@ -211,7 +245,17 @@ describe("pollTrackedPullRequests", () => {
         failedCount: 0,
       });
 
-      expect(request).toHaveBeenCalledTimes(4);
+      expect(request).toHaveBeenCalledTimes(5);
+      expect(request).toHaveBeenCalledWith(
+        "GET /repos/{owner}/{repo}/actions/runs",
+        expect.objectContaining({
+          owner: "acme",
+          repo: "octopulse",
+          head_sha: "abc123",
+          page: 1,
+          per_page: 100,
+        }),
+      );
 
       const pullRequest = repository.listTrackedPullRequests()[0];
 
@@ -242,6 +286,16 @@ describe("pollTrackedPullRequests", () => {
           source: "github_issue_timeline",
           sourceId: "8401",
           eventType: "merged",
+        },
+        {
+          source: "github_actions_workflow_run",
+          sourceId: "8501:2026-04-10T12:05:00.000Z",
+          eventType: "workflow_run",
+        },
+        {
+          source: "github_actions_workflow_run",
+          sourceId: "8502:2026-04-10T12:06:00.000Z",
+          eventType: "workflow_run",
         },
       ]);
     } finally {
