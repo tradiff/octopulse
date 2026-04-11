@@ -87,6 +87,37 @@ describe("renderAppDocument", () => {
     expect(html).toContain("AI fallback");
     expect(html).toContain("Delivered 2026-04-10 12:02:45 UTC");
   });
+
+  it("renders normalized raw events with expandable raw JSON", () => {
+    const html = renderAppDocument({
+      rawEvents: [
+        {
+          id: 17,
+          pullRequestLabel: "acme/octopulse #7",
+          pullRequestTitle: "Add pull request polling",
+          pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+          eventType: "review_changes_requested",
+          actorLogin: "alice",
+          actorClass: "human_other",
+          decisionState: "notified",
+          notificationTiming: "immediate",
+          occurredAt: "2026-04-10T12:04:00.000Z",
+          rawPayloadJson: '{"state":"CHANGES_REQUESTED","body":"Please add tests."}',
+          notificationSourceKind: "immediate",
+          notificationDeliveryStatus: "sent",
+        },
+      ],
+    });
+
+    expect(html).toContain("Raw Events");
+    expect(html).toContain("acme/octopulse #7");
+    expect(html).toContain("Review Changes Requested");
+    expect(html).toContain("Actor alice");
+    expect(html).toContain("Immediate timing");
+    expect(html).toContain("Raw JSON");
+    expect(html).toContain("&quot;CHANGES_REQUESTED&quot;");
+    expect(html).toContain('<details class="raw-event-details">');
+  });
 });
 
 function createPullRequestRecord(

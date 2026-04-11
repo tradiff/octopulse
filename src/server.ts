@@ -9,6 +9,7 @@ import {
 } from "./manual-pull-request-tracking.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
+import type { RawEventsEntry } from "./raw-events.js";
 
 export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_PORT = 3000;
@@ -21,6 +22,7 @@ export interface StartServerOptions {
   listTrackedPullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
   listInactivePullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
   listNotificationHistory?: () => SyncOrPromise<NotificationHistoryEntry[]>;
+  listRawEvents?: () => SyncOrPromise<RawEventsEntry[]>;
   manualTrackPullRequestByUrl?: (pullRequestUrl: string) => Promise<TrackPullRequestByUrlResult>;
   manualUntrackPullRequest?: (
     githubPullRequestId: number,
@@ -176,6 +178,7 @@ async function handleRequest(
     const notificationHistory = options.listNotificationHistory
       ? await options.listNotificationHistory()
       : [];
+    const rawEvents = options.listRawEvents ? await options.listRawEvents() : [];
     const flashMessage = readFlashMessage(searchParams);
 
     respond(
@@ -187,6 +190,7 @@ async function handleRequest(
         trackedPullRequests,
         inactivePullRequests,
         notificationHistory,
+        rawEvents,
         ...(flashMessage ? { flashMessage } : {}),
       }),
     );

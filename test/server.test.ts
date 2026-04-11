@@ -63,6 +63,23 @@ describe("startServer", () => {
           sourceKind: "immediate" as const,
         },
       ],
+      listRawEvents: async () => [
+        {
+          id: 17,
+          pullRequestLabel: "acme/octopulse #7",
+          pullRequestTitle: "Add pull request polling",
+          pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+          eventType: "review_changes_requested",
+          actorLogin: "alice",
+          actorClass: "human_other" as const,
+          decisionState: "notified" as const,
+          notificationTiming: "immediate" as const,
+          occurredAt: "2026-04-10T12:04:00.000Z",
+          rawPayloadJson: '{"state":"CHANGES_REQUESTED"}',
+          notificationSourceKind: "immediate" as const,
+          notificationDeliveryStatus: "sent" as const,
+        },
+      ],
     });
     servers.push(server);
 
@@ -80,6 +97,9 @@ describe("startServer", () => {
     expect(html).toContain("Notification History");
     expect(html).toContain("alice approved review");
     expect(html).toContain("Pending");
+    expect(html).toContain("Raw Events");
+    expect(html).toContain("Review Changes Requested");
+    expect(html).toContain("Raw JSON");
   });
 
   it("handles manual track form submissions and shows a success message", async () => {

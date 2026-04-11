@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
+import type { RawEventsEntry } from "./raw-events.js";
 
 export interface AppFlashMessage {
   kind: "success" | "error";
@@ -13,6 +14,7 @@ interface RenderAppDocumentOptions {
   trackedPullRequests?: PullRequestRecord[];
   inactivePullRequests?: PullRequestRecord[];
   notificationHistory?: NotificationHistoryEntry[];
+  rawEvents?: RawEventsEntry[];
   flashMessage?: AppFlashMessage | undefined;
 }
 
@@ -20,6 +22,7 @@ function AppShell({
   trackedPullRequests,
   inactivePullRequests,
   notificationHistory,
+  rawEvents,
   flashMessage,
 }: Required<RenderAppDocumentOptions>) {
   return (
@@ -85,10 +88,7 @@ function AppShell({
           )}
         />
         <NotificationHistoryPanel notificationHistory={notificationHistory} />
-        <section className="panel">
-          <h2>Raw Events</h2>
-          <p>Normalized activity and raw GitHub payloads will be available here.</p>
-        </section>
+        <RawEventsPanel rawEvents={rawEvents} />
       </div>
     </main>
   );
@@ -140,6 +140,65 @@ function NotificationHistoryPanel({
                   </span>
                 ) : null}
               </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function RawEventsPanel({ rawEvents }: { rawEvents: RawEventsEntry[] }) {
+  return (
+    <section className="panel raw-events-panel">
+      <div className="panel-header">
+        <h2>Raw Events</h2>
+        <span className="count">{rawEvents.length}</span>
+      </div>
+      {rawEvents.length === 0 ? (
+        <p>No normalized events yet.</p>
+      ) : (
+        <ul className="raw-events-list">
+          {rawEvents.map((entry) => (
+            <li key={entry.id} className="raw-events-item">
+              <div className="raw-events-header">
+                <a href={entry.pullRequestUrl} className="pull-request-link">
+                  {entry.pullRequestLabel}
+                </a>
+                <span className="notification-history-time">
+                  {formatHistoryTimestamp(entry.occurredAt)}
+                </span>
+              </div>
+              <strong>{formatEventTypeLabel(entry.eventType)}</strong>
+              <span className="pull-request-subtle">{entry.pullRequestTitle}</span>
+              <div className="notification-history-meta-row raw-events-meta-row">
+                {entry.actorLogin ? <span className="history-pill">Actor {entry.actorLogin}</span> : null}
+                {entry.actorClass ? (
+                  <span className="history-pill">{formatActorClassLabel(entry.actorClass)}</span>
+                ) : null}
+                {entry.decisionState ? (
+                  <span className="history-pill">{formatDecisionStateLabel(entry.decisionState)}</span>
+                ) : null}
+                {entry.notificationTiming ? (
+                  <span className="history-pill">
+                    {formatNotificationTimingLabel(entry.notificationTiming)}
+                  </span>
+                ) : null}
+                {entry.notificationSourceKind ? (
+                  <span className="history-pill">
+                    {formatSourceKindLabel(entry.notificationSourceKind)}
+                  </span>
+                ) : null}
+                {entry.notificationDeliveryStatus ? (
+                  <span className={`delivery-pill delivery-${entry.notificationDeliveryStatus}`}>
+                    {formatDeliveryStatusLabel(entry.notificationDeliveryStatus)}
+                  </span>
+                ) : null}
+              </div>
+              <details className="raw-event-details">
+                <summary>Raw JSON</summary>
+                <pre className="raw-event-json">{entry.rawPayloadJson ?? "No stored raw payload."}</pre>
+              </details>
             </li>
           ))}
         </ul>
@@ -210,6 +269,7 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
   const trackedPullRequests = options.trackedPullRequests ?? [];
   const inactivePullRequests = options.inactivePullRequests ?? [];
   const notificationHistory = options.notificationHistory ?? [];
+  const rawEvents = options.rawEvents ?? [];
   const flashMessage = options.flashMessage;
 
   return [
@@ -337,6 +397,14 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               list-style: none;
             }
 
+            .raw-events-list {
+              display: grid;
+              gap: 12px;
+              margin: 0;
+              padding: 0;
+              list-style: none;
+            }
+
             .pull-request-item {
               padding: 14px;
               border-radius: 12px;
@@ -351,7 +419,18 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               border: 1px solid rgba(148, 163, 184, 0.18);
             }
 
+            .raw-events-item {
+              padding: 14px;
+              border-radius: 12px;
+              background: rgba(30, 41, 59, 0.72);
+              border: 1px solid rgba(148, 163, 184, 0.18);
+            }
+
             .notification-history-panel {
+              grid-column: 1 / -1;
+            }
+
+            .raw-events-panel {
               grid-column: 1 / -1;
             }
 
@@ -423,6 +502,13 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               gap: 12px;
             }
 
+            .raw-events-header {
+              display: flex;
+              align-items: flex-start;
+              justify-content: space-between;
+              gap: 12px;
+            }
+
             .notification-history-title {
               margin: 0;
             }
@@ -437,6 +523,33 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               flex-wrap: wrap;
               gap: 8px;
               margin-top: 12px;
+            }
+
+            .raw-events-meta-row {
+              margin-bottom: 12px;
+            }
+
+            .raw-event-details {
+              margin-top: 10px;
+            }
+
+            .raw-event-details summary {
+              cursor: pointer;
+              color: #7dd3fc;
+              font-size: 0.875rem;
+              user-select: none;
+            }
+
+            .raw-event-json {
+              overflow-x: auto;
+              margin: 12px 0 0;
+              padding: 12px;
+              border-radius: 12px;
+              background: rgba(15, 23, 42, 0.92);
+              border: 1px solid rgba(148, 163, 184, 0.18);
+              color: #cbd5e1;
+              font-size: 0.8rem;
+              line-height: 1.5;
             }
 
             .state-pill {
@@ -544,6 +657,10 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               .notification-history-header {
                 flex-direction: column;
               }
+
+              .raw-events-header {
+                flex-direction: column;
+              }
             }
           `}</style>
         </head>
@@ -553,6 +670,7 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               trackedPullRequests={trackedPullRequests}
               inactivePullRequests={inactivePullRequests}
               notificationHistory={notificationHistory}
+              rawEvents={rawEvents}
               flashMessage={flashMessage}
             />
           </div>
@@ -576,6 +694,14 @@ function formatDeliveryStatusLabel(deliveryStatus: NotificationHistoryEntry["del
 
 function formatSourceKindLabel(sourceKind: NotificationHistoryEntry["sourceKind"]): string {
   return sourceKind === "bundle" ? "Bundled" : "Immediate";
+}
+
+function formatActorClassLabel(actorClass: "self" | "human_other" | "bot"): string {
+  if (actorClass === "human_other") {
+    return "Human";
+  }
+
+  return actorClass === "self" ? "Self" : "Bot";
 }
 
 function formatDecisionStateLabel(
@@ -610,4 +736,15 @@ function formatHistoryTimestamp(timestamp: string): string {
   }
 
   return `${timestamp} UTC`;
+}
+
+function formatEventTypeLabel(eventType: string): string {
+  return eventType
+    .split("_")
+    .map((segment) => `${segment[0]?.toUpperCase() ?? ""}${segment.slice(1)}`)
+    .join(" ");
+}
+
+function formatNotificationTimingLabel(notificationTiming: "immediate"): string {
+  return notificationTiming === "immediate" ? "Immediate timing" : notificationTiming;
 }

@@ -13,6 +13,7 @@ import { LinuxNotificationAdapter } from "./linux-notification-adapter.js";
 import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request-tracking.js";
 import { listNotificationHistory } from "./notification-history.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
+import { listRawEvents } from "./raw-events.js";
 import { readServerOrigin, startServer } from "./server.js";
 import {
   startRecurringTrackedPullRequestPolling,
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
       listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
       listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
       listNotificationHistory: async () => listNotificationHistory(currentDatabase),
+      listRawEvents: async () => listRawEvents(currentDatabase),
       manualTrackPullRequestByUrl: (pullRequestUrl: string) =>
         trackPullRequestByUrl(currentDatabase, githubAuth, pullRequestUrl, {
           pullRequestRepository,
