@@ -1,18 +1,38 @@
-import { describeApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./database.js";
+import { readServerOrigin, startServer } from "./server.js";
 
-function main(): void {
+async function main(): Promise<void> {
+  let database: ReturnType<typeof initializeDatabase> | undefined;
+
   try {
     const config = loadConfig();
-    const database = initializeDatabase(config.paths);
-    database.close();
-    console.log(describeApp());
+    database = initializeDatabase(config.paths);
+    const server = await startServer();
+
+    server.once("close", () => {
+      closeDatabaseQuietly(database);
+    });
+
+    console.log(`Octopulse listening at ${readServerOrigin(server)}`);
   } catch (error) {
+    closeDatabaseQuietly(database);
     const message = error instanceof Error ? error.message : "Unknown startup error";
     console.error(`Octopulse failed to start: ${message}`);
     process.exitCode = 1;
   }
 }
 
-main();
+void main();
+
+function closeDatabaseQuietly(database: ReturnType<typeof initializeDatabase> | undefined): void {
+  if (!database?.isOpen) {
+    return;
+  }
+
+  try {
+    database.close();
+  } catch {
+    // Preserve the original startup failure.
+  }
+}

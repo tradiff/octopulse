@@ -11,11 +11,15 @@
   },
   "devDependencies": {
     "@types/node": "^24.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "smol-toml": "^1.6.1"
   }
 }
