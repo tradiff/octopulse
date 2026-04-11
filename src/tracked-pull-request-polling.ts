@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { Octokit } from "octokit";
 
+import { bundlePullRequestEvents } from "./event-bundling.js";
 import type { GitHubAuthContext } from "./github.js";
 import { ingestPullRequestActivity } from "./pull-request-activity-ingestion.js";
 import { normalizePullRequestActivity } from "./pull-request-activity-normalization.js";
@@ -50,6 +51,7 @@ export async function pollTrackedPullRequests<TClient>(
     (async (client: TClient, pullRequest: PullRequestRecord) => {
       await ingestPullRequestActivity(database, client, pullRequest);
       normalizePullRequestActivity(database, pullRequest, githubAuth.currentUserLogin);
+      bundlePullRequestEvents(database, pullRequest.id);
     });
   const onError = options.onError ?? logTrackedPullRequestPollingError;
   const observedAt = options.observedAt ?? new Date().toISOString();

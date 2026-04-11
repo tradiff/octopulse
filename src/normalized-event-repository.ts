@@ -11,9 +11,24 @@ export type DecisionState =
 
 export type NotificationTiming = "immediate";
 
+const BUNDLE_ELIGIBLE_DECISION_STATES = ["notified", "notified_ai_fallback"] as const;
+const BUNDLE_ELIGIBLE_EVENT_TYPES = [
+  "issue_comment",
+  "review_submitted",
+  "review_inline_comment",
+  "ci_failed",
+  "ci_succeeded",
+  "pr_closed",
+  "pr_merged",
+  "pr_reopened",
+  "ready_for_review",
+  "converted_to_draft",
+] as const;
+
 export interface NormalizedEventRecord {
   id: number;
   rawEventId: number | null;
+  eventBundleId: number | null;
   pullRequestId: number;
   eventType: string;
   actorLogin: string | null;
@@ -28,6 +43,7 @@ export interface NormalizedEventRecord {
 
 export interface InsertNormalizedEventInput {
   rawEventId?: number | null;
+  eventBundleId?: number | null;
   pullRequestId: number;
   eventType: string;
   actorLogin?: string | null;
@@ -56,6 +72,7 @@ export class NormalizedEventRepository {
           `
             INSERT INTO NormalizedEvent (
               raw_event_id,
+              event_bundle_id,
               pull_request_id,
               event_type,
               actor_login,
@@ -65,11 +82,12 @@ export class NormalizedEventRepository {
               summary,
               payload_json,
               occurred_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
         )
         .run(
           input.rawEventId ?? null,
+          input.eventBundleId ?? null,
           input.pullRequestId,
           input.eventType,
           input.actorLogin ?? null,
@@ -108,6 +126,71 @@ export class NormalizedEventRepository {
     return rows.map((row) => mapNormalizedEventRow(row));
   }
 
+  listNormalizedEventsForBundle(eventBundleId: number): NormalizedEventRecord[] {
+    const rows = this.database
+      .prepare(
+        `
+          SELECT *
+          FROM NormalizedEvent
+          WHERE event_bundle_id = ?
+          ORDER BY occurred_at ASC, id ASC
+        `,
+      )
+      .all(eventBundleId);
+
+    return rows.map((row) => mapNormalizedEventRow(row));
+  }
+
+  listBundleEligibleUnbundledEventsForPullRequest(pullRequestId: number): NormalizedEventRecord[] {
+    const decisionStatePlaceholders = BUNDLE_ELIGIBLE_DECISION_STATES.map(() => "?").join(", ");
+    const eventTypePlaceholders = BUNDLE_ELIGIBLE_EVENT_TYPES.map(() => "?").join(", ");
+    const rows = this.database
+      .prepare(
+        `
+          SELECT *
+          FROM NormalizedEvent
+          WHERE pull_request_id = ?
+            AND event_bundle_id IS NULL
+            AND notification_timing IS NULL
+            AND decision_state IN (${decisionStatePlaceholders})
+            AND event_type IN (${eventTypePlaceholders})
+          ORDER BY occurred_at ASC, id ASC
+        `,
+      )
+      .all(
+        pullRequestId,
+        ...BUNDLE_ELIGIBLE_DECISION_STATES,
+        ...BUNDLE_ELIGIBLE_EVENT_TYPES,
+      );
+
+    return rows.map((row) => mapNormalizedEventRow(row));
+  }
+
+  assignEventBundle(normalizedEventIds: readonly number[], eventBundleId: number): void {
+    if (normalizedEventIds.length === 0) {
+      return;
+    }
+
+    try {
+      const placeholders = normalizedEventIds.map(() => "?").join(", ");
+
+      this.database
+        .prepare(
+          `
+            UPDATE NormalizedEvent
+            SET event_bundle_id = ?
+            WHERE id IN (${placeholders})
+              AND event_bundle_id IS NULL
+          `,
+        )
+        .run(eventBundleId, ...normalizedEventIds);
+    } catch (error) {
+      throw new NormalizedEventRepositoryError(
+        `Failed to assign normalized events to bundle ${eventBundleId}: ${getErrorMessage(error)}`,
+      );
+    }
+  }
+
   private requireNormalizedEventById(id: number): NormalizedEventRecord {
     const row = this.database.prepare("SELECT * FROM NormalizedEvent WHERE id = ?").get(id);
 
@@ -131,6 +214,7 @@ function mapNormalizedEventRow(row: unknown): NormalizedEventRecord {
   return {
     id: readInteger(value.id, "NormalizedEvent.id"),
     rawEventId: readNullableInteger(value.raw_event_id, "NormalizedEvent.raw_event_id"),
+    eventBundleId: readNullableInteger(value.event_bundle_id, "NormalizedEvent.event_bundle_id"),
     pullRequestId: readInteger(value.pull_request_id, "NormalizedEvent.pull_request_id"),
     eventType: readString(value.event_type, "NormalizedEvent.event_type"),
     actorLogin: readNullableString(value.actor_login, "NormalizedEvent.actor_login"),
