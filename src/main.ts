@@ -8,7 +8,8 @@ import {
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./database.js";
 import { initializeGitHubAuth } from "./github.js";
-import { trackPullRequestByUrl } from "./manual-pull-request-tracking.js";
+import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request-tracking.js";
+import { PullRequestRepository } from "./pull-request-repository.js";
 import { readServerOrigin, startServer } from "./server.js";
 
 async function main(): Promise<void> {
@@ -20,11 +21,20 @@ async function main(): Promise<void> {
     const config = loadConfig();
     const githubAuth = await initializeGitHubAuth(config);
     const currentDatabase = initializeDatabase(config.paths);
+    const pullRequestRepository = new PullRequestRepository(currentDatabase);
     database = currentDatabase;
     await runFirstRunAuthoredPullRequestDiscovery(currentDatabase, githubAuth);
     server = await startServer({
+      listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
+      listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
       manualTrackPullRequestByUrl: (pullRequestUrl: string) =>
-        trackPullRequestByUrl(currentDatabase, githubAuth, pullRequestUrl),
+        trackPullRequestByUrl(currentDatabase, githubAuth, pullRequestUrl, {
+          pullRequestRepository,
+        }),
+      manualUntrackPullRequest: (githubPullRequestId: number) =>
+        untrackPullRequest(currentDatabase, githubPullRequestId, {
+          pullRequestRepository,
+        }),
     });
     recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(currentDatabase, githubAuth, {
       intervalMs: config.timings.discoveryPollMs,

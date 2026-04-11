@@ -33,6 +33,19 @@ export interface TrackPullRequestByUrlResult {
   pullRequest: PullRequestRecord;
 }
 
+export interface UntrackPullRequestOptions {
+  pullRequestRepository?: Pick<
+    PullRequestRepository,
+    | "getPullRequestByGitHubPullRequestId"
+    | "updatePullRequestTrackingState"
+  >;
+}
+
+export interface UntrackPullRequestResult {
+  outcome: "untracked" | "already_untracked";
+  pullRequest: PullRequestRecord;
+}
+
 export class ManualPullRequestTrackingError extends Error {
   constructor(message: string) {
     super(message);
@@ -110,6 +123,52 @@ export async function trackPullRequestByUrl<TClient>(
   }
 }
 
+export async function untrackPullRequest(
+  database: DatabaseSync,
+  githubPullRequestId: number,
+  options: UntrackPullRequestOptions = {},
+): Promise<UntrackPullRequestResult> {
+  const pullRequestRepository = options.pullRequestRepository ?? new PullRequestRepository(database);
+
+  let existing: PullRequestRecord | undefined;
+
+  try {
+    existing = pullRequestRepository.getPullRequestByGitHubPullRequestId(githubPullRequestId);
+  } catch (error) {
+    throw new ManualPullRequestTrackingError(
+      `Failed to read pull request ${githubPullRequestId}: ${getErrorMessage(error)}`,
+    );
+  }
+
+  if (!existing) {
+    throw new ManualPullRequestTrackingError(
+      `Pull request ${githubPullRequestId} is not tracked locally`,
+    );
+  }
+
+  if (!existing.isTracked && existing.isStickyUntracked) {
+    return {
+      outcome: "already_untracked",
+      pullRequest: existing,
+    };
+  }
+
+  try {
+    return {
+      outcome: "untracked",
+      pullRequest: pullRequestRepository.updatePullRequestTrackingState(githubPullRequestId, {
+        isTracked: false,
+        trackingReason: MANUAL_TRACKING_REASON,
+        isStickyUntracked: true,
+      }),
+    };
+  } catch (error) {
+    throw new ManualPullRequestTrackingError(
+      `Failed to persist pull request ${formatStoredPullRequestLabel(existing)}: ${getErrorMessage(error)}`,
+    );
+  }
+}
+
 export function parseGitHubPullRequestUrl(pullRequestUrl: string): PullRequestCoordinates {
   const normalizedPullRequestUrl = pullRequestUrl.trim();
   let url: URL;
@@ -156,6 +215,12 @@ export function parseGitHubPullRequestUrl(pullRequestUrl: string): PullRequestCo
 
 function formatPullRequestLabel(coordinates: PullRequestCoordinates): string {
   return `${coordinates.repositoryOwner}/${coordinates.repositoryName}#${coordinates.number}`;
+}
+
+function formatStoredPullRequestLabel(
+  pullRequest: Pick<PullRequestRecord, "repositoryOwner" | "repositoryName" | "number">,
+): string {
+  return `${pullRequest.repositoryOwner}/${pullRequest.repositoryName}#${pullRequest.number}`;
 }
 
 function getErrorMessage(error: unknown): string {

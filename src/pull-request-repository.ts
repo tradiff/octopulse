@@ -59,6 +59,10 @@ export class PullRequestRepositoryError extends Error {
 export class PullRequestRepository {
   constructor(private readonly database: DatabaseSync) {}
 
+  getPullRequestByGitHubPullRequestId(githubPullRequestId: number): PullRequestRecord | undefined {
+    return this.readPullRequestByGitHubPullRequestId(githubPullRequestId);
+  }
+
   getPullRequestByRepositoryCoordinates(
     repositoryOwner: string,
     repositoryName: string,

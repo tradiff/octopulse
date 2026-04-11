@@ -11,6 +11,7 @@ import {
   ManualPullRequestTrackingError,
   parseGitHubPullRequestUrl,
   trackPullRequestByUrl,
+  untrackPullRequest,
 } from "../src/manual-pull-request-tracking.js";
 import {
   PullRequestRepository,
@@ -181,6 +182,66 @@ describe("trackPullRequestByUrl", () => {
       expect(trackedPullRequests).toHaveLength(1);
       expect(trackedPullRequests[0]?.title).toBe("Persisted title");
       expect(trackedPullRequests[0]?.lastSeenAt).toBe("2026-04-10T11:55:00.000Z");
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("untrackPullRequest", () => {
+  it("marks a tracked pull request as inactive with sticky manual untrack state", async () => {
+    const { database, repository } = createRepository();
+    repository.upsertPullRequest(createPullRequestInput());
+
+    try {
+      await expect(
+        untrackPullRequest(database, 101, {
+          pullRequestRepository: repository,
+        }),
+      ).resolves.toMatchObject({
+        outcome: "untracked",
+        pullRequest: {
+          githubPullRequestId: 101,
+          isTracked: false,
+          trackingReason: "manual",
+          isStickyUntracked: true,
+        },
+      });
+
+      expect(repository.listTrackedPullRequests()).toHaveLength(0);
+      expect(repository.listInactivePullRequests()).toHaveLength(1);
+      expect(repository.listInactivePullRequests()[0]?.githubPullRequestId).toBe(101);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("returns a no-op result when the pull request is already manually untracked", async () => {
+    const { database, repository } = createRepository();
+    repository.upsertPullRequest(createPullRequestInput());
+    repository.updatePullRequestTrackingState(101, {
+      isTracked: false,
+      trackingReason: "manual",
+      isStickyUntracked: true,
+    });
+
+    try {
+      await expect(
+        untrackPullRequest(database, 101, {
+          pullRequestRepository: repository,
+        }),
+      ).resolves.toMatchObject({
+        outcome: "already_untracked",
+        pullRequest: {
+          githubPullRequestId: 101,
+          isTracked: false,
+          trackingReason: "manual",
+          isStickyUntracked: true,
+        },
+      });
+
+      expect(repository.listTrackedPullRequests()).toHaveLength(0);
+      expect(repository.listInactivePullRequests()).toHaveLength(1);
     } finally {
       database.close();
     }

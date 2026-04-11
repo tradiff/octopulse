@@ -49,7 +49,7 @@ describe("startServer", () => {
   it("accepts manual pull request tracking requests", async () => {
     const manualTrackPullRequestByUrl = vi.fn(async (pullRequestUrl: string) => ({
       outcome: "tracked" as const,
-      pullRequest: createPullRequestResponseRecord(pullRequestUrl),
+      pullRequest: createPullRequestResponseRecord({ url: pullRequestUrl }),
     }));
     const server = await startServer({
       host: "127.0.0.1",
@@ -81,13 +81,95 @@ describe("startServer", () => {
     );
   });
 
+  it("lists tracked pull requests for the UI layer", async () => {
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listTrackedPullRequests: async () => [createPullRequestResponseRecord()],
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/api/tracked-pull-requests`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      pullRequests: [createPullRequestResponseRecord()],
+    });
+  });
+
+  it("lists inactive pull requests for the UI layer", async () => {
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listInactivePullRequests: async () => [
+        createPullRequestResponseRecord({
+          githubPullRequestId: 202,
+          isTracked: false,
+          trackingReason: "manual",
+          isStickyUntracked: true,
+        }),
+      ],
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/api/inactive-pull-requests`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      pullRequests: [
+        createPullRequestResponseRecord({
+          githubPullRequestId: 202,
+          isTracked: false,
+          trackingReason: "manual",
+          isStickyUntracked: true,
+        }),
+      ],
+    });
+  });
+
+  it("accepts manual pull request untracking requests", async () => {
+    const manualUntrackPullRequest = vi.fn(async (githubPullRequestId: number) => ({
+      outcome: "untracked" as const,
+      pullRequest: createPullRequestResponseRecord({
+        githubPullRequestId,
+        isTracked: false,
+        trackingReason: "manual",
+        isStickyUntracked: true,
+      }),
+    }));
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      manualUntrackPullRequest,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/api/tracked-pull-requests/101`, {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toMatchObject({
+      outcome: "untracked",
+      pullRequest: {
+        githubPullRequestId: 101,
+        isTracked: false,
+        isStickyUntracked: true,
+      },
+    });
+    expect(manualUntrackPullRequest).toHaveBeenCalledWith(101);
+  });
+
   it("returns already tracked responses without treating them as errors", async () => {
     const server = await startServer({
       host: "127.0.0.1",
       port: 0,
       manualTrackPullRequestByUrl: async (pullRequestUrl: string) => ({
         outcome: "already_tracked",
-        pullRequest: createPullRequestResponseRecord(pullRequestUrl),
+        pullRequest: createPullRequestResponseRecord({ url: pullRequestUrl }),
       }),
     });
     servers.push(server);
@@ -115,7 +197,7 @@ describe("startServer", () => {
       port: 0,
       manualTrackPullRequestByUrl: async (pullRequestUrl: string) => ({
         outcome: "tracked",
-        pullRequest: createPullRequestResponseRecord(pullRequestUrl),
+        pullRequest: createPullRequestResponseRecord({ url: pullRequestUrl }),
       }),
     });
     servers.push(server);
@@ -148,14 +230,37 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
-function createPullRequestResponseRecord(pullRequestUrl: string) {
+function createPullRequestResponseRecord(
+  overrides: Partial<{
+    id: number;
+    githubPullRequestId: number;
+    repositoryOwner: string;
+    repositoryName: string;
+    number: number;
+    url: string;
+    authorLogin: string;
+    title: string;
+    state: string;
+    isDraft: boolean;
+    isTracked: boolean;
+    trackingReason: string;
+    isStickyUntracked: boolean;
+    lastSeenAt: string | null;
+    closedAt: string | null;
+    mergedAt: string | null;
+    graceUntil: string | null;
+    lastSeenHeadSha: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }> = {},
+) {
   return {
     id: 1,
     githubPullRequestId: 101,
     repositoryOwner: "acme",
     repositoryName: "octopulse",
     number: 7,
-    url: pullRequestUrl,
+    url: "https://github.com/acme/octopulse/pull/7",
     authorLogin: "octocat",
     title: "Add pull request polling",
     state: "open",
@@ -170,5 +275,6 @@ function createPullRequestResponseRecord(pullRequestUrl: string) {
     lastSeenHeadSha: "abc123",
     createdAt: "2026-04-10 12:00:00",
     updatedAt: "2026-04-10 12:00:00",
+    ...overrides,
   };
 }
