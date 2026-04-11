@@ -4,17 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "npm run build:client && tsx watch src/main.ts",
     "install:user-service": "tsx src/install-user-service.ts",
-    "start": "tsx src/main.ts",
+    "start": "npm run build:client && tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json",
-    "build": "tsc --project tsconfig.build.json"
+    "build:client": "esbuild src/client-spa.tsx --bundle --platform=browser --format=esm --outfile=dist/public/app.js",
+    "build": "tsc --project tsconfig.build.json && npm run build:client"
   },
   "devDependencies": {
     "@types/node": "^24.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "esbuild": "^0.25.10",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

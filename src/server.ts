@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { existsSync, readFileSync } from "node:fs";
 
-import { renderAppDocument, type AppFlashMessage, type AppPage } from "./app.js";
 import {
   DEFAULT_LOG_VIEWER_ENTRY_LIMIT,
   getLogger,
@@ -18,19 +18,28 @@ import {
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
-import {
-  buildUiFilterOptions,
-  filterInactivePullRequests,
-  filterNotificationHistory,
-  filterRawEvents,
-  filterTrackedPullRequests,
-  readUiFilterValues,
-} from "./ui-filters.js";
+
+const CLIENT_BUNDLE_PATH = new URL("../dist/public/app.js", import.meta.url);
+const SPA_DOCUMENT = [
+  "<!DOCTYPE html>",
+  "<html lang=\"en\">",
+  "<head>",
+  "  <meta charset=\"utf-8\" />",
+  "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+  "  <title>Octopulse</title>",
+  "</head>",
+  "<body>",
+  "  <div id=\"root\"></div>",
+  "  <script type=\"module\" src=\"/app.js\"></script>",
+  "</body>",
+  "</html>",
+].join("\n");
 
 export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_PORT = 3000;
 
 type SyncOrPromise<T> = T | Promise<T>;
+type AppPage = "pull-requests" | "logs" | "notification-history" | "raw-events";
 
 export interface StartServerOptions {
   host?: string;
@@ -113,13 +122,14 @@ async function handleRequest(
 ): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
   const { pathname, searchParams } = requestUrl;
-  const documentPage = readDocumentPage(pathname);
   const logLevelFilter = readLogLevelFilter(searchParams);
   const trackedPullRequestMatch = pathname.match(/^\/api\/tracked-pull-requests\/(\d+)$/);
-  const documentUntrackMatch = pathname.match(/^\/tracked-pull-requests\/(\d+)\/untrack$/);
-  const documentNotificationRecordResendMatch = pathname.match(
-    /^\/notification-records\/(\d+)\/resend$/,
-  );
+  const notificationRecordResendMatch = pathname.match(/^\/api\/notification-records\/(\d+)\/resend$/);
+
+  if (supportsDocumentResponse(request) && pathname === "/app.js") {
+    handleClientBundleRequest(request, response);
+    return;
+  }
 
   if (request.method === "GET" && pathname === "/api/tracked-pull-requests") {
     await handlePullRequestListRequest(
@@ -138,6 +148,21 @@ async function handleRequest(
       options.listInactivePullRequests,
       "Inactive pull request listing is not configured",
     );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/notification-history") {
+    await handleNotificationHistoryRequest(request, response, options.listNotificationHistory);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/raw-events") {
+    await handleRawEventsRequest(request, response, options.listRawEvents);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/logs") {
+    await handleLogsRequest(request, response, options.listRecentLogs, logLevelFilter);
     return;
   }
 
@@ -160,46 +185,6 @@ async function handleRequest(
     return;
   }
 
-  if (request.method === "POST" && pathname === "/tracked-pull-requests/manual-track") {
-    await handleDocumentManualTrackPullRequestRequest(
-      request,
-      response,
-      options.manualTrackPullRequestByUrl,
-    );
-    return;
-  }
-
-  if (request.method === "POST" && documentUntrackMatch) {
-    await handleDocumentManualUntrackPullRequestRequest(
-      request,
-      response,
-      options.manualUntrackPullRequest,
-      documentUntrackMatch[1]!,
-    );
-    return;
-  }
-
-  if (request.method === "POST" && pathname === "/inactive-pull-requests/retrack") {
-    await handleDocumentManualTrackPullRequestRequest(
-      request,
-      response,
-      options.manualTrackPullRequestByUrl,
-    );
-    return;
-  }
-
-  if (request.method === "POST" && documentNotificationRecordResendMatch) {
-    await handleDocumentNotificationRecordResendRequest(
-      request,
-      response,
-      options.resendNotificationRecord,
-      documentNotificationRecordResendMatch[1]!,
-    );
-    return;
-  }
-
-  const notificationRecordResendMatch = pathname.match(/^\/api\/notification-records\/(\d+)\/resend$/);
-
   if (request.method === "POST" && notificationRecordResendMatch) {
     await handleNotificationRecordResendRequest(
       request,
@@ -221,129 +206,28 @@ async function handleRequest(
     return;
   }
 
-  if (supportsDocumentResponse(request) && documentPage) {
-    const trackedPullRequests = options.listTrackedPullRequests
-      ? await options.listTrackedPullRequests()
-      : [];
-    const inactivePullRequests = options.listInactivePullRequests
-      ? await options.listInactivePullRequests()
-      : [];
-    const notificationHistory = options.listNotificationHistory
-      ? await options.listNotificationHistory()
-      : [];
-    const recentLogs =
-      documentPage === "logs" && options.listRecentLogs
-        ? await options.listRecentLogs({
-            ...(logLevelFilter !== "all" ? { level: logLevelFilter } : {}),
-            limit: DEFAULT_LOG_VIEWER_ENTRY_LIMIT,
-          })
-        : [];
-    const rawEvents = options.listRawEvents ? await options.listRawEvents() : [];
-    const flashMessage = readFlashMessage(searchParams);
-    const uiFilters = readUiFilterValues(searchParams);
-    const uiFilterOptions = buildUiFilterOptions({
-      trackedPullRequests,
-      inactivePullRequests,
-      notificationHistory,
-      rawEvents,
-    });
-
-    respond(
-      response,
-      request.method,
-      200,
-      "text/html; charset=utf-8",
-      renderAppDocument({
-        trackedPullRequests: filterTrackedPullRequests(trackedPullRequests, uiFilters),
-        inactivePullRequests: filterInactivePullRequests(inactivePullRequests, uiFilters),
-        notificationHistory: filterNotificationHistory(notificationHistory, uiFilters),
-        rawEvents: filterRawEvents(rawEvents, uiFilters),
-        recentLogs,
-        logLevelFilter,
-        ...(flashMessage ? { flashMessage } : {}),
-        uiFilters,
-        uiFilterOptions,
-        currentPage: documentPage,
-      }),
-    );
+  if (supportsDocumentResponse(request) && readDocumentPage(pathname)) {
+    respond(response, request.method, 200, "text/html; charset=utf-8", SPA_DOCUMENT);
     return;
   }
 
   respond(response, request.method, 404, "text/plain; charset=utf-8", "Not Found");
 }
 
-async function handleDocumentManualTrackPullRequestRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-  manualTrackPullRequestByUrl: StartServerOptions["manualTrackPullRequestByUrl"],
-): Promise<void> {
-  if (!manualTrackPullRequestByUrl) {
-    redirectToDocumentMessage(request, response, {
-      kind: "error",
-      text: "Manual pull request tracking is not configured",
-    });
-    return;
-  }
-
-  try {
-    const requestBody = readManualTrackRequestBody(await readFormRequestBody(request));
-    const result = await manualTrackPullRequestByUrl(requestBody.url);
-
-    getLogger().info("Handled manual pull request tracking from document flow", {
-      pullRequest: formatPullRequestLabel(result.pullRequest),
-      outcome: result.outcome,
-    });
-
-    redirectToDocumentMessage(request, response, createTrackFlashMessage(result));
-  } catch (error) {
-    getLogger().warn("Manual pull request tracking from document flow failed", {
-      path: request.url,
-      error,
-    });
-    redirectToDocumentMessage(request, response, {
-      kind: "error",
-      text: getErrorMessage(error),
-    });
-  }
-}
-
-async function handleDocumentManualUntrackPullRequestRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-  manualUntrackPullRequest: StartServerOptions["manualUntrackPullRequest"],
-  githubPullRequestIdSegment: string,
-): Promise<void> {
-  if (!manualUntrackPullRequest) {
-    redirectToDocumentMessage(request, response, {
-      kind: "error",
-      text: "Manual pull request untracking is not configured",
-    });
-    return;
-  }
-
-  try {
-    const githubPullRequestId = readPositiveInteger(
-      githubPullRequestIdSegment,
-      "Pull request id",
+function handleClientBundleRequest(request: IncomingMessage, response: ServerResponse): void {
+  if (!existsSync(CLIENT_BUNDLE_PATH)) {
+    respond(
+      response,
+      request.method,
+      503,
+      "text/plain; charset=utf-8",
+      "Client bundle not found. Run npm run build:client.",
     );
-    const result = await manualUntrackPullRequest(githubPullRequestId);
-
-    getLogger().info("Handled manual pull request untracking from document flow", {
-      pullRequest: formatPullRequestLabel(result.pullRequest),
-      outcome: result.outcome,
-    });
-
-    redirectToDocumentMessage(request, response, createUntrackFlashMessage(result));
-  } catch (error) {
-    getLogger().warn("Manual pull request untracking from document flow failed", {
-      path: request.url,
-      error,
-    });
-    redirectToDocumentMessage(request, response, {
-      kind: "error",
-      text: getErrorMessage(error),
-    });
+    return;
   }
+
+  const source = readFileSync(CLIENT_BUNDLE_PATH, "utf8");
+  respond(response, request.method, 200, "application/javascript; charset=utf-8", source);
 }
 
 async function handleManualTrackPullRequestRequest(
@@ -510,6 +394,88 @@ async function handlePullRequestListRequest(
   );
 }
 
+async function handleNotificationHistoryRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  listNotificationHistory: StartServerOptions["listNotificationHistory"],
+): Promise<void> {
+  if (!listNotificationHistory) {
+    respond(
+      response,
+      request.method,
+      503,
+      "application/json; charset=utf-8",
+      JSON.stringify({ error: "Notification history listing is not configured" }),
+    );
+    return;
+  }
+
+  const notificationHistory = await listNotificationHistory();
+  respond(
+    response,
+    request.method,
+    200,
+    "application/json; charset=utf-8",
+    JSON.stringify({ notificationHistory }),
+  );
+}
+
+async function handleRawEventsRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  listRawEvents: StartServerOptions["listRawEvents"],
+): Promise<void> {
+  if (!listRawEvents) {
+    respond(
+      response,
+      request.method,
+      503,
+      "application/json; charset=utf-8",
+      JSON.stringify({ error: "Raw event listing is not configured" }),
+    );
+    return;
+  }
+
+  const rawEvents = await listRawEvents();
+  respond(
+    response,
+    request.method,
+    200,
+    "application/json; charset=utf-8",
+    JSON.stringify({ rawEvents }),
+  );
+}
+
+async function handleLogsRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  listRecentLogs: StartServerOptions["listRecentLogs"],
+  logLevelFilter: LogLevelFilter,
+): Promise<void> {
+  if (!listRecentLogs) {
+    respond(
+      response,
+      request.method,
+      503,
+      "application/json; charset=utf-8",
+      JSON.stringify({ error: "Log listing is not configured" }),
+    );
+    return;
+  }
+
+  const recentLogs = await listRecentLogs({
+    ...(logLevelFilter !== "all" ? { level: logLevelFilter } : {}),
+    limit: DEFAULT_LOG_VIEWER_ENTRY_LIMIT,
+  });
+  respond(
+    response,
+    request.method,
+    200,
+    "application/json; charset=utf-8",
+    JSON.stringify({ logs: recentLogs }),
+  );
+}
+
 function supportsDocumentResponse(request: IncomingMessage): boolean {
   return request.method === "GET" || request.method === "HEAD";
 }
@@ -536,11 +502,6 @@ async function readJsonRequestBody(request: IncomingMessage): Promise<unknown> {
   }
 }
 
-async function readFormRequestBody(request: IncomingMessage): Promise<unknown> {
-  const body = await readRequestBody(request);
-  return Object.fromEntries(new URLSearchParams(body).entries()) as unknown;
-}
-
 async function readRequestBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
 
@@ -564,51 +525,6 @@ function readManualTrackRequestBody(body: unknown): { url: string } {
   }
 
   return { url: url.trim() };
-}
-
-function readFlashMessage(searchParams: URLSearchParams): AppFlashMessage | undefined {
-  const kind = searchParams.get("flash-kind");
-  const text = searchParams.get("flash-text");
-
-  if ((kind !== "success" && kind !== "error") || !text) {
-    return undefined;
-  }
-
-  return { kind, text };
-}
-
-function redirectToDocumentMessage(
-  request: IncomingMessage,
-  response: ServerResponse,
-  flashMessage: AppFlashMessage,
-): void {
-  const location = createDocumentRedirectLocation(request);
-  location.searchParams.set("flash-kind", flashMessage.kind);
-  location.searchParams.set("flash-text", flashMessage.text);
-
-  response.statusCode = 303;
-  response.setHeader("Location", `${location.pathname}${location.search}`);
-  response.end(request.method === "HEAD" ? undefined : "");
-}
-
-function createDocumentRedirectLocation(request: IncomingMessage): URL {
-  const referer = request.headers.referer;
-
-  if (typeof referer === "string") {
-    try {
-      const location = new URL(referer);
-
-      if (readDocumentPage(location.pathname)) {
-        location.searchParams.delete("flash-kind");
-        location.searchParams.delete("flash-text");
-        return location;
-      }
-    } catch {
-      // Fall back to root when the browser did not send a valid referer.
-    }
-  }
-
-  return new URL("/", "http://127.0.0.1");
 }
 
 function readDocumentPage(pathname: string): AppPage | undefined {
@@ -639,30 +555,6 @@ function readLogLevelFilter(searchParams: URLSearchParams): LogLevelFilter {
   }
 
   return isLogLevel(value) ? value : "all";
-}
-
-function createTrackFlashMessage(result: TrackPullRequestByUrlResult): AppFlashMessage {
-  const pullRequestLabel = formatPullRequestLabel(result.pullRequest);
-
-  return {
-    kind: "success",
-    text:
-      result.outcome === "tracked"
-        ? `Now tracking ${pullRequestLabel}.`
-        : `${pullRequestLabel} is already tracked.`,
-  };
-}
-
-function createUntrackFlashMessage(result: UntrackPullRequestResult): AppFlashMessage {
-  const pullRequestLabel = formatPullRequestLabel(result.pullRequest);
-
-  return {
-    kind: "success",
-    text:
-      result.outcome === "untracked"
-        ? `Stopped tracking ${pullRequestLabel}.`
-        : `${pullRequestLabel} is already inactive.`,
-  };
 }
 
 async function handleNotificationRecordResendRequest(
@@ -712,44 +604,6 @@ async function handleNotificationRecordResendRequest(
         error: getErrorMessage(error),
       }),
     );
-  }
-}
-
-async function handleDocumentNotificationRecordResendRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-  resendNotificationRecord: StartServerOptions["resendNotificationRecord"],
-  notificationRecordIdSegment: string,
-): Promise<void> {
-  if (!resendNotificationRecord) {
-    redirectToDocumentMessage(request, response, {
-      kind: "error",
-      text: "Notification record resend is not configured",
-    });
-    return;
-  }
-
-  try {
-    const notificationRecordId = readPositiveInteger(notificationRecordIdSegment, "Notification record id");
-    await resendNotificationRecord(notificationRecordId);
-
-    getLogger().info("Resent notification record from document flow", {
-      notificationRecordId,
-    });
-
-    redirectToDocumentMessage(request, response, {
-      kind: "success",
-      text: "Notification resent.",
-    });
-  } catch (error) {
-    getLogger().warn("Failed to resend notification record from document flow", {
-      notificationRecordId: notificationRecordIdSegment,
-      error,
-    });
-    redirectToDocumentMessage(request, response, {
-      kind: "error",
-      text: getErrorMessage(error),
-    });
   }
 }
 

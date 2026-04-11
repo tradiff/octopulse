@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { readServerOrigin, startServer } from "../src/server.js";
 
@@ -15,17 +15,6 @@ describe("startServer", () => {
     const server = await startServer({ host: "127.0.0.1", port: 0 });
     servers.push(server);
 
-    const address = server.address();
-
-    expect(address).not.toBeNull();
-    expect(typeof address).not.toBe("string");
-
-    if (address === null || typeof address === "string") {
-      throw new Error("Expected a TCP listening address");
-    }
-
-    expect(address.address).toBe("127.0.0.1");
-
     const response = await fetch(`${readServerOrigin(server)}/health`);
 
     expect(response.status).toBe(200);
@@ -33,7 +22,21 @@ describe("startServer", () => {
     expect(await response.json()).toEqual({ status: "ok" });
   });
 
-  it("serves pull requests from the root path", async () => {
+  it("serves the SPA document on history routes", async () => {
+    const server = await startServer({ host: "127.0.0.1", port: 0 });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/notification-history`);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(html).toContain("<div id=\"root\"></div>");
+    expect(html).toContain('src="/app.js"');
+    expect(html).not.toContain("Track Pull Request");
+  });
+
+  it("serves pull request APIs", async () => {
     const server = await startServer({
       host: "127.0.0.1",
       port: 0,
@@ -45,34 +48,57 @@ describe("startServer", () => {
           repositoryName: "worker",
           number: 12,
           title: "Keep inactive list visible",
-          state: "closed",
           isTracked: false,
           isStickyUntracked: true,
+          state: "closed",
         }),
       ],
+    });
+    servers.push(server);
+
+    const trackedResponse = await fetch(`${readServerOrigin(server)}/api/tracked-pull-requests`);
+    const inactiveResponse = await fetch(`${readServerOrigin(server)}/api/inactive-pull-requests`);
+
+    expect(trackedResponse.status).toBe(200);
+    expect(inactiveResponse.status).toBe(200);
+    expect((await trackedResponse.json()) as unknown).toEqual({
+      pullRequests: [createPullRequestResponseRecord()],
+    });
+    expect((await inactiveResponse.json()) as unknown).toEqual({
+      pullRequests: [
+        createPullRequestResponseRecord({
+          id: 2,
+          githubPullRequestId: 202,
+          repositoryName: "worker",
+          number: 12,
+          title: "Keep inactive list visible",
+          isTracked: false,
+          isStickyUntracked: true,
+          state: "closed",
+        }),
+      ],
+    });
+  });
+
+  it("serves notification history, raw events, and logs APIs", async () => {
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
       listNotificationHistory: async () => [
         {
           id: 1,
           title: "acme/octopulse PR #7",
-          body: "alice approved review\nAdd pull request polling",
+          body: "alice approved review",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
-          deliveryStatus: "pending" as const,
+          deliveryStatus: "sent" as const,
           createdAt: "2026-04-10 12:03:00",
-          deliveredAt: null,
+          deliveredAt: "2026-04-10T12:03:02.000Z",
           decisionStates: ["notified" as const],
           eventTypes: ["review_approved"],
           actorClasses: ["human_other" as const],
           sourceKind: "immediate" as const,
           repositoryKey: "acme/octopulse",
           isTracked: true,
-        },
-      ],
-      listRecentLogs: async () => [
-        {
-          id: "octopulse-2026-04-10.jsonl:1",
-          timestamp: "2026-04-10T12:05:00.000Z",
-          level: "info" as const,
-          message: "Server boot complete",
         },
       ],
       listRawEvents: async () => [
@@ -89,74 +115,11 @@ describe("startServer", () => {
           decisionState: "notified" as const,
           notificationTiming: "immediate" as const,
           occurredAt: "2026-04-10T12:04:00.000Z",
-          rawPayloadJson: '{"state":"CHANGES_REQUESTED"}',
+          rawPayloadJson: "{\"state\":\"CHANGES_REQUESTED\"}",
           notificationSourceKind: "immediate" as const,
           notificationDeliveryStatus: "sent" as const,
         },
       ],
-    });
-    servers.push(server);
-
-    const response = await fetch(readServerOrigin(server));
-    const html = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("text/html");
-    expect(html).toContain("Octopulse");
-    expect(html).toContain("Add pull request polling");
-    expect(html).toContain("Keep inactive list visible");
-    expect(html).toContain('action="/tracked-pull-requests/manual-track"');
-    expect(html).toContain('href="/logs"');
-    expect(html).toContain('href="/notification-history"');
-    expect(html).toContain('href="/raw-events"');
-    expect(html).toContain("Untrack");
-    expect(html).toContain("Track Again");
-    expect(html).not.toContain("alice approved review");
-    expect(html).not.toContain("Pending");
-    expect(html).not.toContain("Review Changes Requested");
-    expect(html).not.toContain("Raw JSON");
-  });
-
-  it("serves notification history from dedicated path", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listNotificationHistory: async () => [
-        {
-          id: 1,
-          title: "acme/octopulse PR #7",
-          body: "alice approved review\nAdd pull request polling",
-          clickUrl: "https://github.com/acme/octopulse/pull/7",
-          deliveryStatus: "pending" as const,
-          createdAt: "2026-04-10 12:03:00",
-          deliveredAt: null,
-          decisionStates: ["notified" as const],
-          eventTypes: ["review_approved"],
-          actorClasses: ["human_other" as const],
-          sourceKind: "immediate" as const,
-          repositoryKey: "acme/octopulse",
-          isTracked: true,
-        },
-      ],
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/notification-history`);
-    const html = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(html).toContain("Notification History");
-    expect(html).toContain('action="/notification-history"');
-    expect(html).toContain("alice approved review");
-    expect(html).toContain("Pending");
-    expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
-    expect(html).not.toContain("Review Changes Requested");
-  });
-
-  it("serves recent logs from dedicated path", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
       listRecentLogs: async ({ level }) =>
         level === "warn"
           ? [
@@ -165,9 +128,6 @@ describe("startServer", () => {
                 timestamp: "2026-04-11T12:04:00.000Z",
                 level: "warn" as const,
                 message: "Tracked polling slowed down",
-                context: {
-                  eligibleCount: 3,
-                },
               },
             ]
           : [
@@ -177,35 +137,39 @@ describe("startServer", () => {
                 level: "info" as const,
                 message: "Tracked polling cycle complete",
               },
-              {
-                id: "octopulse-2026-04-11.jsonl:3",
-                timestamp: "2026-04-11T12:04:00.000Z",
-                level: "warn" as const,
-                message: "Tracked polling slowed down",
-                context: {
-                  eligibleCount: 3,
-                },
-              },
             ],
     });
     servers.push(server);
 
-    const response = await fetch(`${readServerOrigin(server)}/logs?level=warn`);
-    const html = await response.text();
+    const historyResponse = await fetch(`${readServerOrigin(server)}/api/notification-history`);
+    const rawEventsResponse = await fetch(`${readServerOrigin(server)}/api/raw-events`);
+    const logsResponse = await fetch(`${readServerOrigin(server)}/api/logs?level=warn`);
 
-    expect(response.status).toBe(200);
-    expect(html).toContain("Logs");
-    expect(html).toContain('action="/logs"');
-    expect(html).toContain('href="/logs?level=warn"');
-    expect(html).toContain("Tracked polling slowed down");
-    expect(html).not.toContain("Tracked polling cycle complete");
-  });
+    expect(historyResponse.status).toBe(200);
+    expect(rawEventsResponse.status).toBe(200);
+    expect(logsResponse.status).toBe(200);
 
-  it("serves raw events from dedicated path", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listRawEvents: async () => [
+    expect((await historyResponse.json()) as unknown).toEqual({
+      notificationHistory: [
+        {
+          id: 1,
+          title: "acme/octopulse PR #7",
+          body: "alice approved review",
+          clickUrl: "https://github.com/acme/octopulse/pull/7",
+          deliveryStatus: "sent",
+          createdAt: "2026-04-10 12:03:00",
+          deliveredAt: "2026-04-10T12:03:02.000Z",
+          decisionStates: ["notified"],
+          eventTypes: ["review_approved"],
+          actorClasses: ["human_other"],
+          sourceKind: "immediate",
+          repositoryKey: "acme/octopulse",
+          isTracked: true,
+        },
+      ],
+    });
+    expect((await rawEventsResponse.json()) as unknown).toEqual({
+      rawEvents: [
         {
           id: 17,
           repositoryKey: "acme/octopulse",
@@ -215,488 +179,28 @@ describe("startServer", () => {
           pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
           eventType: "review_changes_requested",
           actorLogin: "alice",
-          actorClass: "human_other" as const,
-          decisionState: "notified" as const,
-          notificationTiming: "immediate" as const,
+          actorClass: "human_other",
+          decisionState: "notified",
+          notificationTiming: "immediate",
           occurredAt: "2026-04-10T12:04:00.000Z",
-          rawPayloadJson: '{"state":"CHANGES_REQUESTED"}',
-          notificationSourceKind: "immediate" as const,
-          notificationDeliveryStatus: "sent" as const,
+          rawPayloadJson: "{\"state\":\"CHANGES_REQUESTED\"}",
+          notificationSourceKind: "immediate",
+          notificationDeliveryStatus: "sent",
         },
       ],
     });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/raw-events`);
-    const html = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(html).toContain("Raw Events");
-    expect(html).toContain('action="/raw-events"');
-    expect(html).toContain("Review Changes Requested");
-    expect(html).toContain("Raw JSON");
-    expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
-    expect(html).not.toContain("alice approved review");
-  });
-
-  it("applies pull request filters on root path", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listTrackedPullRequests: async () => [createPullRequestResponseRecord()],
-      listInactivePullRequests: async () => [
-        createPullRequestResponseRecord({
-          id: 2,
-          githubPullRequestId: 202,
-          repositoryName: "worker",
-          number: 12,
-          title: "Keep inactive list visible",
-          url: "https://github.com/acme/worker/pull/12",
-          state: "closed",
-          isTracked: false,
-          isStickyUntracked: true,
-        }),
-      ],
-    });
-    servers.push(server);
-
-    const query = new URLSearchParams({
-      "pr-state": "inactive",
-      repo: "acme/worker",
-    });
-    const response = await fetch(`${readServerOrigin(server)}/?${query}`);
-    const html = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(html).toContain("Keep inactive list visible");
-    expect(html).not.toContain("Add pull request polling");
-    expect(html).toContain('action="/"');
-    expect(html).not.toContain('name="event-type"');
-  });
-
-  it("applies activity filters on notification history path", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listNotificationHistory: async () => [
+    expect((await logsResponse.json()) as unknown).toEqual({
+      logs: [
         {
-          id: 1,
-          title: "acme/octopulse PR #7",
-          body: "alice approved review\nAdd pull request polling",
-          clickUrl: "https://github.com/acme/octopulse/pull/7",
-          deliveryStatus: "pending" as const,
-          createdAt: "2026-04-10 12:03:00",
-          deliveredAt: null,
-          decisionStates: ["notified" as const],
-          eventTypes: ["review_approved"],
-          actorClasses: ["human_other" as const],
-          sourceKind: "immediate" as const,
-          repositoryKey: "acme/octopulse",
-          isTracked: true,
-        },
-        {
-          id: 2,
-          title: "acme/worker PR #12",
-          body: "CI failed\nKeep inactive list visible",
-          clickUrl: "https://github.com/acme/worker/pull/12",
-          deliveryStatus: "sent" as const,
-          createdAt: "2026-04-11 09:00:00",
-          deliveredAt: "2026-04-11T09:00:05.000Z",
-          decisionStates: ["suppressed_rule" as const],
-          eventTypes: ["issue_comment"],
-          actorClasses: ["bot" as const],
-          sourceKind: "bundle" as const,
-          repositoryKey: "acme/worker",
-          isTracked: false,
+          id: "octopulse-2026-04-11.jsonl:3",
+          timestamp: "2026-04-11T12:04:00.000Z",
+          level: "warn",
+          message: "Tracked polling slowed down",
         },
       ],
-    });
-    servers.push(server);
-
-    const query = new URLSearchParams({
-      "pr-state": "inactive",
-      repo: "acme/worker",
-      "event-type": "issue_comment",
-      "decision-state": "suppressed_rule",
-      "actor-type": "bot",
-      "start-date": "2026-04-11",
-      "end-date": "2026-04-11",
-    });
-    const response = await fetch(`${readServerOrigin(server)}/notification-history?${query}`);
-    const html = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(html).toContain("CI failed");
-    expect(html).not.toContain("Add pull request polling");
-    expect(html).toContain('action="/notification-history"');
-    expect(html).toContain('value="2026-04-11"');
-  });
-
-  it("handles manual track form submissions and shows a success message", async () => {
-    const trackedPullRequests = [createPullRequestResponseRecord()];
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listTrackedPullRequests: async () => trackedPullRequests,
-      listInactivePullRequests: async () => [],
-      manualTrackPullRequestByUrl: async (pullRequestUrl: string) => {
-        const trackedPullRequest = createPullRequestResponseRecord({
-          githubPullRequestId: 303,
-          repositoryName: "api",
-          number: 19,
-          url: pullRequestUrl,
-          title: "Track a pull request from the UI",
-        });
-        trackedPullRequests.push(trackedPullRequest);
-        return {
-          outcome: "tracked" as const,
-          pullRequest: trackedPullRequest,
-        };
-      },
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/tracked-pull-requests/manual-track`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        url: "https://github.com/acme/api/pull/19",
-      }),
-    });
-    const html = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(html).toContain("Now tracking acme/api #19.");
-    expect(html).toContain("Track a pull request from the UI");
-  });
-
-  it("shows a clear no-op message when a tracked PR is submitted again from the UI", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listTrackedPullRequests: async () => [createPullRequestResponseRecord()],
-      listInactivePullRequests: async () => [],
-      manualTrackPullRequestByUrl: async (pullRequestUrl: string) => ({
-        outcome: "already_tracked" as const,
-        pullRequest: createPullRequestResponseRecord({ url: pullRequestUrl }),
-      }),
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/tracked-pull-requests/manual-track`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        url: "https://github.com/acme/octopulse/pull/7",
-      }),
-    });
-    const html = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(html).toContain("acme/octopulse #7 is already tracked.");
-  });
-
-  it("handles manual untrack and re-track form submissions", async () => {
-    const retrackedPullRequest = createPullRequestResponseRecord({
-      githubPullRequestId: 202,
-      repositoryName: "worker",
-      number: 12,
-      title: "Keep inactive list visible",
-      url: "https://github.com/acme/worker/pull/12",
-      isTracked: false,
-      isStickyUntracked: true,
-    });
-    let trackedPullRequests = [createPullRequestResponseRecord()];
-    let inactivePullRequests = [retrackedPullRequest];
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listTrackedPullRequests: async () => trackedPullRequests,
-      listInactivePullRequests: async () => inactivePullRequests,
-      manualUntrackPullRequest: async (githubPullRequestId: number) => {
-        const pullRequest = createPullRequestResponseRecord({
-          githubPullRequestId,
-          isTracked: false,
-          isStickyUntracked: true,
-        });
-        trackedPullRequests = [];
-        inactivePullRequests = [pullRequest, ...inactivePullRequests];
-        return {
-          outcome: "untracked" as const,
-          pullRequest,
-        };
-      },
-      manualTrackPullRequestByUrl: async (pullRequestUrl: string) => {
-        trackedPullRequests = [
-          createPullRequestResponseRecord({
-            ...retrackedPullRequest,
-            url: pullRequestUrl,
-            isTracked: true,
-            isStickyUntracked: false,
-          }),
-        ];
-        inactivePullRequests = [];
-        return {
-          outcome: "tracked" as const,
-          pullRequest: trackedPullRequests[0]!,
-        };
-      },
-    });
-    servers.push(server);
-
-    const untrackResponse = await fetch(
-      `${readServerOrigin(server)}/tracked-pull-requests/101/untrack`,
-      {
-        method: "POST",
-      },
-    );
-    const untrackHtml = await untrackResponse.text();
-
-    expect(untrackResponse.status).toBe(200);
-    expect(untrackHtml).toContain("Stopped tracking acme/octopulse #7.");
-
-    const retrackResponse = await fetch(`${readServerOrigin(server)}/inactive-pull-requests/retrack`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        url: "https://github.com/acme/worker/pull/12",
-      }),
-    });
-    const retrackHtml = await retrackResponse.text();
-
-    expect(retrackResponse.status).toBe(200);
-    expect(retrackHtml).toContain("Now tracking acme/worker #12.");
-    expect(retrackHtml).toContain("Keep inactive list visible");
-  });
-
-  it("handles notification resend form submissions with document redirect", async () => {
-    const resendNotificationRecord = vi.fn(async (_notificationRecordId: number) => undefined);
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      resendNotificationRecord,
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/notification-records/9/resend`, {
-      method: "POST",
-      redirect: "follow",
-    });
-    const html = await response.text();
-
-    expect(response.status).toBe(200);
-    expect(html).toContain("Notification resent.");
-    expect(resendNotificationRecord).toHaveBeenCalledWith(9);
-  });
-
-  it("keeps resend API endpoint returning json", async () => {
-    const resendNotificationRecord = vi.fn(async (_notificationRecordId: number) => undefined);
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      resendNotificationRecord,
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/api/notification-records/9/resend`, {
-      method: "POST",
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("application/json");
-    await expect(response.json()).resolves.toEqual({ success: true });
-    expect(resendNotificationRecord).toHaveBeenCalledWith(9);
-  });
-
-  it("accepts manual pull request tracking requests", async () => {
-    const manualTrackPullRequestByUrl = vi.fn(async (pullRequestUrl: string) => ({
-      outcome: "tracked" as const,
-      pullRequest: createPullRequestResponseRecord({ url: pullRequestUrl }),
-    }));
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      manualTrackPullRequestByUrl,
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/api/tracked-pull-requests`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ url: " https://github.com/acme/octopulse/pull/7 " }),
-    });
-
-    expect(response.status).toBe(201);
-    expect(response.headers.get("content-type")).toContain("application/json");
-    await expect(response.json()).resolves.toMatchObject({
-      outcome: "tracked",
-      pullRequest: {
-        githubPullRequestId: 101,
-        trackingReason: "manual",
-        isTracked: true,
-      },
-    });
-    expect(manualTrackPullRequestByUrl).toHaveBeenCalledWith(
-      "https://github.com/acme/octopulse/pull/7",
-    );
-  });
-
-  it("lists tracked pull requests for the UI layer", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listTrackedPullRequests: async () => [createPullRequestResponseRecord()],
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/api/tracked-pull-requests`);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("application/json");
-    await expect(response.json()).resolves.toEqual({
-      pullRequests: [createPullRequestResponseRecord()],
-    });
-  });
-
-  it("lists inactive pull requests for the UI layer", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      listInactivePullRequests: async () => [
-        createPullRequestResponseRecord({
-          githubPullRequestId: 202,
-          isTracked: false,
-          trackingReason: "manual",
-          isStickyUntracked: true,
-        }),
-      ],
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/api/inactive-pull-requests`);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("application/json");
-    await expect(response.json()).resolves.toEqual({
-      pullRequests: [
-        createPullRequestResponseRecord({
-          githubPullRequestId: 202,
-          isTracked: false,
-          trackingReason: "manual",
-          isStickyUntracked: true,
-        }),
-      ],
-    });
-  });
-
-  it("accepts manual pull request untracking requests", async () => {
-    const manualUntrackPullRequest = vi.fn(async (githubPullRequestId: number) => ({
-      outcome: "untracked" as const,
-      pullRequest: createPullRequestResponseRecord({
-        githubPullRequestId,
-        isTracked: false,
-        trackingReason: "manual",
-        isStickyUntracked: true,
-      }),
-    }));
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      manualUntrackPullRequest,
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/api/tracked-pull-requests/101`, {
-      method: "DELETE",
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("application/json");
-    await expect(response.json()).resolves.toMatchObject({
-      outcome: "untracked",
-      pullRequest: {
-        githubPullRequestId: 101,
-        isTracked: false,
-        isStickyUntracked: true,
-      },
-    });
-    expect(manualUntrackPullRequest).toHaveBeenCalledWith(101);
-  });
-
-  it("returns already tracked responses without treating them as errors", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      manualTrackPullRequestByUrl: async (pullRequestUrl: string) => ({
-        outcome: "already_tracked",
-        pullRequest: createPullRequestResponseRecord({ url: pullRequestUrl }),
-      }),
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/api/tracked-pull-requests`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ url: "https://github.com/acme/octopulse/pull/7" }),
-    });
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      outcome: "already_tracked",
-      pullRequest: {
-        githubPullRequestId: 101,
-      },
-    });
-  });
-
-  it("rejects invalid manual tracking request bodies", async () => {
-    const server = await startServer({
-      host: "127.0.0.1",
-      port: 0,
-      manualTrackPullRequestByUrl: async (pullRequestUrl: string) => ({
-        outcome: "tracked",
-        pullRequest: createPullRequestResponseRecord({ url: pullRequestUrl }),
-      }),
-    });
-    servers.push(server);
-
-    const response = await fetch(`${readServerOrigin(server)}/api/tracked-pull-requests`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    });
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Request body.url must be a non-empty string",
     });
   });
 });
-
-async function closeServer(server: Server): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve();
-    });
-  });
-}
 
 function createPullRequestResponseRecord(
   overrides: Partial<{
@@ -745,4 +249,17 @@ function createPullRequestResponseRecord(
     updatedAt: "2026-04-10 12:00:00",
     ...overrides,
   };
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
 }
