@@ -162,7 +162,7 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
   const fetchPullRequestDetail =
     options.fetchPullRequestDetail ??
     ((client: TClient, coordinates: PullRequestCoordinates) =>
-      fetchPullRequestDetailViaGitHub(
+      fetchPullRequestDetailFromGitHub(
         client as unknown as Octokit,
         coordinates,
       ) as Promise<DiscoveredPullRequest>);
@@ -255,7 +255,7 @@ async function searchOpenAuthoredPullRequestsViaGitHub(
   }
 }
 
-async function fetchPullRequestDetailViaGitHub(
+export async function fetchPullRequestDetailFromGitHub(
   client: Octokit,
   coordinates: PullRequestCoordinates,
 ): Promise<DiscoveredPullRequest> {

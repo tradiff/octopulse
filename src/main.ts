@@ -8,6 +8,7 @@ import {
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./database.js";
 import { initializeGitHubAuth } from "./github.js";
+import { trackPullRequestByUrl } from "./manual-pull-request-tracking.js";
 import { readServerOrigin, startServer } from "./server.js";
 
 async function main(): Promise<void> {
@@ -18,10 +19,14 @@ async function main(): Promise<void> {
   try {
     const config = loadConfig();
     const githubAuth = await initializeGitHubAuth(config);
-    database = initializeDatabase(config.paths);
-    await runFirstRunAuthoredPullRequestDiscovery(database, githubAuth);
-    server = await startServer();
-    recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(database, githubAuth, {
+    const currentDatabase = initializeDatabase(config.paths);
+    database = currentDatabase;
+    await runFirstRunAuthoredPullRequestDiscovery(currentDatabase, githubAuth);
+    server = await startServer({
+      manualTrackPullRequestByUrl: (pullRequestUrl: string) =>
+        trackPullRequestByUrl(currentDatabase, githubAuth, pullRequestUrl),
+    });
+    recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(currentDatabase, githubAuth, {
       intervalMs: config.timings.discoveryPollMs,
     });
 

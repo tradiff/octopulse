@@ -59,6 +59,14 @@ export class PullRequestRepositoryError extends Error {
 export class PullRequestRepository {
   constructor(private readonly database: DatabaseSync) {}
 
+  getPullRequestByRepositoryCoordinates(
+    repositoryOwner: string,
+    repositoryName: string,
+    number: number,
+  ): PullRequestRecord | undefined {
+    return this.readPullRequestByRepositoryCoordinates(repositoryOwner, repositoryName, number);
+  }
+
   upsertPullRequest(input: UpsertPullRequestInput): PullRequestRecord {
     try {
       return withinTransaction(this.database, () => {
