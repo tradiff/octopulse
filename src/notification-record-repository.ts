@@ -26,6 +26,11 @@ export interface CreateNotificationRecordInput {
   deliveredAt?: string | null;
 }
 
+export interface UpdateNotificationRecordDeliveryInput {
+  deliveryStatus: NotificationDeliveryStatus;
+  deliveredAt?: string | null;
+}
+
 export class NotificationRecordRepositoryError extends Error {
   constructor(message: string) {
     super(message);
@@ -107,6 +112,49 @@ export class NotificationRecordRepository {
       .all(pullRequestId);
 
     return rows.map((row) => mapNotificationRecordRow(row));
+  }
+
+  listPendingNotificationRecordsForPullRequest(pullRequestId: number): NotificationRecord[] {
+    const rows = this.database
+      .prepare(
+        `
+          SELECT *
+          FROM NotificationRecord
+          WHERE pull_request_id = ?
+            AND delivery_status = 'pending'
+          ORDER BY created_at ASC, id ASC
+        `,
+      )
+      .all(pullRequestId);
+
+    return rows.map((row) => mapNotificationRecordRow(row));
+  }
+
+  updateNotificationRecordDelivery(
+    id: number,
+    input: UpdateNotificationRecordDeliveryInput,
+  ): NotificationRecord {
+    try {
+      this.database
+        .prepare(
+          `
+            UPDATE NotificationRecord
+            SET delivery_status = ?, delivered_at = ?
+            WHERE id = ?
+          `,
+        )
+        .run(input.deliveryStatus, input.deliveredAt ?? null, id);
+
+      return this.requireNotificationRecordById(id);
+    } catch (error) {
+      if (error instanceof NotificationRecordRepositoryError) {
+        throw error;
+      }
+
+      throw new NotificationRecordRepositoryError(
+        `Failed to update notification record ${id} delivery: ${getErrorMessage(error)}`,
+      );
+    }
   }
 
   private requireNotificationRecordById(id: number): NotificationRecord {

@@ -8,6 +8,10 @@ import {
 } from "./bot-activity-classification.js";
 import { bundlePullRequestEvents } from "./event-bundling.js";
 import type { GitHubAuthContext } from "./github.js";
+import {
+  dispatchPullRequestNotifications,
+  type NotificationDispatcher,
+} from "./notification-dispatch.js";
 import { preparePullRequestNotifications } from "./notification-preparation.js";
 import { ingestPullRequestActivity } from "./pull-request-activity-ingestion.js";
 import { normalizePullRequestActivity } from "./pull-request-activity-normalization.js";
@@ -20,8 +24,10 @@ export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   pullRequestRepository?: Pick<PullRequestRepository, "listPullRequestsForPolling">;
   pollPullRequest?: (client: TClient, pullRequest: PullRequestRecord) => Promise<void>;
   botActivityClassifier?: BotActivityClassifier;
+  notificationDispatcher?: NotificationDispatcher;
   observedAt?: string;
   notificationPreparedAt?: string;
+  notificationDispatchedAt?: string;
   onError?: (error: PullRequestPollingError) => void;
 }
 
@@ -54,8 +60,10 @@ export async function pollTrackedPullRequests<TClient>(
 ): Promise<PollTrackedPullRequestsResult> {
   const pullRequestRepository = options.pullRequestRepository ?? new PullRequestRepository(database);
   const botActivityClassifier = options.botActivityClassifier;
+  const notificationDispatcher = options.notificationDispatcher;
   const observedAt = options.observedAt ?? new Date().toISOString();
   const notificationPreparedAt = options.notificationPreparedAt ?? new Date().toISOString();
+  const notificationDispatchedAt = options.notificationDispatchedAt ?? new Date().toISOString();
   const pollPullRequest =
     options.pollPullRequest ??
     (async (client: TClient, pullRequest: PullRequestRecord) => {
@@ -73,6 +81,16 @@ export async function pollTrackedPullRequests<TClient>(
       }
 
       bundlePullRequestEvents(database, pullRequest.id);
+
+      if (notificationDispatcher) {
+        await dispatchPullRequestNotifications(database, pullRequest, {
+          preparedAt: notificationPreparedAt,
+          dispatchedAt: notificationDispatchedAt,
+          notificationDispatcher,
+        });
+        return;
+      }
+
       preparePullRequestNotifications(database, pullRequest, {
         preparedAt: notificationPreparedAt,
       });

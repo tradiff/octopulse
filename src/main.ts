@@ -9,6 +9,7 @@ import { createOpenAiBotActivityClassifier } from "./bot-activity-classification
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./database.js";
 import { initializeGitHubAuth } from "./github.js";
+import { LinuxNotificationAdapter } from "./linux-notification-adapter.js";
 import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request-tracking.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
 import { readServerOrigin, startServer } from "./server.js";
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
     const botActivityClassifier = config.openAiApiKey
       ? createOpenAiBotActivityClassifier({ apiKey: config.openAiApiKey })
       : undefined;
+    const notificationDispatcher = new LinuxNotificationAdapter();
     const currentDatabase = initializeDatabase(config.paths);
     const pullRequestRepository = new PullRequestRepository(currentDatabase);
     database = currentDatabase;
@@ -54,6 +56,7 @@ async function main(): Promise<void> {
       {
         intervalMs: config.timings.trackedPullRequestPollMs,
         pullRequestRepository,
+        notificationDispatcher,
         ...(botActivityClassifier ? { botActivityClassifier } : {}),
       },
     );
