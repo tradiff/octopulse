@@ -1,24 +1,25 @@
 # Octopulse User-Service Setup
 
-Run install helper from repo root:
+This document covers persistent local setup, service management, logs, and the runtime files Octopulse uses.
+
+## Install The User Service
+
+From the repo root:
 
 ```bash
+mise install
+npm install
 npm run install:user-service
 ```
 
-What helper does:
-- installs `octopulse.service` at `~/.config/systemd/user/octopulse.service`
-- creates example config at `~/.config/octopulse/config.toml` only when file does not already exist
-- leaves runtime data in `~/.local/state/octopulse/octopulse.db`
+The install helper:
 
-After helper runs:
+- writes `octopulse.service` to `~/.config/systemd/user/octopulse.service`
+- creates `~/.config/octopulse/config.toml` only if it does not already exist
+- uses `mise exec -- npm run start` as the service command
+- leaves runtime data under `~/.local/state/octopulse`
 
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now octopulse.service
-systemctl --user status octopulse.service
-journalctl --user -u octopulse.service -f
-```
+## Configure Octopulse
 
 Required config:
 
@@ -39,3 +40,69 @@ discovery_poll_interval = "5m"
 debounce_window = "1m"
 grace_period = "7 days"
 ```
+
+Supported timing units include `ms`, `s`, `m`, `h`, and `day` or `days`.
+
+## Service Management
+
+After the install helper runs:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now octopulse.service
+```
+
+Useful service commands:
+
+```bash
+systemctl --user status octopulse.service
+systemctl --user restart octopulse.service
+systemctl --user stop octopulse.service
+systemctl --user disable octopulse.service
+```
+
+The service is configured with `Restart=on-failure`, so systemd will try to bring it back if the process exits unexpectedly.
+
+## Logs And Debugging
+
+Follow the live logs:
+
+```bash
+journalctl --user -u octopulse.service -f
+```
+
+Show recent logs:
+
+```bash
+journalctl --user -u octopulse.service -n 100
+```
+
+Common debugging checks:
+
+- confirm the config file exists at `~/.config/octopulse/config.toml`
+- confirm `[github].token` is set to a non-empty token
+- check service status with `systemctl --user status octopulse.service`
+- check startup failures in the journal if the UI is not reachable
+- run `npm run start` from the repo root to reproduce startup issues in the foreground
+
+When startup succeeds, Octopulse logs the localhost UI origin and the authenticated GitHub login.
+
+## Runtime Locations
+
+- user service unit: `~/.config/systemd/user/octopulse.service`
+- config file: `~/.config/octopulse/config.toml`
+- state directory: `~/.local/state/octopulse`
+- SQLite database: `~/.local/state/octopulse/octopulse.db`
+
+The app keeps raw GitHub payloads, normalized events, notification history, and tracked pull request state in the SQLite database.
+
+## Runtime Behavior
+
+The service runs a single local process that:
+
+- starts a localhost-only web UI at `http://127.0.0.1:3000`
+- exposes a health endpoint at `http://127.0.0.1:3000/health`
+- performs first-run authored pull request discovery
+- continues recurring authored-PR discovery every 5 minutes by default
+- polls tracked pull requests every minute by default
+- stores data indefinitely unless you remove the state directory manually
