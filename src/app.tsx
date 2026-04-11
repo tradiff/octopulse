@@ -1,23 +1,32 @@
 import { renderToStaticMarkup } from "react-dom/server";
 
-function AppShell() {
+import type { PullRequestRecord } from "./pull-request-repository.js";
+
+interface RenderAppDocumentOptions {
+  trackedPullRequests?: PullRequestRecord[];
+  inactivePullRequests?: PullRequestRecord[];
+}
+
+function AppShell({ trackedPullRequests, inactivePullRequests }: Required<RenderAppDocumentOptions>) {
   return (
     <main>
       <span className="eyebrow">Local GitHub PR pulse</span>
       <h1>Octopulse</h1>
       <p>
-        GitHub activity will appear here once authentication, discovery, and polling are wired
-        in.
+        Local pull request state is rendered from the persisted Octopulse database so tracked and
+        inactive work is visible at a glance.
       </p>
       <div className="grid">
-        <section className="panel">
-          <h2>Tracked Pull Requests</h2>
-          <p>No tracked pull requests yet.</p>
-        </section>
-        <section className="panel">
-          <h2>Inactive Pull Requests</h2>
-          <p>Closed and untracked pull requests will show up here.</p>
-        </section>
+        <PullRequestList
+          title="Tracked Pull Requests"
+          emptyMessage="No tracked pull requests yet."
+          pullRequests={trackedPullRequests}
+        />
+        <PullRequestList
+          title="Inactive Pull Requests"
+          emptyMessage="No inactive pull requests yet."
+          pullRequests={inactivePullRequests}
+        />
         <section className="panel">
           <h2>Notification History</h2>
           <p>Bundled notifications and delivery records will appear here.</p>
@@ -31,7 +40,59 @@ function AppShell() {
   );
 }
 
-export function renderAppDocument(): string {
+function PullRequestList({
+  title,
+  emptyMessage,
+  pullRequests,
+}: {
+  title: string;
+  emptyMessage: string;
+  pullRequests: PullRequestRecord[];
+}) {
+  return (
+    <section className="panel pull-request-panel">
+      <div className="panel-header">
+        <h2>{title}</h2>
+        <span className="count">{pullRequests.length}</span>
+      </div>
+      {pullRequests.length === 0 ? (
+        <p>{emptyMessage}</p>
+      ) : (
+        <ul className="pull-request-list">
+          {pullRequests.map((pullRequest) => (
+            <li key={pullRequest.id} className="pull-request-item">
+              <div className="pull-request-meta">
+                <a href={pullRequest.url} className="pull-request-link">
+                  {pullRequest.repositoryOwner}/{pullRequest.repositoryName} #{pullRequest.number}
+                </a>
+                <span className="state-pill">{formatStateLabel(pullRequest)}</span>
+              </div>
+              <strong>{pullRequest.title}</strong>
+              <span className="pull-request-subtle">Author: {pullRequest.authorLogin}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function formatStateLabel(pullRequest: PullRequestRecord): string {
+  if (pullRequest.isDraft) {
+    return "Draft";
+  }
+
+  if (pullRequest.state.length === 0) {
+    return "Unknown";
+  }
+
+  return `${pullRequest.state[0]!.toUpperCase()}${pullRequest.state.slice(1)}`;
+}
+
+export function renderAppDocument(options: RenderAppDocumentOptions = {}): string {
+  const trackedPullRequests = options.trackedPullRequests ?? [];
+  const inactivePullRequests = options.inactivePullRequests ?? [];
+
   return [
     "<!DOCTYPE html>",
     renderToStaticMarkup(
@@ -102,11 +163,106 @@ export function renderAppDocument(): string {
               margin: 0 0 8px;
               font-size: 1rem;
             }
+
+            strong {
+              display: block;
+              margin-top: 8px;
+              font-size: 1rem;
+              line-height: 1.4;
+            }
+
+            a {
+              color: inherit;
+            }
+
+            .panel-header {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+              margin-bottom: 12px;
+            }
+
+            .count,
+            .state-pill {
+              display: inline-flex;
+              align-items: center;
+              border-radius: 999px;
+              font-size: 0.75rem;
+              font-weight: 600;
+            }
+
+            .count {
+              padding: 4px 10px;
+              background: rgba(56, 189, 248, 0.16);
+              color: #7dd3fc;
+            }
+
+            .pull-request-list {
+              display: grid;
+              gap: 12px;
+              margin: 0;
+              padding: 0;
+              list-style: none;
+            }
+
+            .pull-request-item {
+              padding: 14px;
+              border-radius: 12px;
+              background: rgba(30, 41, 59, 0.72);
+              border: 1px solid rgba(148, 163, 184, 0.18);
+            }
+
+            .pull-request-meta {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+            }
+
+            .pull-request-link {
+              font-size: 0.9rem;
+              color: #7dd3fc;
+              text-decoration: none;
+              word-break: break-word;
+            }
+
+            .pull-request-link:hover {
+              text-decoration: underline;
+            }
+
+            .state-pill {
+              padding: 4px 8px;
+              background: rgba(148, 163, 184, 0.14);
+              color: #cbd5e1;
+              white-space: nowrap;
+            }
+
+            .pull-request-subtle {
+              display: block;
+              margin-top: 6px;
+              font-size: 0.875rem;
+              color: #94a3b8;
+            }
+
+            @media (max-width: 640px) {
+              main {
+                padding: 32px 16px 48px;
+              }
+
+              .pull-request-meta {
+                align-items: flex-start;
+                flex-direction: column;
+              }
+            }
           `}</style>
         </head>
         <body>
           <div id="app">
-            <AppShell />
+            <AppShell
+              trackedPullRequests={trackedPullRequests}
+              inactivePullRequests={inactivePullRequests}
+            />
           </div>
         </body>
       </html>,

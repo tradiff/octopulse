@@ -135,7 +135,20 @@ async function handleRequest(
   }
 
   if (supportsDocumentResponse(request) && pathname === "/") {
-    respond(response, request.method, 200, "text/html; charset=utf-8", renderAppDocument());
+    const trackedPullRequests = options.listTrackedPullRequests
+      ? await options.listTrackedPullRequests()
+      : [];
+    const inactivePullRequests = options.listInactivePullRequests
+      ? await options.listInactivePullRequests()
+      : [];
+
+    respond(
+      response,
+      request.method,
+      200,
+      "text/html; charset=utf-8",
+      renderAppDocument({ trackedPullRequests, inactivePullRequests }),
+    );
     return;
   }
 

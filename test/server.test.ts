@@ -34,7 +34,23 @@ describe("startServer", () => {
   });
 
   it("serves the React shell from the root path", async () => {
-    const server = await startServer({ host: "127.0.0.1", port: 0 });
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listTrackedPullRequests: async () => [createPullRequestResponseRecord()],
+      listInactivePullRequests: async () => [
+        createPullRequestResponseRecord({
+          id: 2,
+          githubPullRequestId: 202,
+          repositoryName: "worker",
+          number: 12,
+          title: "Keep inactive list visible",
+          state: "closed",
+          isTracked: false,
+          isStickyUntracked: true,
+        }),
+      ],
+    });
     servers.push(server);
 
     const response = await fetch(readServerOrigin(server));
@@ -43,7 +59,8 @@ describe("startServer", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(html).toContain("Octopulse");
-    expect(html).toContain("Raw Events");
+    expect(html).toContain("Add pull request polling");
+    expect(html).toContain("Keep inactive list visible");
   });
 
   it("accepts manual pull request tracking requests", async () => {
