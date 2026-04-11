@@ -302,6 +302,193 @@ describe("pollTrackedPullRequests", () => {
       database.close();
     }
   });
+
+  it("keeps repeated polling idempotent and reuses comment fetch cursors", async () => {
+    const { database, repository } = createRepository();
+    const rawEventRepository = new RawEventRepository(database);
+    const issueCommentSinceValues: Array<string | undefined> = [];
+    const reviewCommentSinceValues: Array<string | undefined> = [];
+    const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments": {
+          const since = typeof parameters?.since === "string" ? parameters.since : undefined;
+          issueCommentSinceValues.push(since);
+
+          return {
+            data:
+              since === undefined
+                ? [
+                    {
+                      id: 9101,
+                      user: {
+                        login: "alice",
+                      },
+                      created_at: "2026-04-10T12:11:00.000Z",
+                    },
+                  ]
+                : [],
+          };
+        }
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+          return {
+            data: [
+              {
+                id: 9201,
+                user: {
+                  login: "bob",
+                },
+                state: "APPROVED",
+                submitted_at: "2026-04-10T12:12:00.000Z",
+              },
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments": {
+          const since = typeof parameters?.since === "string" ? parameters.since : undefined;
+          reviewCommentSinceValues.push(since);
+
+          return {
+            data:
+              since === undefined
+                ? [
+                    {
+                      id: 9301,
+                      user: {
+                        login: "carol",
+                      },
+                      created_at: "2026-04-10T12:13:00.000Z",
+                    },
+                  ]
+                : [],
+          };
+        }
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return {
+            data: [
+              {
+                id: 9401,
+                actor: {
+                  login: "octocat",
+                },
+                event: "merged",
+                created_at: "2026-04-10T12:14:00.000Z",
+              },
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          return {
+            data: {
+              total_count: 1,
+              workflow_runs: [
+                {
+                  id: 9501,
+                  head_sha: "abc123",
+                  actor: {
+                    login: "octocat",
+                  },
+                  status: "completed",
+                  conclusion: "success",
+                  updated_at: "2026-04-10T12:15:00.000Z",
+                },
+              ],
+            },
+          };
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      repository.upsertPullRequest(createPullRequestInput());
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      expect(issueCommentSinceValues).toEqual([
+        undefined,
+        "2026-04-10T12:11:00.000Z",
+      ]);
+      expect(reviewCommentSinceValues).toEqual([
+        undefined,
+        "2026-04-10T12:13:00.000Z",
+      ]);
+
+      const pullRequest = repository.listTrackedPullRequests()[0];
+
+      expect(pullRequest).toBeDefined();
+      expect(
+        rawEventRepository.listRawEventsForPullRequest(pullRequest?.id ?? -1).map((rawEvent) => ({
+          source: rawEvent.source,
+          sourceId: rawEvent.sourceId,
+          eventType: rawEvent.eventType,
+        })),
+      ).toEqual([
+        {
+          source: "github_issue_comment",
+          sourceId: "9101",
+          eventType: "issue_comment",
+        },
+        {
+          source: "github_pull_request_review",
+          sourceId: "9201",
+          eventType: "pull_request_review",
+        },
+        {
+          source: "github_pull_request_review_comment",
+          sourceId: "9301",
+          eventType: "pull_request_review_comment",
+        },
+        {
+          source: "github_issue_timeline",
+          sourceId: "9401",
+          eventType: "merged",
+        },
+        {
+          source: "github_actions_workflow_run",
+          sourceId: "9501:2026-04-10T12:15:00.000Z",
+          eventType: "workflow_run",
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 describe("startRecurringTrackedPullRequestPolling", () => {

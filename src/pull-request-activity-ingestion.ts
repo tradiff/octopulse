@@ -12,6 +12,12 @@ const GITHUB_API_HEADERS = {
   "X-GitHub-Api-Version": "2022-11-28",
 };
 const GITHUB_PAGE_SIZE = 100;
+const ISSUE_COMMENT_SOURCE = "github_issue_comment";
+const PULL_REQUEST_REVIEW_SOURCE = "github_pull_request_review";
+const PULL_REQUEST_REVIEW_COMMENT_SOURCE = "github_pull_request_review_comment";
+const ISSUE_TIMELINE_SOURCE = "github_issue_timeline";
+const ACTIONS_WORKFLOW_RUN_SOURCE = "github_actions_workflow_run";
+const ACTIVITY_FETCH_CURSOR_KEY_PREFIX = "pull_request_activity_cursor";
 const SUPPORTED_TIMELINE_EVENT_TYPES = new Set([
   "closed",
   "merged",
@@ -20,11 +26,16 @@ const SUPPORTED_TIMELINE_EVENT_TYPES = new Set([
   "converted_to_draft",
 ]);
 
+type ActivityFetchCursorSource =
+  | typeof ISSUE_COMMENT_SOURCE
+  | typeof PULL_REQUEST_REVIEW_COMMENT_SOURCE;
+
 export interface IngestPullRequestActivityOptions<TClient = Octokit> {
   rawEventRepository?: Pick<RawEventRepository, "insertRawEvent">;
   fetchIssueComments?: (
     client: TClient,
     pullRequest: PullRequestRecord,
+    since?: string,
   ) => Promise<unknown[]>;
   fetchPullRequestReviews?: (
     client: TClient,
@@ -33,6 +44,7 @@ export interface IngestPullRequestActivityOptions<TClient = Octokit> {
   fetchPullRequestReviewComments?: (
     client: TClient,
     pullRequest: PullRequestRecord,
+    since?: string,
   ) => Promise<unknown[]>;
   fetchPullRequestTimeline?: (
     client: TClient,
@@ -64,12 +76,23 @@ export async function ingestPullRequestActivity<TClient>(
   options: IngestPullRequestActivityOptions<TClient> = {},
 ): Promise<IngestPullRequestActivityResult> {
   const rawEventRepository = options.rawEventRepository ?? new RawEventRepository(database);
+  const issueCommentCursor = readActivityFetchCursor(
+    database,
+    pullRequest.id,
+    ISSUE_COMMENT_SOURCE,
+  );
+  const pullRequestReviewCommentCursor = readActivityFetchCursor(
+    database,
+    pullRequest.id,
+    PULL_REQUEST_REVIEW_COMMENT_SOURCE,
+  );
   const fetchIssueComments =
     options.fetchIssueComments ??
-    ((client: TClient, pullRequest: PullRequestRecord) =>
+    ((client: TClient, pullRequest: PullRequestRecord, since?: string) =>
       fetchIssueCommentsFromGitHub(
         client as unknown as Octokit,
         pullRequest,
+        since,
       ) as Promise<unknown[]>);
   const fetchPullRequestReviews =
     options.fetchPullRequestReviews ??
@@ -80,10 +103,11 @@ export async function ingestPullRequestActivity<TClient>(
       ) as Promise<unknown[]>);
   const fetchPullRequestReviewComments =
     options.fetchPullRequestReviewComments ??
-    ((client: TClient, pullRequest: PullRequestRecord) =>
+    ((client: TClient, pullRequest: PullRequestRecord, since?: string) =>
       fetchPullRequestReviewCommentsFromGitHub(
         client as unknown as Octokit,
         pullRequest,
+        since,
       ) as Promise<unknown[]>);
   const fetchPullRequestTimeline =
     options.fetchPullRequestTimeline ??
@@ -106,10 +130,12 @@ export async function ingestPullRequestActivity<TClient>(
       : loadActivity("workflow runs", pullRequest, () => fetchWorkflowRuns(client, pullRequest));
 
   const [issueComments, reviews, reviewComments, timelineEvents, workflowRuns] = await Promise.all([
-    loadActivity("issue comments", pullRequest, () => fetchIssueComments(client, pullRequest)),
+    loadActivity("issue comments", pullRequest, () =>
+      fetchIssueComments(client, pullRequest, issueCommentCursor),
+    ),
     loadActivity("pull request reviews", pullRequest, () => fetchPullRequestReviews(client, pullRequest)),
     loadActivity("pull request review comments", pullRequest, () =>
-      fetchPullRequestReviewComments(client, pullRequest),
+      fetchPullRequestReviewComments(client, pullRequest, pullRequestReviewCommentCursor),
     ),
     loadActivity("pull request timeline events", pullRequest, () =>
       fetchPullRequestTimeline(client, pullRequest),
@@ -134,6 +160,14 @@ export async function ingestPullRequestActivity<TClient>(
 
   let insertedCount = 0;
   let duplicateCount = 0;
+  const nextIssueCommentCursor = pickLaterTimestamp(
+    issueCommentCursor,
+    readLatestActivityCursor(issueComments, "issue comment"),
+  );
+  const nextPullRequestReviewCommentCursor = pickLaterTimestamp(
+    pullRequestReviewCommentCursor,
+    readLatestActivityCursor(reviewComments, "pull request review comment"),
+  );
 
   try {
     for (const rawEvent of rawEvents) {
@@ -144,6 +178,27 @@ export async function ingestPullRequestActivity<TClient>(
       } else {
         duplicateCount += 1;
       }
+    }
+
+    if (nextIssueCommentCursor !== undefined && nextIssueCommentCursor !== issueCommentCursor) {
+      writeActivityFetchCursor(
+        database,
+        pullRequest.id,
+        ISSUE_COMMENT_SOURCE,
+        nextIssueCommentCursor,
+      );
+    }
+
+    if (
+      nextPullRequestReviewCommentCursor !== undefined &&
+      nextPullRequestReviewCommentCursor !== pullRequestReviewCommentCursor
+    ) {
+      writeActivityFetchCursor(
+        database,
+        pullRequest.id,
+        PULL_REQUEST_REVIEW_COMMENT_SOURCE,
+        nextPullRequestReviewCommentCursor,
+      );
     }
   } catch (error) {
     if (error instanceof PullRequestActivityIngestionError) {
@@ -165,6 +220,7 @@ export async function ingestPullRequestActivity<TClient>(
 async function fetchIssueCommentsFromGitHub(
   client: Octokit,
   pullRequest: Pick<PullRequestRecord, "repositoryOwner" | "repositoryName" | "number">,
+  since?: string,
 ): Promise<unknown[]> {
   return fetchAllPagesFromGitHub(
     client,
@@ -173,6 +229,7 @@ async function fetchIssueCommentsFromGitHub(
       owner: pullRequest.repositoryOwner,
       repo: pullRequest.repositoryName,
       issue_number: pullRequest.number,
+      ...(since === undefined ? {} : { since }),
     },
     "issue comments response",
   );
@@ -197,6 +254,7 @@ async function fetchPullRequestReviewsFromGitHub(
 async function fetchPullRequestReviewCommentsFromGitHub(
   client: Octokit,
   pullRequest: Pick<PullRequestRecord, "repositoryOwner" | "repositoryName" | "number">,
+  since?: string,
 ): Promise<unknown[]> {
   return fetchAllPagesFromGitHub(
     client,
@@ -205,6 +263,7 @@ async function fetchPullRequestReviewCommentsFromGitHub(
       owner: pullRequest.repositoryOwner,
       repo: pullRequest.repositoryName,
       pull_number: pullRequest.number,
+      ...(since === undefined ? {} : { since }),
     },
     "pull request review comments response",
   );
@@ -303,7 +362,7 @@ function mapIssueCommentRawEvent(data: unknown, pullRequestId: number): InsertRa
 
   return {
     pullRequestId,
-    source: "github_issue_comment",
+    source: ISSUE_COMMENT_SOURCE,
     sourceId: readSourceId(value, "issue comment"),
     eventType: "issue_comment",
     actorLogin: readNullableLogin(value.user, "issue comment.user"),
@@ -326,7 +385,7 @@ function mapPullRequestReviewRawEvent(
 
   return {
     pullRequestId,
-    source: "github_pull_request_review",
+    source: PULL_REQUEST_REVIEW_SOURCE,
     sourceId: readSourceId(value, "pull request review"),
     eventType: "pull_request_review",
     actorLogin: readNullableLogin(value.user, "pull request review.user"),
@@ -343,7 +402,7 @@ function mapPullRequestReviewCommentRawEvent(
 
   return {
     pullRequestId,
-    source: "github_pull_request_review_comment",
+    source: PULL_REQUEST_REVIEW_COMMENT_SOURCE,
     sourceId: readSourceId(value, "pull request review comment"),
     eventType: "pull_request_review_comment",
     actorLogin: readNullableLogin(value.user, "pull request review comment.user"),
@@ -365,7 +424,7 @@ function mapPullRequestTimelineRawEvent(
 
   return {
     pullRequestId,
-    source: "github_issue_timeline",
+    source: ISSUE_TIMELINE_SOURCE,
     sourceId: readSourceId(value, "pull request timeline event"),
     eventType,
     actorLogin: readNullableLogin(value.actor, "pull request timeline event.actor"),
@@ -392,7 +451,7 @@ function mapWorkflowRunRawEvent(
 
   return {
     pullRequestId,
-    source: "github_actions_workflow_run",
+    source: ACTIONS_WORKFLOW_RUN_SOURCE,
     sourceId: `${readSourceId(value, "workflow run")}:${updatedAt}`,
     eventType: "workflow_run",
     actorLogin: readNullableLogin(value.actor, "workflow run.actor"),
@@ -463,6 +522,85 @@ function readNullableLogin(value: unknown, fieldName: string): string | null {
   }
 
   return readString(login, `${fieldName}.login`);
+}
+
+function readActivityFetchCursor(
+  database: DatabaseSync,
+  pullRequestId: number,
+  source: ActivityFetchCursorSource,
+): string | undefined {
+  const row = database
+    .prepare("SELECT value FROM AppState WHERE key = ?")
+    .get(buildActivityFetchCursorKey(pullRequestId, source));
+
+  if (row === undefined) {
+    return undefined;
+  }
+
+  const value = requireRecord(row, "AppState row").value;
+  return readString(value, "AppState.value");
+}
+
+function writeActivityFetchCursor(
+  database: DatabaseSync,
+  pullRequestId: number,
+  source: ActivityFetchCursorSource,
+  cursor: string | undefined,
+): void {
+  if (cursor === undefined) {
+    return;
+  }
+
+  database
+    .prepare(
+      `
+        INSERT INTO AppState (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+    )
+    .run(buildActivityFetchCursorKey(pullRequestId, source), cursor);
+}
+
+function buildActivityFetchCursorKey(
+  pullRequestId: number,
+  source: ActivityFetchCursorSource,
+): string {
+  return `${ACTIVITY_FETCH_CURSOR_KEY_PREFIX}:${pullRequestId}:${source}`;
+}
+
+function readLatestActivityCursor(items: unknown[], fieldName: string): string | undefined {
+  let latestCursor: string | undefined;
+
+  for (const item of items) {
+    const value = requireRecord(item, fieldName);
+    const updatedAt = value.updated_at;
+    const cursor =
+      updatedAt === undefined || updatedAt === null
+        ? readString(value.created_at, `${fieldName}.created_at`)
+        : readString(updatedAt, `${fieldName}.updated_at`);
+
+    latestCursor = pickLaterTimestamp(latestCursor, cursor);
+  }
+
+  return latestCursor;
+}
+
+function pickLaterTimestamp(
+  left: string | undefined,
+  right: string | undefined,
+): string | undefined {
+  if (left === undefined) {
+    return right;
+  }
+
+  if (right === undefined) {
+    return left;
+  }
+
+  return left >= right ? left : right;
 }
 
 function readString(value: unknown, fieldName: string): string {

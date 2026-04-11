@@ -192,6 +192,79 @@ describe("ingestPullRequestActivity", () => {
       database.close();
     }
   });
+
+  it("dedupes repeated ingestion and reuses comment fetch cursors", async () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const issueCommentSinceValues: Array<string | undefined> = [];
+    const reviewCommentSinceValues: Array<string | undefined> = [];
+
+    try {
+      await expect(
+        ingestPullRequestActivity(database, { kind: "fake-client" }, pullRequest, {
+          fetchIssueComments: async (_client, _pullRequest, since) => {
+            issueCommentSinceValues.push(since);
+            return [createIssueCommentFixture()];
+          },
+          fetchPullRequestReviews: async () => [],
+          fetchPullRequestReviewComments: async (_client, _pullRequest, since) => {
+            reviewCommentSinceValues.push(since);
+            return [createReviewCommentFixture()];
+          },
+          fetchPullRequestTimeline: async () => [],
+          fetchWorkflowRuns: async () => [],
+        }),
+      ).resolves.toEqual({
+        processedCount: 2,
+        insertedCount: 2,
+        duplicateCount: 0,
+      });
+
+      await expect(
+        ingestPullRequestActivity(database, { kind: "fake-client" }, pullRequest, {
+          fetchIssueComments: async (_client, _pullRequest, since) => {
+            issueCommentSinceValues.push(since);
+            return [createIssueCommentFixture()];
+          },
+          fetchPullRequestReviews: async () => [],
+          fetchPullRequestReviewComments: async (_client, _pullRequest, since) => {
+            reviewCommentSinceValues.push(since);
+            return [createReviewCommentFixture()];
+          },
+          fetchPullRequestTimeline: async () => [],
+          fetchWorkflowRuns: async () => [],
+        }),
+      ).resolves.toEqual({
+        processedCount: 2,
+        insertedCount: 0,
+        duplicateCount: 2,
+      });
+
+      expect(issueCommentSinceValues).toEqual([
+        undefined,
+        "2026-04-10T12:01:00.000Z",
+      ]);
+      expect(reviewCommentSinceValues).toEqual([
+        undefined,
+        "2026-04-10T12:04:00.000Z",
+      ]);
+      expect(
+        readAppStateValue(
+          database,
+          `pull_request_activity_cursor:${pullRequest.id}:github_issue_comment`,
+        ),
+      ).toBe("2026-04-10T12:01:00.000Z");
+      expect(
+        readAppStateValue(
+          database,
+          `pull_request_activity_cursor:${pullRequest.id}:github_pull_request_review_comment`,
+        ),
+      ).toBe("2026-04-10T12:04:00.000Z");
+      expect(rawEventRepository.listRawEventsForPullRequest(pullRequest.id)).toHaveLength(2);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createPullRequest(): {
@@ -325,4 +398,18 @@ function createPullRequestInput(
     ...input,
     ...overrides,
   };
+}
+
+function readAppStateValue(
+  database: ReturnType<typeof initializeDatabase>,
+  key: string,
+): string | undefined {
+  const row = database.prepare("SELECT value FROM AppState WHERE key = ?").get(key);
+
+  if (row === undefined || typeof row !== "object" || row === null) {
+    return undefined;
+  }
+
+  const value = (row as { value?: unknown }).value;
+  return typeof value === "string" ? value : undefined;
 }
