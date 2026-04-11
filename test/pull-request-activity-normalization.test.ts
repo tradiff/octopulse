@@ -698,6 +698,65 @@ describe("normalizePullRequestActivity", () => {
     }
   });
 
+  it("derives ci outcomes from node_id-only workflow runs with normalized strings", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "WR_kwDOAA8:2026-04-10T12:52:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "github-actions[bot]",
+        payloadJson: JSON.stringify(
+          createWorkflowRunFixture({
+            id: null,
+            nodeId: "WR_kwDOAA8",
+            actorLogin: "github-actions[bot]",
+            actorType: "Bot",
+            headSha: " ABC123 ",
+            status: " COMPLETED ",
+            conclusion: " SUCCESS ",
+            updatedAt: "2026-04-10T12:52:00.000Z",
+            url: "https://github.com/acme/octopulse/actions/runs/5008",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:52:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 1,
+        normalizedCount: 1,
+        skippedCount: 0,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          actorClass: event.actorClass,
+          payload: parseNormalizedPayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          eventType: "ci_succeeded",
+          actorClass: "bot",
+          payload: {
+            headSha: "abc123",
+            workflowRunId: "WR_kwDOAA8",
+            workflowName: "CI",
+            workflowRunStatus: "completed",
+            workflowRunConclusion: "success",
+            url: "https://github.com/acme/octopulse/actions/runs/5008",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("maps pull request state changes and commit pushes from timeline activity", () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);

@@ -127,6 +127,52 @@ describe("preparePullRequestNotifications", () => {
       database.close();
     }
   });
+
+  it("prepares bundled notifications when prepared exactly at the debounce boundary", () => {
+    const { database, pullRequest } = createPullRequest();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const notificationRecordRepository = new NotificationRecordRepository(database);
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        actorLogin: "alice",
+        actorClass: "human_other",
+        decisionState: "notified",
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+
+      expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
+        eligibleCount: 1,
+        bundledCount: 1,
+        createdBundleCount: 1,
+      });
+
+      expect(
+        preparePullRequestNotifications(database, pullRequest, {
+          preparedAt: "2026-04-10T12:02:00.000Z",
+        }),
+      ).toEqual({
+        immediateCount: 0,
+        bundledCount: 1,
+        createdCount: 1,
+      });
+
+      expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest.id)).toEqual([
+        expect.objectContaining({
+          normalizedEventId: null,
+          eventBundleId: expect.any(Number),
+          title: "acme/octopulse PR #7",
+          body: "alice commented\nAdd notifications",
+          clickUrl: "https://github.com/acme/octopulse/pull/7",
+          deliveryStatus: "pending",
+        }),
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {

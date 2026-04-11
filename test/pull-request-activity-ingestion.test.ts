@@ -303,6 +303,60 @@ describe("ingestPullRequestActivity", () => {
       database.close();
     }
   });
+
+  it("persists workflow runs that only expose node_id", async () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+
+    try {
+      await expect(
+        ingestPullRequestActivity(database, { kind: "fake-client" }, pullRequest, {
+          fetchIssueComments: async () => [],
+          fetchPullRequestReviews: async () => [],
+          fetchPullRequestReviewComments: async () => [],
+          fetchPullRequestTimeline: async () => [],
+          fetchWorkflowRuns: async () => [
+            createWorkflowRunFixture({
+              id: null,
+              nodeId: "WR_kwDOAA7",
+              actorLogin: "github-actions[bot]",
+              headSha: "abc123",
+              status: "completed",
+              conclusion: "failure",
+              updatedAt: "2026-04-10T12:08:00.000Z",
+              url: "https://github.com/acme/octopulse/actions/runs/5007",
+            }),
+          ],
+        }),
+      ).resolves.toEqual({
+        processedCount: 1,
+        insertedCount: 1,
+        duplicateCount: 0,
+      });
+
+      expect(
+        rawEventRepository.listRawEventsForPullRequest(pullRequest.id).map((rawEvent) => ({
+          sourceId: rawEvent.sourceId,
+          actorLogin: rawEvent.actorLogin,
+          occurredAt: rawEvent.occurredAt,
+          payload: JSON.parse(rawEvent.payloadJson),
+        })),
+      ).toEqual([
+        {
+          sourceId: "WR_kwDOAA7:2026-04-10T12:08:00.000Z",
+          actorLogin: "github-actions[bot]",
+          occurredAt: "2026-04-10T12:08:00.000Z",
+          payload: expect.objectContaining({
+            id: null,
+            node_id: "WR_kwDOAA7",
+            head_sha: "abc123",
+          }),
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createPullRequest(): {

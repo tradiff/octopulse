@@ -236,6 +236,60 @@ describe("bundlePullRequestEvents", () => {
       database.close();
     }
   });
+
+  it("keeps events on the debounce boundary in the same bundle", () => {
+    const { database, pullRequest } = createPullRequest();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const eventBundleRepository = new EventBundleRepository(database);
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        actorClass: "human_other",
+        decisionState: "notified",
+        occurredAt: "2026-04-10T12:00:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_inline_comment",
+        actorClass: "human_other",
+        decisionState: "notified",
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+
+      expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
+        eligibleCount: 2,
+        bundledCount: 2,
+        createdBundleCount: 1,
+      });
+
+      const bundles = eventBundleRepository.listEventBundlesForPullRequest(pullRequest.id);
+
+      expect(bundles).toHaveLength(1);
+      expect(bundles[0]).toMatchObject({
+        windowStartedAt: "2026-04-10T12:00:00.000Z",
+        windowEndsAt: "2026-04-10T12:02:00.000Z",
+      });
+      expect(
+        normalizedEventRepository.listNormalizedEventsForBundle(bundles[0]?.id ?? -1).map((event) => ({
+          eventType: event.eventType,
+          occurredAt: event.occurredAt,
+        })),
+      ).toEqual([
+        {
+          eventType: "issue_comment",
+          occurredAt: "2026-04-10T12:00:00.000Z",
+        },
+        {
+          eventType: "review_inline_comment",
+          occurredAt: "2026-04-10T12:01:00.000Z",
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {

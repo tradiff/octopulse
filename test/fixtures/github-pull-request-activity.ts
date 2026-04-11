@@ -55,7 +55,8 @@ interface CommittedTimelineEventFixtureOverrides {
 }
 
 interface WorkflowRunFixtureOverrides {
-  id?: number;
+  id?: number | string | null;
+  nodeId?: string;
   actorLogin?: string;
   actorType?: string;
   headSha?: string;
@@ -183,13 +184,16 @@ export function createCommittedTimelineEventFixture(
 export function createWorkflowRunFixture(
   overrides: WorkflowRunFixtureOverrides = {},
 ): Record<string, unknown> {
-  const id = overrides.id ?? 5001;
+  const id = overrides.id === undefined ? 5001 : overrides.id;
   const updatedAt = overrides.updatedAt ?? "2026-04-10T12:08:00.000Z";
   const createdAt = overrides.createdAt ?? updatedAt;
   const conclusion = overrides.conclusion === undefined ? "success" : overrides.conclusion;
+  const nodeId = overrides.nodeId ?? (id === null ? "WR_kwDOAA" : undefined);
+  const runIdForUrl = typeof id === "number" || typeof id === "string" ? String(id) : "workflow-run";
 
   return {
-    id,
+    ...(id === undefined ? {} : { id }),
+    ...(nodeId === undefined ? {} : { node_id: nodeId }),
     name: overrides.name ?? "CI",
     actor: createIdentityFixture({
       login: overrides.actorLogin ?? "github-actions[bot]",
@@ -200,7 +204,7 @@ export function createWorkflowRunFixture(
     conclusion,
     updated_at: updatedAt,
     created_at: createdAt,
-    html_url: overrides.url ?? buildActionsRunUrl(id),
+    html_url: overrides.url ?? buildActionsRunUrl(runIdForUrl),
   };
 }
 
@@ -218,6 +222,6 @@ function buildCommitUrl(sha: string): string {
   return `https://github.com/${DEFAULT_REPOSITORY_OWNER}/${DEFAULT_REPOSITORY_NAME}/commit/${sha}`;
 }
 
-function buildActionsRunUrl(id: number): string {
+function buildActionsRunUrl(id: string): string {
   return `https://github.com/${DEFAULT_REPOSITORY_OWNER}/${DEFAULT_REPOSITORY_NAME}/actions/runs/${id}`;
 }
