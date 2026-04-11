@@ -90,6 +90,28 @@ describe("initializeDatabase", () => {
       /0002_bad_sql\.sql/,
     );
   });
+
+  it("applies notification record link migrations", () => {
+    const homeDir = createTempDir("octopulse-db-home-");
+    const database = initializeDatabase(resolveAppPaths({ homeDir }));
+
+    try {
+      expect(readTableColumns(database, "NotificationRecord")).toEqual([
+        "id",
+        "event_bundle_id",
+        "pull_request_id",
+        "title",
+        "body",
+        "delivery_status",
+        "created_at",
+        "delivered_at",
+        "normalized_event_id",
+        "click_url",
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createTempDir(prefix: string): string {
@@ -133,4 +155,11 @@ function readCount(database: ReturnType<typeof initializeDatabase>, tableName: s
   }
 
   return Number(row.count);
+}
+
+function readTableColumns(database: ReturnType<typeof initializeDatabase>, tableName: string): string[] {
+  return database
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all()
+    .map((row) => String(row.name));
 }

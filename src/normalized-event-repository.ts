@@ -198,6 +198,29 @@ export class NormalizedEventRepository {
     return rows.map((row) => mapNormalizedEventRow(row));
   }
 
+  listImmediateEligibleUnnotifiedEventsForPullRequest(
+    pullRequestId: number,
+  ): NormalizedEventRecord[] {
+    const decisionStatePlaceholders = BUNDLE_ELIGIBLE_DECISION_STATES.map(() => "?").join(", ");
+    const rows = this.database
+      .prepare(
+        `
+          SELECT normalized_event.*
+          FROM NormalizedEvent normalized_event
+          LEFT JOIN NotificationRecord notification_record
+            ON notification_record.normalized_event_id = normalized_event.id
+          WHERE normalized_event.pull_request_id = ?
+            AND normalized_event.notification_timing = 'immediate'
+            AND normalized_event.decision_state IN (${decisionStatePlaceholders})
+            AND notification_record.id IS NULL
+          ORDER BY normalized_event.occurred_at ASC, normalized_event.id ASC
+        `,
+      )
+      .all(pullRequestId, ...BUNDLE_ELIGIBLE_DECISION_STATES);
+
+    return rows.map((row) => mapNormalizedEventRow(row));
+  }
+
   assignEventBundle(normalizedEventIds: readonly number[], eventBundleId: number): void {
     if (normalizedEventIds.length === 0) {
       return;

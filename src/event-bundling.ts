@@ -134,6 +134,29 @@ export class EventBundleRepository {
     return rows.map((row) => mapEventBundleRow(row));
   }
 
+  listReadyPendingUnnotifiedBundlesForPullRequest(
+    pullRequestId: number,
+    readyAt: string,
+  ): EventBundleRecord[] {
+    const rows = this.database
+      .prepare(
+        `
+          SELECT event_bundle.*
+          FROM EventBundle event_bundle
+          LEFT JOIN NotificationRecord notification_record
+            ON notification_record.event_bundle_id = event_bundle.id
+          WHERE event_bundle.pull_request_id = ?
+            AND event_bundle.status = 'pending'
+            AND event_bundle.window_ends_at <= ?
+            AND notification_record.id IS NULL
+          ORDER BY event_bundle.window_started_at ASC, event_bundle.id ASC
+        `,
+      )
+      .all(pullRequestId, readyAt);
+
+    return rows.map((row) => mapEventBundleRow(row));
+  }
+
   updateEventBundleWindowEnd(id: number, windowEndsAt: string): EventBundleRecord {
     try {
       this.database

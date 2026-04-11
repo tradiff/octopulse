@@ -8,6 +8,7 @@ import {
 } from "./bot-activity-classification.js";
 import { bundlePullRequestEvents } from "./event-bundling.js";
 import type { GitHubAuthContext } from "./github.js";
+import { preparePullRequestNotifications } from "./notification-preparation.js";
 import { ingestPullRequestActivity } from "./pull-request-activity-ingestion.js";
 import { normalizePullRequestActivity } from "./pull-request-activity-normalization.js";
 import {
@@ -20,6 +21,7 @@ export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   pollPullRequest?: (client: TClient, pullRequest: PullRequestRecord) => Promise<void>;
   botActivityClassifier?: BotActivityClassifier;
   observedAt?: string;
+  notificationPreparedAt?: string;
   onError?: (error: PullRequestPollingError) => void;
 }
 
@@ -52,6 +54,8 @@ export async function pollTrackedPullRequests<TClient>(
 ): Promise<PollTrackedPullRequestsResult> {
   const pullRequestRepository = options.pullRequestRepository ?? new PullRequestRepository(database);
   const botActivityClassifier = options.botActivityClassifier;
+  const observedAt = options.observedAt ?? new Date().toISOString();
+  const notificationPreparedAt = options.notificationPreparedAt ?? new Date().toISOString();
   const pollPullRequest =
     options.pollPullRequest ??
     (async (client: TClient, pullRequest: PullRequestRecord) => {
@@ -69,9 +73,11 @@ export async function pollTrackedPullRequests<TClient>(
       }
 
       bundlePullRequestEvents(database, pullRequest.id);
+      preparePullRequestNotifications(database, pullRequest, {
+        preparedAt: notificationPreparedAt,
+      });
     });
   const onError = options.onError ?? logTrackedPullRequestPollingError;
-  const observedAt = options.observedAt ?? new Date().toISOString();
 
   let pullRequests: PullRequestRecord[];
 

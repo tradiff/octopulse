@@ -8,6 +8,7 @@ import { resolveAppPaths } from "../src/config.js";
 import { initializeDatabase } from "../src/database.js";
 import { EventBundleRepository } from "../src/event-bundling.js";
 import { NormalizedEventRepository } from "../src/normalized-event-repository.js";
+import { NotificationRecordRepository } from "../src/notification-record-repository.js";
 import {
   pollTrackedPullRequests,
   startRecurringTrackedPullRequestPolling,
@@ -926,6 +927,110 @@ describe("pollTrackedPullRequests", () => {
       expect(
         normalizedEventRepository.listNormalizedEventsForBundle(bundles[0]?.id ?? -1).map((event) => event.eventType),
       ).toEqual(["issue_comment", "review_inline_comment"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("persists immediate and ready bundled notification records during polling", async () => {
+    const { database, repository } = createRepository();
+    const notificationRecordRepository = new NotificationRecordRepository(database);
+    const request = vi.fn(async (route: string) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+          return {
+            data: [
+              createIssueCommentFixture({
+                id: 9901,
+                actorLogin: "alice",
+                createdAt: "2026-04-10T12:00:00.000Z",
+                body: "Please fix lint",
+              }),
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+          return {
+            data: [
+              createReviewFixture({
+                id: 9902,
+                actorLogin: "bob",
+                state: "APPROVED",
+                submittedAt: "2026-04-10T12:00:10.000Z",
+                body: "LGTM",
+              }),
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+          return {
+            data: [
+              createReviewCommentFixture({
+                id: 9903,
+                actorLogin: "carol",
+                createdAt: "2026-04-10T12:00:20.000Z",
+                body: "Inline follow-up",
+              }),
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return {
+            data: [],
+          };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          return {
+            data: {
+              total_count: 0,
+              workflow_runs: [],
+            },
+          };
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      repository.upsertPullRequest(createPullRequestInput());
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+            notificationPreparedAt: "2026-04-10T12:02:00.000Z",
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      const pullRequest = repository.listTrackedPullRequests()[0];
+
+      expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest?.id ?? -1)).toEqual([
+        expect.objectContaining({
+          normalizedEventId: expect.any(Number),
+          eventBundleId: null,
+          title: "acme/octopulse PR #7",
+          body: "bob approved review\nAdd pull request polling",
+          clickUrl: "https://github.com/acme/octopulse/pull/7",
+          deliveryStatus: "pending",
+        }),
+        expect.objectContaining({
+          normalizedEventId: null,
+          eventBundleId: expect.any(Number),
+          title: "acme/octopulse PR #7",
+          body: "2 comments\nAdd pull request polling",
+          clickUrl: "https://github.com/acme/octopulse/pull/7",
+          deliveryStatus: "pending",
+        }),
+      ]);
     } finally {
       database.close();
     }
