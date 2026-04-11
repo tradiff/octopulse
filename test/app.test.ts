@@ -31,6 +31,7 @@ describe("renderAppDocument", () => {
     expect(html).toContain("Pull Requests");
     expect(html).toContain("Track Pull Request");
     expect(html).toContain('action="/tracked-pull-requests/manual-track"');
+    expect(html).toContain('href="/logs"');
     expect(html).toContain('href="/notification-history"');
     expect(html).toContain('href="/raw-events"');
     expect(html).toContain("acme/octopulse #7");
@@ -100,6 +101,35 @@ describe("renderAppDocument", () => {
     expect(html).toContain('name="event-type"');
     expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
     expect(html).not.toContain('class="pull-request-panel"');
+  });
+
+  it("renders recent logs on the logs page", () => {
+    const html = renderAppDocument({
+      currentPage: "logs",
+      logLevelFilter: "warn",
+      recentLogs: [
+        {
+          id: "octopulse-2026-04-11.jsonl:2",
+          timestamp: "2026-04-11T12:02:45.000Z",
+          level: "warn",
+          message: "Notification dispatch lagged",
+          context: {
+            failedCount: 1,
+            pullRequest: "acme/octopulse#7",
+          },
+        },
+      ],
+    });
+
+    expect(html).toContain("Logs");
+    expect(html).toContain('action="/logs"');
+    expect(html).toContain('href="/logs?level=warn"');
+    expect(html).toContain("Notification dispatch lagged");
+    expect(html).toContain("WARN");
+    expect(html).toContain('&quot;pullRequest&quot;: &quot;acme/octopulse#7&quot;');
+    expect(html).toContain(formatExpectedLocalHistoryTimestamp("2026-04-11T12:02:45.000Z"));
+    expect(html).not.toContain('name="event-type"');
+    expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
   });
 
   it("renders normalized raw events on its own page", () => {

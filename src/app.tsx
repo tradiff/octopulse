@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import type { LogLevelFilter, RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
@@ -15,14 +16,16 @@ export interface AppFlashMessage {
   text: string;
 }
 
-export type AppPage = "pull-requests" | "notification-history" | "raw-events";
+export type AppPage = "pull-requests" | "logs" | "notification-history" | "raw-events";
 
 interface RenderAppDocumentOptions {
   trackedPullRequests?: PullRequestRecord[];
   inactivePullRequests?: PullRequestRecord[];
   notificationHistory?: NotificationHistoryEntry[];
+  recentLogs?: RecentLogEntry[];
   rawEvents?: RawEventsEntry[];
   flashMessage?: AppFlashMessage | undefined;
+  logLevelFilter?: LogLevelFilter;
   uiFilters?: UiFilterValues;
   uiFilterOptions?: UiFilterOptions;
   currentPage?: AppPage;
@@ -40,7 +43,12 @@ const ACTIVITY_FILTER_FIELDS: readonly PageFilterField[] = [
   "startDate",
   "endDate",
 ];
-const APP_PAGES: readonly AppPage[] = ["pull-requests", "notification-history", "raw-events"];
+const APP_PAGES: readonly AppPage[] = [
+  "pull-requests",
+  "notification-history",
+  "raw-events",
+  "logs",
+];
 const SQLITE_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const NAIVE_ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
 const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -58,19 +66,26 @@ function AppShell({
   trackedPullRequests,
   inactivePullRequests,
   notificationHistory,
+  recentLogs,
   rawEvents,
   flashMessage,
+  logLevelFilter,
   uiFilters,
   uiFilterOptions,
   currentPage,
 }: Required<RenderAppDocumentOptions>) {
   const hasActiveFilters = countActivePageFilters(uiFilters, currentPage) > 0;
   const pullRequests = [...trackedPullRequests, ...inactivePullRequests];
+  const showsPageFilters = currentPage !== "logs";
 
   return (
     <main>
       <h1>Octopulse</h1>
-      <PageNavigation currentPage={currentPage} uiFilters={uiFilters} />
+      <PageNavigation
+        currentPage={currentPage}
+        uiFilters={uiFilters}
+        logLevelFilter={logLevelFilter}
+      />
       {currentPage === "pull-requests" ? (
         <section className="panel manual-track-panel">
           <div className="panel-header">
@@ -98,7 +113,9 @@ function AppShell({
           {flashMessage ? <FlashMessage message={flashMessage} /> : null}
         </section>
       ) : null}
-      <FilterPanel currentPage={currentPage} uiFilters={uiFilters} uiFilterOptions={uiFilterOptions} />
+      {showsPageFilters ? (
+        <FilterPanel currentPage={currentPage} uiFilters={uiFilters} uiFilterOptions={uiFilterOptions} />
+      ) : null}
       <div className="page-content">
         {currentPage === "pull-requests" ? (
           <PullRequestList
@@ -107,6 +124,9 @@ function AppShell({
             pullRequests={pullRequests}
             renderAction={renderPullRequestAction}
           />
+        ) : null}
+        {currentPage === "logs" ? (
+          <LogsPanel recentLogs={recentLogs} logLevelFilter={logLevelFilter} />
         ) : null}
         {currentPage === "notification-history" ? (
           <NotificationHistoryPanel
@@ -241,9 +261,11 @@ function FilterPanel({
 function PageNavigation({
   currentPage,
   uiFilters,
+  logLevelFilter,
 }: {
   currentPage: AppPage;
   uiFilters: UiFilterValues;
+  logLevelFilter: LogLevelFilter;
 }) {
   return (
     <nav className="page-nav" aria-label="Octopulse pages">
@@ -254,7 +276,7 @@ function PageNavigation({
           return (
             <a
               key={page}
-              href={buildPageHref(page, uiFilters)}
+              href={buildPageHref(page, uiFilters, logLevelFilter)}
               className={`page-nav-link ${isCurrentPage ? "page-nav-link-current" : ""}`.trim()}
               aria-current={isCurrentPage ? "page" : undefined}
             >
@@ -396,6 +418,93 @@ function RawEventsPanel({
   );
 }
 
+function LogsPanel({
+  recentLogs,
+  logLevelFilter,
+}: {
+  recentLogs: RecentLogEntry[];
+  logLevelFilter: LogLevelFilter;
+}) {
+  return (
+    <section className="panel logs-panel">
+      <div className="panel-header">
+        <div>
+          <h2>Logs</h2>
+          <p className="panel-description">Recent flat-file logs from local runtime.</p>
+        </div>
+        <span className="count">{recentLogs.length}</span>
+      </div>
+      <form method="get" action="/logs" className="logs-toolbar">
+        <label className="filter-field logs-filter-field">
+          <span className="input-label">Level</span>
+          <select name="level" defaultValue={logLevelFilter} className="text-input">
+            <option value="all">All levels</option>
+            <option value="debug">Debug</option>
+            <option value="info">Info</option>
+            <option value="warn">Warn</option>
+            <option value="error">Error</option>
+          </select>
+        </label>
+        <div className="logs-toolbar-actions">
+          <button type="submit" className="action-button primary-button">
+            Apply
+          </button>
+          <a href={buildLogViewerHref(logLevelFilter)} className="action-button clear-filters-link">
+            Refresh
+          </a>
+        </div>
+      </form>
+      {recentLogs.length === 0 ? (
+        <p>
+          {logLevelFilter === "all"
+            ? "No log entries yet."
+            : `No ${formatLogLevelLabel(logLevelFilter)} log entries match current filter.`}
+        </p>
+      ) : (
+        <ul className="logs-list">
+          {recentLogs.map((entry) => (
+            <li key={entry.id} className="logs-item">
+              {entry.context ? (
+                <>
+                  <details className="logs-entry-details">
+                    <summary
+                      className="logs-disclosure-button"
+                      aria-label={`Toggle log context for ${entry.message}`}
+                    >
+                      <span className="logs-disclosure-marker" aria-hidden="true" />
+                    </summary>
+                  </details>
+                  <LogEntrySummary entry={entry} />
+                  <pre className="raw-event-json logs-context-json">
+                    {JSON.stringify(entry.context, null, 2)}
+                  </pre>
+                </>
+              ) : (
+                <>
+                  <span className="logs-disclosure-spacer" aria-hidden="true" />
+                  <LogEntrySummary entry={entry} />
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function LogEntrySummary({ entry }: { entry: RecentLogEntry }) {
+  return (
+    <>
+      <span className="logs-entry-time">{formatHistoryTimestamp(entry.timestamp)}</span>
+      <span className={`log-level-pill log-level-${entry.level}`}>
+        {formatLogLevelLabel(entry.level)}
+      </span>
+      <span className="logs-entry-message">{entry.message}</span>
+    </>
+  );
+}
+
 function PullRequestList({
   title,
   emptyMessage,
@@ -507,8 +616,10 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
   const trackedPullRequests = options.trackedPullRequests ?? [];
   const inactivePullRequests = options.inactivePullRequests ?? [];
   const notificationHistory = options.notificationHistory ?? [];
+  const recentLogs = options.recentLogs ?? [];
   const rawEvents = options.rawEvents ?? [];
   const flashMessage = options.flashMessage;
+  const logLevelFilter = options.logLevelFilter ?? "all";
   const currentPage = options.currentPage ?? "pull-requests";
   const uiFilters: UiFilterValues = options.uiFilters ?? DEFAULT_UI_FILTERS;
   const uiFilterOptions: UiFilterOptions = options.uiFilterOptions ?? {
@@ -677,13 +788,19 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               list-style: none;
             }
 
-            .raw-events-list {
-              display: grid;
-              gap: 12px;
-              margin: 0;
-              padding: 0;
-              list-style: none;
-            }
+             .raw-events-list {
+               display: grid;
+               gap: 12px;
+               margin: 0;
+               padding: 0;
+               list-style: none;
+             }
+
+             .logs-list {
+               margin: 12px 0 0;
+               padding: 0;
+               list-style: none;
+             }
 
             .pull-request-item {
               padding: 14px;
@@ -699,20 +816,36 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               border: 1px solid rgba(148, 163, 184, 0.18);
             }
 
-            .raw-events-item {
-              padding: 14px;
-              border-radius: 12px;
-              background: rgba(30, 41, 59, 0.72);
-              border: 1px solid rgba(148, 163, 184, 0.18);
-            }
+             .raw-events-item {
+               padding: 14px;
+               border-radius: 12px;
+               background: rgba(30, 41, 59, 0.72);
+               border: 1px solid rgba(148, 163, 184, 0.18);
+             }
+
+             .logs-item {
+               padding: 6px 0;
+               display: grid;
+               grid-template-columns: 32px auto auto minmax(0, 1fr);
+               align-items: start;
+               column-gap: 12px;
+             }
+
+             .logs-item + .logs-item {
+               border-top: 1px solid rgba(148, 163, 184, 0.16);
+             }
 
             .notification-history-panel {
               grid-column: 1 / -1;
             }
 
-            .raw-events-panel {
-              grid-column: 1 / -1;
-            }
+             .raw-events-panel {
+               grid-column: 1 / -1;
+             }
+
+             .logs-panel {
+               grid-column: 1 / -1;
+             }
 
             .pull-request-panel {
               grid-column: 1 / -1;
@@ -722,9 +855,17 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               margin-top: 16px;
             }
 
-            .filters-form {
-              margin-top: 16px;
-            }
+             .filters-form {
+               margin-top: 16px;
+             }
+
+             .logs-toolbar {
+               display: flex;
+               flex-wrap: wrap;
+               align-items: flex-end;
+               gap: 12px;
+               margin-bottom: 16px;
+             }
 
             .filters-grid {
               display: grid;
@@ -737,12 +878,22 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               gap: 8px;
             }
 
-            .filters-actions {
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              margin-top: 16px;
-            }
+             .filters-actions {
+               display: flex;
+               align-items: center;
+               gap: 12px;
+               margin-top: 16px;
+             }
+
+             .logs-toolbar-actions {
+               display: flex;
+               align-items: center;
+               gap: 12px;
+             }
+
+             .logs-filter-field {
+               min-width: 180px;
+             }
 
             .panel-description {
               margin-top: 4px;
@@ -813,16 +964,16 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               gap: 12px;
             }
 
-            .raw-events-header {
-              display: flex;
-              align-items: flex-start;
-              justify-content: space-between;
-              gap: 12px;
-            }
+             .raw-events-header {
+               display: flex;
+               align-items: flex-start;
+               justify-content: space-between;
+               gap: 12px;
+             }
 
-            .notification-history-title {
-              margin: 0;
-            }
+             .notification-history-title {
+               margin: 0;
+             }
 
             .notification-history-body {
               margin-top: 10px;
@@ -836,9 +987,77 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               margin-top: 12px;
             }
 
-            .raw-events-meta-row {
-              margin-bottom: 12px;
-            }
+             .raw-events-meta-row {
+               margin-bottom: 12px;
+             }
+
+             .logs-entry-time {
+               color: #94a3b8;
+               font-size: 0.875rem;
+               white-space: nowrap;
+               font-variant-numeric: tabular-nums;
+             }
+
+             .logs-entry-message {
+               min-width: 0;
+                font-size: 1rem;
+                font-weight: 400;
+                line-height: 1.5;
+                word-break: break-word;
+             }
+
+             .logs-entry-details {
+               margin: 0;
+             }
+
+             .logs-entry-details:not([open]) ~ .logs-context-json {
+               display: none;
+             }
+
+             .logs-disclosure-button {
+               display: inline-flex;
+                align-items: center;
+                justify-content: center;
+               width: 32px;
+               padding: 0;
+               list-style: none;
+               cursor: pointer;
+             }
+
+             .logs-entry-details > summary::-webkit-details-marker {
+               display: none;
+             }
+
+             .logs-disclosure-marker,
+             .logs-disclosure-spacer {
+               display: inline-flex;
+               align-items: center;
+               justify-content: center;
+               width: 32px;
+               color: #94a3b8;
+               font-size: 1rem;
+               line-height: 1.2;
+             }
+
+             .logs-disclosure-button .logs-disclosure-marker {
+               width: auto;
+             }
+
+             .logs-disclosure-marker::before {
+               content: "▸";
+             }
+
+             .logs-entry-details[open] .logs-disclosure-marker::before {
+               content: "▾";
+             }
+
+             .logs-context-json {
+               grid-column: 2 / -1;
+               margin: 6px 0 0;
+               padding: 8px 10px;
+               border-radius: 10px;
+               font-size: 0.75rem;
+             }
 
             .raw-event-details {
               margin-top: 10px;
@@ -890,21 +1109,42 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               color: #fde68a;
             }
 
-            .history-pill,
-            .delivery-pill {
-              display: inline-flex;
-              align-items: center;
-              border-radius: 999px;
-              padding: 4px 8px;
-              font-size: 0.75rem;
+             .history-pill,
+             .delivery-pill,
+             .log-level-pill {
+               display: inline-flex;
+               align-items: center;
+               border-radius: 999px;
+               padding: 4px 8px;
+               font-size: 0.75rem;
               font-weight: 600;
               white-space: nowrap;
             }
 
-            .history-pill {
-              background: rgba(148, 163, 184, 0.14);
-              color: #cbd5e1;
-            }
+             .history-pill {
+               background: rgba(148, 163, 184, 0.14);
+               color: #cbd5e1;
+             }
+
+             .log-level-debug {
+               background: rgba(148, 163, 184, 0.14);
+               color: #cbd5e1;
+             }
+
+             .log-level-info {
+               background: rgba(56, 189, 248, 0.16);
+               color: #7dd3fc;
+             }
+
+             .log-level-warn {
+               background: rgba(250, 204, 21, 0.14);
+               color: #fde68a;
+             }
+
+             .log-level-error {
+               background: rgba(248, 113, 113, 0.12);
+               color: #fca5a5;
+             }
 
             .delivery-pending {
               background: rgba(250, 204, 21, 0.14);
@@ -983,14 +1223,24 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
                 flex-direction: column;
               }
 
-              .filters-actions {
-                align-items: stretch;
-                flex-direction: column;
-              }
+               .filters-actions {
+                 align-items: stretch;
+                 flex-direction: column;
+               }
 
-              .pull-request-meta {
-                align-items: flex-start;
-                flex-direction: column;
+               .logs-toolbar {
+                 align-items: stretch;
+                 flex-direction: column;
+               }
+
+               .logs-toolbar-actions {
+                 align-items: stretch;
+                 flex-direction: column;
+               }
+
+               .pull-request-meta {
+                 align-items: flex-start;
+                 flex-direction: column;
               }
 
               .pull-request-controls {
@@ -1002,11 +1252,12 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
                 flex-direction: column;
               }
 
-              .raw-events-header {
-                flex-direction: column;
-              }
-            }
-          `}</style>
+               .raw-events-header {
+                 flex-direction: column;
+               }
+
+             }
+           `}</style>
         </head>
         <body>
           <div id="app">
@@ -1014,8 +1265,10 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
                 trackedPullRequests={trackedPullRequests}
                 inactivePullRequests={inactivePullRequests}
                 notificationHistory={notificationHistory}
+                recentLogs={recentLogs}
                 rawEvents={rawEvents}
                 flashMessage={flashMessage}
+                logLevelFilter={logLevelFilter}
                 uiFilters={uiFilters}
                 uiFilterOptions={uiFilterOptions}
                 currentPage={currentPage}
@@ -1040,10 +1293,26 @@ function countActivePageFilters(filters: UiFilterValues, page: AppPage): number 
 }
 
 function getPageFilterFields(page: AppPage): readonly PageFilterField[] {
-  return page === "pull-requests" ? PULL_REQUEST_FILTER_FIELDS : ACTIVITY_FILTER_FIELDS;
+  if (page === "pull-requests") {
+    return PULL_REQUEST_FILTER_FIELDS;
+  }
+
+  if (page === "logs") {
+    return [];
+  }
+
+  return ACTIVITY_FILTER_FIELDS;
 }
 
-function buildPageHref(page: AppPage, uiFilters: UiFilterValues): string {
+function buildPageHref(
+  page: AppPage,
+  uiFilters: UiFilterValues,
+  logLevelFilter: LogLevelFilter,
+): string {
+  if (page === "logs") {
+    return buildLogViewerHref(logLevelFilter);
+  }
+
   const searchParams = new URLSearchParams();
 
   for (const field of getPageFilterFields(page)) {
@@ -1058,6 +1327,14 @@ function buildPageHref(page: AppPage, uiFilters: UiFilterValues): string {
   const search = searchParams.toString();
 
   return search.length > 0 ? `${pagePath}?${search}` : pagePath;
+}
+
+function buildLogViewerHref(logLevelFilter: LogLevelFilter): string {
+  if (logLevelFilter === "all") {
+    return "/logs";
+  }
+
+  return `/logs?level=${logLevelFilter}`;
 }
 
 function formatFilterSearchParamKey(field: PageFilterField): string {
@@ -1092,6 +1369,10 @@ function formatPageLabel(page: AppPage): string {
     return "Pull Requests";
   }
 
+  if (page === "logs") {
+    return "Logs";
+  }
+
   if (page === "notification-history") {
     return "Notification History";
   }
@@ -1102,6 +1383,10 @@ function formatPageLabel(page: AppPage): string {
 function formatFilterDescription(page: AppPage): string {
   if (page === "pull-requests") {
     return "Refine tracked and untracked pull requests.";
+  }
+
+  if (page === "logs") {
+    return "Refine recent logs.";
   }
 
   if (page === "notification-history") {
@@ -1212,4 +1497,12 @@ function formatEventTypeLabel(eventType: string): string {
 
 function formatNotificationTimingLabel(notificationTiming: "immediate"): string {
   return notificationTiming === "immediate" ? "Immediate timing" : notificationTiming;
+}
+
+function formatLogLevelLabel(level: LogLevelFilter): string {
+  if (level === "all") {
+    return "All";
+  }
+
+  return level.toUpperCase();
 }

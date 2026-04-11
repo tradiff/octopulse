@@ -4,6 +4,7 @@ import {
   LinuxNotificationAdapter,
   type LinuxNotification,
 } from "./linux-notification-adapter.js";
+import { getLogger } from "./logger.js";
 import { preparePullRequestNotifications } from "./notification-preparation.js";
 import { NotificationRecordRepository } from "./notification-record-repository.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
@@ -87,11 +88,24 @@ export async function dispatchPullRequestNotifications(
     }
   }
 
-  return {
+  const result = {
     ...preparation,
     dispatchedCount,
     failedCount,
   };
+
+  if (result.createdCount > 0 || result.dispatchedCount > 0 || result.failedCount > 0) {
+    getLogger().info("Processed pull request notifications", {
+      pullRequest: formatPullRequestLabel(pullRequest),
+      ...result,
+    });
+  } else {
+    getLogger().debug("No pull request notifications were ready to dispatch", {
+      pullRequest: formatPullRequestLabel(pullRequest),
+    });
+  }
+
+  return result;
 }
 
 function formatPullRequestLabel(
@@ -101,7 +115,9 @@ function formatPullRequestLabel(
 }
 
 function logNotificationDispatchError(error: NotificationDispatchError): void {
-  console.error(`Octopulse notification dispatch failed: ${error.message}`);
+  getLogger().error("Octopulse notification dispatch failed", {
+    error,
+  });
 }
 
 function getErrorMessage(error: unknown): string {

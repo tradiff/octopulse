@@ -31,6 +31,10 @@ token = "ghp_replace_with_your_token"
 Optional config:
 
 ```toml
+[logging]
+level = "info"
+retention = "14 days"
+
 [openai]
 api_key = "sk_replace_with_your_key"
 
@@ -42,6 +46,7 @@ grace_period = "7 days"
 ```
 
 Supported timing units include `ms`, `s`, `m`, `h`, and `day` or `days`.
+Supported log levels are `debug`, `info`, `warn`, and `error`.
 
 ## Service Management
 
@@ -71,11 +76,22 @@ Follow the live logs:
 journalctl --user -u octopulse.service -f
 ```
 
+Octopulse also writes structured JSONL log files under `~/.local/state/octopulse/logs`.
+The app mirrors the same entries to stdout and stderr, so journald still receives them.
+
 Show recent logs:
 
 ```bash
 journalctl --user -u octopulse.service -n 100
 ```
+
+Inspect recent file-backed logs in the UI:
+
+- open `http://127.0.0.1:3000/logs`
+- use the level filter to narrow to `debug`, `info`, `warn`, or `error`
+- use the Refresh action to reload recent entries from disk
+
+Log retention defaults to `14 days`. Older daily log files are pruned automatically.
 
 Common debugging checks:
 
@@ -93,6 +109,7 @@ When startup succeeds, Octopulse logs the localhost UI origin and the authentica
 - config file: `~/.config/octopulse/config.toml`
 - state directory: `~/.local/state/octopulse`
 - SQLite database: `~/.local/state/octopulse/octopulse.db`
+- log directory: `~/.local/state/octopulse/logs`
 
 The app keeps raw GitHub payloads, normalized events, notification history, and tracked pull request state in the SQLite database.
 

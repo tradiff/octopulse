@@ -23,6 +23,7 @@ describe("resolveAppPaths", () => {
       configPath: path.join(homeDir, ".config", "octopulse", "config.toml"),
       stateDirPath: path.join(homeDir, ".local", "state", "octopulse"),
       databasePath: path.join(homeDir, ".local", "state", "octopulse", "octopulse.db"),
+      logsDirPath: path.join(homeDir, ".local", "state", "octopulse", "logs"),
     });
   });
 });
@@ -40,6 +41,10 @@ describe("loadConfig", () => {
 
     expect(config.githubToken).toBe("ghp_test_123");
     expect(config.openAiApiKey).toBeUndefined();
+    expect(config.logging).toEqual({
+      level: "info",
+      retentionMs: 14 * 24 * 60 * 60_000,
+    });
     expect(config.timings).toEqual({
       trackedPullRequestPollMs: 60_000,
       discoveryPollMs: 5 * 60_000,
@@ -61,6 +66,10 @@ describe("loadConfig", () => {
         "[openai]",
         'api_key = "sk-test-456"',
         "",
+        "[logging]",
+        'level = "debug"',
+        'retention = "30 days"',
+        "",
         "[timings]",
         'tracked_poll_interval = "2 minutes"',
         'discovery_poll_interval = "10m"',
@@ -74,6 +83,10 @@ describe("loadConfig", () => {
 
     expect(config.githubToken).toBe("ghp_override_123");
     expect(config.openAiApiKey).toBe("sk-test-456");
+    expect(config.logging).toEqual({
+      level: "debug",
+      retentionMs: 30 * 24 * 60 * 60_000,
+    });
     expect(config.timings).toEqual({
       trackedPullRequestPollMs: 2 * 60_000,
       discoveryPollMs: 10 * 60_000,

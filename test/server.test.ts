@@ -67,6 +67,14 @@ describe("startServer", () => {
           isTracked: true,
         },
       ],
+      listRecentLogs: async () => [
+        {
+          id: "octopulse-2026-04-10.jsonl:1",
+          timestamp: "2026-04-10T12:05:00.000Z",
+          level: "info" as const,
+          message: "Server boot complete",
+        },
+      ],
       listRawEvents: async () => [
         {
           id: 17,
@@ -98,6 +106,7 @@ describe("startServer", () => {
     expect(html).toContain("Add pull request polling");
     expect(html).toContain("Keep inactive list visible");
     expect(html).toContain('action="/tracked-pull-requests/manual-track"');
+    expect(html).toContain('href="/logs"');
     expect(html).toContain('href="/notification-history"');
     expect(html).toContain('href="/raw-events"');
     expect(html).toContain("Untrack");
@@ -142,6 +151,54 @@ describe("startServer", () => {
     expect(html).toContain("Pending");
     expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
     expect(html).not.toContain("Review Changes Requested");
+  });
+
+  it("serves recent logs from dedicated path", async () => {
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listRecentLogs: async ({ level }) =>
+        level === "warn"
+          ? [
+              {
+                id: "octopulse-2026-04-11.jsonl:3",
+                timestamp: "2026-04-11T12:04:00.000Z",
+                level: "warn" as const,
+                message: "Tracked polling slowed down",
+                context: {
+                  eligibleCount: 3,
+                },
+              },
+            ]
+          : [
+              {
+                id: "octopulse-2026-04-11.jsonl:2",
+                timestamp: "2026-04-11T12:03:00.000Z",
+                level: "info" as const,
+                message: "Tracked polling cycle complete",
+              },
+              {
+                id: "octopulse-2026-04-11.jsonl:3",
+                timestamp: "2026-04-11T12:04:00.000Z",
+                level: "warn" as const,
+                message: "Tracked polling slowed down",
+                context: {
+                  eligibleCount: 3,
+                },
+              },
+            ],
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/logs?level=warn`);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Logs");
+    expect(html).toContain('action="/logs"');
+    expect(html).toContain('href="/logs?level=warn"');
+    expect(html).toContain("Tracked polling slowed down");
+    expect(html).not.toContain("Tracked polling cycle complete");
   });
 
   it("serves raw events from dedicated path", async () => {

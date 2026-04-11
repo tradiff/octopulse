@@ -37,6 +37,11 @@ Create the config file at `~/.config/octopulse/config.toml`:
 [github]
 token = "ghp_replace_with_your_token"
 
+# Optional file logging settings.
+#[logging]
+#level = "info"
+#retention = "14 days"
+
 # Optional. Used only for bot-authored comment/review classification.
 #[openai]
 #api_key = "sk_replace_with_your_key"
@@ -54,6 +59,7 @@ Default paths:
 - config: `~/.config/octopulse/config.toml`
 - state directory: `~/.local/state/octopulse`
 - database: `~/.local/state/octopulse/octopulse.db`
+- logs: `~/.local/state/octopulse/logs/*.jsonl`
 
 ## Running Locally
 
@@ -79,10 +85,11 @@ npm run dev
 
 ## UI Overview
 
-The root page shows:
+The UI includes pages for:
 
 - tracked pull requests
 - inactive pull requests
+- recent file-backed logs with level filtering
 - notification history
 - normalized raw events with expandable stored payloads
 - filters for PR state, repository, event type, decision state, actor type, and date range

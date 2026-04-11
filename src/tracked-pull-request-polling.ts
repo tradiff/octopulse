@@ -12,6 +12,7 @@ import {
   dispatchPullRequestNotifications,
   type NotificationDispatcher,
 } from "./notification-dispatch.js";
+import { getLogger } from "./logger.js";
 import { preparePullRequestNotifications } from "./notification-preparation.js";
 import { ingestPullRequestActivity } from "./pull-request-activity-ingestion.js";
 import { normalizePullRequestActivity } from "./pull-request-activity-normalization.js";
@@ -75,9 +76,10 @@ export async function pollTrackedPullRequests<TClient>(
           ...(botActivityClassifier ? { botActivityClassifier } : {}),
         });
       } catch (error) {
-        console.error(
-          `Octopulse bot activity classification failed for pull request ${formatPullRequestLabel(pullRequest)}: ${getErrorMessage(error)}`,
-        );
+        getLogger().warn("Bot activity classification failed", {
+          pullRequest: formatPullRequestLabel(pullRequest),
+          error,
+        });
       }
 
       bundlePullRequestEvents(database, pullRequest.id);
@@ -111,6 +113,11 @@ export async function pollTrackedPullRequests<TClient>(
     );
   }
 
+  getLogger().debug("Loaded pull requests eligible for polling", {
+    observedAt,
+    eligibleCount: pullRequests.length,
+  });
+
   let polledCount = 0;
   let failedCount = 0;
 
@@ -118,6 +125,9 @@ export async function pollTrackedPullRequests<TClient>(
     try {
       await pollPullRequest(githubAuth.client, pullRequest);
       polledCount += 1;
+      getLogger().debug("Polled tracked pull request", {
+        pullRequest: formatPullRequestLabel(pullRequest),
+      });
     } catch (error) {
       failedCount += 1;
       onError(
@@ -182,7 +192,13 @@ export function startRecurringTrackedPullRequestPolling<TClient>(
           }
         : pollOptions;
 
-      await pollTrackedPullRequests(database, githubAuth, cycleOptions);
+      const result = await pollTrackedPullRequests(database, githubAuth, cycleOptions);
+
+      if (result.polledCount > 0 || result.failedCount > 0) {
+        getLogger().info("Completed tracked pull request polling cycle", result);
+      } else {
+        getLogger().debug("Tracked pull request polling cycle found no eligible work", result);
+      }
     } catch (error) {
       const pollingError =
         error instanceof PullRequestPollingError
@@ -205,7 +221,9 @@ function formatPullRequestLabel(
 }
 
 function logTrackedPullRequestPollingError(error: PullRequestPollingError): void {
-  console.error(`Octopulse tracked pull request polling failed: ${error.message}`);
+  getLogger().error("Octopulse tracked pull request polling failed", {
+    error,
+  });
 }
 
 function getErrorMessage(error: unknown): string {

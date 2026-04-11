@@ -3,6 +3,14 @@ import type { AddressInfo } from "node:net";
 
 import { renderAppDocument, type AppFlashMessage, type AppPage } from "./app.js";
 import {
+  DEFAULT_LOG_VIEWER_ENTRY_LIMIT,
+  getLogger,
+  isLogLevel,
+  type LogLevel,
+  type LogLevelFilter,
+  type RecentLogEntry,
+} from "./logger.js";
+import {
   ManualPullRequestTrackingError,
   type TrackPullRequestByUrlResult,
   type UntrackPullRequestResult,
@@ -30,6 +38,10 @@ export interface StartServerOptions {
   listTrackedPullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
   listInactivePullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
   listNotificationHistory?: () => SyncOrPromise<NotificationHistoryEntry[]>;
+  listRecentLogs?: (options: {
+    level?: LogLevel;
+    limit?: number;
+  }) => SyncOrPromise<RecentLogEntry[]>;
   listRawEvents?: () => SyncOrPromise<RawEventsEntry[]>;
   manualTrackPullRequestByUrl?: (pullRequestUrl: string) => Promise<TrackPullRequestByUrlResult>;
   manualUntrackPullRequest?: (
@@ -49,6 +61,11 @@ export function startServer(options: StartServerOptions = {}): Promise<Server> {
   const port = options.port ?? DEFAULT_SERVER_PORT;
   const server = createServer((request, response) => {
     void handleRequest(request, response, options).catch((error) => {
+      getLogger().error("HTTP request failed", {
+        method: request.method,
+        path: request.url,
+        error,
+      });
       respond(
         response,
         request.method,
@@ -96,6 +113,7 @@ async function handleRequest(
   const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
   const { pathname, searchParams } = requestUrl;
   const documentPage = readDocumentPage(pathname);
+  const logLevelFilter = readLogLevelFilter(searchParams);
   const trackedPullRequestMatch = pathname.match(/^\/api\/tracked-pull-requests\/(\d+)$/);
   const documentUntrackMatch = pathname.match(/^\/tracked-pull-requests\/(\d+)\/untrack$/);
 
@@ -187,6 +205,13 @@ async function handleRequest(
     const notificationHistory = options.listNotificationHistory
       ? await options.listNotificationHistory()
       : [];
+    const recentLogs =
+      documentPage === "logs" && options.listRecentLogs
+        ? await options.listRecentLogs({
+            ...(logLevelFilter !== "all" ? { level: logLevelFilter } : {}),
+            limit: DEFAULT_LOG_VIEWER_ENTRY_LIMIT,
+          })
+        : [];
     const rawEvents = options.listRawEvents ? await options.listRawEvents() : [];
     const flashMessage = readFlashMessage(searchParams);
     const uiFilters = readUiFilterValues(searchParams);
@@ -207,6 +232,8 @@ async function handleRequest(
         inactivePullRequests: filterInactivePullRequests(inactivePullRequests, uiFilters),
         notificationHistory: filterNotificationHistory(notificationHistory, uiFilters),
         rawEvents: filterRawEvents(rawEvents, uiFilters),
+        recentLogs,
+        logLevelFilter,
         ...(flashMessage ? { flashMessage } : {}),
         uiFilters,
         uiFilterOptions,
@@ -236,8 +263,17 @@ async function handleDocumentManualTrackPullRequestRequest(
     const requestBody = readManualTrackRequestBody(await readFormRequestBody(request));
     const result = await manualTrackPullRequestByUrl(requestBody.url);
 
+    getLogger().info("Handled manual pull request tracking from document flow", {
+      pullRequest: formatPullRequestLabel(result.pullRequest),
+      outcome: result.outcome,
+    });
+
     redirectToDocumentMessage(request, response, createTrackFlashMessage(result));
   } catch (error) {
+    getLogger().warn("Manual pull request tracking from document flow failed", {
+      path: request.url,
+      error,
+    });
     redirectToDocumentMessage(request, response, {
       kind: "error",
       text: getErrorMessage(error),
@@ -266,8 +302,17 @@ async function handleDocumentManualUntrackPullRequestRequest(
     );
     const result = await manualUntrackPullRequest(githubPullRequestId);
 
+    getLogger().info("Handled manual pull request untracking from document flow", {
+      pullRequest: formatPullRequestLabel(result.pullRequest),
+      outcome: result.outcome,
+    });
+
     redirectToDocumentMessage(request, response, createUntrackFlashMessage(result));
   } catch (error) {
+    getLogger().warn("Manual pull request untracking from document flow failed", {
+      path: request.url,
+      error,
+    });
     redirectToDocumentMessage(request, response, {
       kind: "error",
       text: getErrorMessage(error),
@@ -295,6 +340,11 @@ async function handleManualTrackPullRequestRequest(
     const requestBody = readManualTrackRequestBody(await readJsonRequestBody(request));
     const result = await manualTrackPullRequestByUrl(requestBody.url);
 
+    getLogger().info("Handled manual pull request tracking API request", {
+      pullRequest: formatPullRequestLabel(result.pullRequest),
+      outcome: result.outcome,
+    });
+
     respond(
       response,
       request.method,
@@ -304,6 +354,10 @@ async function handleManualTrackPullRequestRequest(
     );
   } catch (error) {
     if (error instanceof ServerError || error instanceof ManualPullRequestTrackingError) {
+      getLogger().warn("Manual pull request tracking API request failed", {
+        path: request.url,
+        error,
+      });
       respond(
         response,
         request.method,
@@ -313,6 +367,11 @@ async function handleManualTrackPullRequestRequest(
       );
       return;
     }
+
+    getLogger().error("Manual pull request tracking API request failed unexpectedly", {
+      path: request.url,
+      error,
+    });
 
     respond(
       response,
@@ -350,6 +409,11 @@ async function handleManualUntrackPullRequestRequest(
     );
     const result = await manualUntrackPullRequest(githubPullRequestId);
 
+    getLogger().info("Handled manual pull request untracking API request", {
+      pullRequest: formatPullRequestLabel(result.pullRequest),
+      outcome: result.outcome,
+    });
+
     respond(
       response,
       request.method,
@@ -359,6 +423,10 @@ async function handleManualUntrackPullRequestRequest(
     );
   } catch (error) {
     if (error instanceof ServerError || error instanceof ManualPullRequestTrackingError) {
+      getLogger().warn("Manual pull request untracking API request failed", {
+        path: request.url,
+        error,
+      });
       respond(
         response,
         request.method,
@@ -368,6 +436,11 @@ async function handleManualUntrackPullRequestRequest(
       );
       return;
     }
+
+    getLogger().error("Manual pull request untracking API request failed unexpectedly", {
+      path: request.url,
+      error,
+    });
 
     respond(
       response,
@@ -517,6 +590,10 @@ function readDocumentPage(pathname: string): AppPage | undefined {
     return "pull-requests";
   }
 
+  if (pathname === "/logs") {
+    return "logs";
+  }
+
   if (pathname === "/notification-history") {
     return "notification-history";
   }
@@ -526,6 +603,16 @@ function readDocumentPage(pathname: string): AppPage | undefined {
   }
 
   return undefined;
+}
+
+function readLogLevelFilter(searchParams: URLSearchParams): LogLevelFilter {
+  const value = searchParams.get("level");
+
+  if (value === null || value === "all") {
+    return "all";
+  }
+
+  return isLogLevel(value) ? value : "all";
 }
 
 function createTrackFlashMessage(result: TrackPullRequestByUrlResult): AppFlashMessage {

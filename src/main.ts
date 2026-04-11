@@ -6,10 +6,16 @@ import {
   type RecurringAuthoredPullRequestDiscoveryHandle,
 } from "./authored-pull-request-discovery.js";
 import { createOpenAiBotActivityClassifier } from "./bot-activity-classification.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, resolveAppPaths } from "./config.js";
 import { initializeDatabase } from "./database.js";
 import { initializeGitHubAuth } from "./github.js";
 import { LinuxNotificationAdapter } from "./linux-notification-adapter.js";
+import {
+  configureAppLogger,
+  DEFAULT_LOG_RETENTION_MS,
+  getLogger,
+  readRecentLogEntries,
+} from "./logger.js";
 import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request-tracking.js";
 import { listNotificationHistory } from "./notification-history.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
@@ -26,8 +32,32 @@ async function main(): Promise<void> {
   let recurringDiscovery: RecurringAuthoredPullRequestDiscoveryHandle | undefined;
   let recurringTrackedPullRequestPolling: RecurringTrackedPullRequestPollingHandle | undefined;
 
+  const defaultPaths = resolveAppPaths();
+  configureAppLogger({
+    logsDirPath: defaultPaths.logsDirPath,
+    minimumLevel: "info",
+    retentionMs: DEFAULT_LOG_RETENTION_MS,
+  });
+  getLogger().info("Octopulse startup initiated", {
+    logsDirPath: defaultPaths.logsDirPath,
+  });
+
   try {
     const config = loadConfig();
+    configureAppLogger({
+      logsDirPath: config.paths.logsDirPath,
+      minimumLevel: config.logging.level,
+      retentionMs: config.logging.retentionMs,
+    });
+    const logger = getLogger();
+    logger.info("Octopulse configuration loaded", {
+      configPath: config.paths.configPath,
+      stateDirPath: config.paths.stateDirPath,
+      databasePath: config.paths.databasePath,
+      logsDirPath: config.paths.logsDirPath,
+      logLevel: config.logging.level,
+      logRetentionMs: config.logging.retentionMs,
+    });
     const githubAuth = await initializeGitHubAuth(config);
     const botActivityClassifier = config.openAiApiKey
       ? createOpenAiBotActivityClassifier({ apiKey: config.openAiApiKey })
@@ -36,11 +66,21 @@ async function main(): Promise<void> {
     const currentDatabase = initializeDatabase(config.paths);
     const pullRequestRepository = new PullRequestRepository(currentDatabase);
     database = currentDatabase;
-    await runFirstRunAuthoredPullRequestDiscovery(currentDatabase, githubAuth);
+    const firstRunDiscoveryResult = await runFirstRunAuthoredPullRequestDiscovery(
+      currentDatabase,
+      githubAuth,
+    );
+    logger.info("Authored pull request discovery completed", firstRunDiscoveryResult);
     server = await startServer({
       listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
       listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
       listNotificationHistory: async () => listNotificationHistory(currentDatabase),
+      listRecentLogs: async ({ level, limit }) =>
+        readRecentLogEntries({
+          logsDirPath: config.paths.logsDirPath,
+          ...(level ? { level } : {}),
+          ...(limit ? { limit } : {}),
+        }),
       listRawEvents: async () => listRawEvents(currentDatabase),
       manualTrackPullRequestByUrl: (pullRequestUrl: string) =>
         trackPullRequestByUrl(currentDatabase, githubAuth, pullRequestUrl, {
@@ -54,6 +94,9 @@ async function main(): Promise<void> {
     recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(currentDatabase, githubAuth, {
       intervalMs: config.timings.discoveryPollMs,
     });
+    logger.info("Started recurring authored pull request discovery", {
+      intervalMs: config.timings.discoveryPollMs,
+    });
     recurringTrackedPullRequestPolling = startRecurringTrackedPullRequestPolling(
       currentDatabase,
       githubAuth,
@@ -64,6 +107,11 @@ async function main(): Promise<void> {
         ...(botActivityClassifier ? { botActivityClassifier } : {}),
       },
     );
+    logger.info("Started recurring tracked pull request polling", {
+      intervalMs: config.timings.trackedPullRequestPollMs,
+      notificationsEnabled: true,
+      botActivityClassificationEnabled: Boolean(botActivityClassifier),
+    });
 
     server.once("close", () => {
       recurringDiscovery?.stop();
@@ -71,16 +119,20 @@ async function main(): Promise<void> {
       closeDatabaseQuietly(database);
     });
 
-    console.log(
-      `Octopulse listening at ${readServerOrigin(server)} for GitHub user ${githubAuth.currentUserLogin}`,
-    );
+    logger.info("Octopulse listening", {
+      origin: readServerOrigin(server),
+      githubUser: githubAuth.currentUserLogin,
+    });
   } catch (error) {
     recurringDiscovery?.stop();
     recurringTrackedPullRequestPolling?.stop();
     await closeServerQuietly(server);
     closeDatabaseQuietly(database);
     const message = error instanceof Error ? error.message : "Unknown startup error";
-    console.error(`Octopulse failed to start: ${message}`);
+    getLogger().error("Octopulse failed to start", {
+      message,
+      error,
+    });
     process.exitCode = 1;
   }
 }

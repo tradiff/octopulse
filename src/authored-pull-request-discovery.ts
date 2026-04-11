@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { Octokit } from "octokit";
 
 import type { GitHubAuthContext } from "./github.js";
+import { getLogger } from "./logger.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
 
 const FIRST_RUN_DISCOVERY_COMPLETED_KEY = "first_run_authored_pull_request_discovery_completed";
@@ -130,7 +131,13 @@ export function startRecurringAuthoredPullRequestDiscovery<TClient>(
     isRunning = true;
 
     try {
-      await discoverOpenAuthoredPullRequests(database, githubAuth, discoveryOptions);
+      const result = await discoverOpenAuthoredPullRequests(database, githubAuth, discoveryOptions);
+
+      if (result.discoveredCount > 0) {
+        getLogger().info("Completed authored pull request discovery cycle", result);
+      } else {
+        getLogger().debug("Authored pull request discovery cycle found no new pull requests", result);
+      }
     } catch (error) {
       const discoveryError =
         error instanceof PullRequestDiscoveryError
@@ -182,6 +189,11 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
     );
   }
 
+  getLogger().debug("Loaded authored pull requests from GitHub search", {
+    authorLogin: githubAuth.currentUserLogin,
+    discoveredCount: coordinatesList.length,
+  });
+
   for (const coordinates of coordinatesList) {
     let pullRequest: DiscoveredPullRequest;
 
@@ -213,6 +225,9 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
         mergedAt: pullRequest.mergedAt,
         graceUntil: null,
         lastSeenHeadSha: pullRequest.lastSeenHeadSha,
+      });
+      getLogger().debug("Persisted discovered authored pull request", {
+        pullRequest: formatPullRequestLabel(coordinates),
       });
     } catch (error) {
       if (error instanceof PullRequestDiscoveryError) {
@@ -425,7 +440,9 @@ function formatPullRequestLabel(coordinates: PullRequestCoordinates): string {
 }
 
 function logRecurringDiscoveryError(error: PullRequestDiscoveryError): void {
-  console.error(`Octopulse recurring authored pull request discovery failed: ${error.message}`);
+  getLogger().error("Octopulse recurring authored pull request discovery failed", {
+    error,
+  });
 }
 
 function getErrorMessage(error: unknown): string {

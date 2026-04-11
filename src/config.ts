@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { parse } from "smol-toml";
 
+import { DEFAULT_LOG_RETENTION_MS, isLogLevel, type LogLevel } from "./logger.js";
+
 const DEFAULT_TRACKED_PULL_REQUEST_POLL_MS = 60_000;
 const DEFAULT_DISCOVERY_POLL_MS = 5 * 60_000;
 const DEFAULT_DEBOUNCE_WINDOW_MS = 60_000;
@@ -23,12 +25,17 @@ export interface AppPaths {
   configPath: string;
   stateDirPath: string;
   databasePath: string;
+  logsDirPath: string;
 }
 
 export interface AppConfig {
   paths: AppPaths;
   githubToken: string;
   openAiApiKey?: string;
+  logging: {
+    level: LogLevel;
+    retentionMs: number;
+  };
   timings: {
     trackedPullRequestPollMs: number;
     discoveryPollMs: number;
@@ -57,6 +64,7 @@ export function resolveAppPaths(options: ResolveAppPathsOptions = {}): AppPaths 
     configPath,
     stateDirPath,
     databasePath: path.join(stateDirPath, "octopulse.db"),
+    logsDirPath: path.join(stateDirPath, "logs"),
   };
 }
 
@@ -90,7 +98,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 
 function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
   const root = requireTable(parsedConfig, "config");
-  assertAllowedKeys(root, ["github", "openai", "timings"]);
+  assertAllowedKeys(root, ["github", "openai", "timings", "logging"]);
 
   const github = requireNestedTable(root, "github");
   assertAllowedKeys(github, ["token"], "github");
@@ -114,6 +122,11 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
     );
   }
 
+  const logging = optionalNestedTable(root, "logging");
+  if (logging) {
+    assertAllowedKeys(logging, ["level", "retention"], "logging");
+  }
+
   const openAiApiKey = openai
     ? optionalNonEmptyString(openai, "api_key", "openai.api_key")
     : undefined;
@@ -122,6 +135,15 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
     paths,
     githubToken: requireNonEmptyString(github, "token", "github.token"),
     ...(openAiApiKey ? { openAiApiKey } : {}),
+    logging: {
+      level: optionalLogLevel(logging, "level", "logging.level", "info"),
+      retentionMs: optionalDuration(
+        logging,
+        "retention",
+        "logging.retention",
+        DEFAULT_LOG_RETENTION_MS,
+      ),
+    },
     timings: {
       trackedPullRequestPollMs: optionalDuration(
         timings,
@@ -233,6 +255,25 @@ function optionalDuration(
   }
 
   return parseDuration(value, fieldPath);
+}
+
+function optionalLogLevel(
+  table: ConfigTable | undefined,
+  key: string,
+  fieldPath: string,
+  defaultValue: LogLevel,
+): LogLevel {
+  const value = table?.[key];
+
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  if (typeof value !== "string" || !isLogLevel(value)) {
+    throw new ConfigError(`${fieldPath} must be one of debug, info, warn, or error`);
+  }
+
+  return value;
 }
 
 function parseDuration(value: string, fieldPath: string): number {
