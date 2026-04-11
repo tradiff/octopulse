@@ -4,13 +4,20 @@ import {
   NormalizedEventRepository,
   type ActorClass,
   type InsertNormalizedEventInput,
+  type NormalizedEventRecord,
 } from "./normalized-event-repository.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import { RawEventRepository, type RawEventRecord } from "./raw-event-repository.js";
 
 export interface NormalizePullRequestActivityOptions {
-  rawEventRepository?: Pick<RawEventRepository, "listUnnormalizedRawEventsForPullRequest">;
-  normalizedEventRepository?: Pick<NormalizedEventRepository, "insertNormalizedEvent">;
+  rawEventRepository?: Pick<
+    RawEventRepository,
+    "listUnnormalizedRawEventsForPullRequest" | "listRawEventsForPullRequest"
+  >;
+  normalizedEventRepository?: Pick<
+    NormalizedEventRepository,
+    "insertNormalizedEvent" | "listNormalizedEventsForPullRequest"
+  >;
 }
 
 export interface NormalizePullRequestActivityResult {
@@ -32,9 +39,31 @@ export class PullRequestActivityNormalizationError extends Error {
   }
 }
 
+type CiOutcomeEventType = "ci_failed" | "ci_succeeded";
+
+interface WorkflowRunSnapshot {
+  workflowRunId: number | string;
+  headSha: string;
+  status: string;
+  conclusion: string | null;
+  actorType: string | null;
+  name: string | null;
+  url: string | null;
+}
+
+interface DerivedCiOutcomeEvent extends InsertNormalizedEventInput {
+  rawEventId: number;
+  eventType: CiOutcomeEventType;
+}
+
+interface WorkflowRunHistoryEntry {
+  rawEvent: RawEventRecord;
+  snapshot: WorkflowRunSnapshot;
+}
+
 export function normalizePullRequestActivity(
   database: DatabaseSync,
-  pullRequest: Pick<PullRequestRecord, "id">,
+  pullRequest: Pick<PullRequestRecord, "id" | "lastSeenHeadSha">,
   currentUserLogin: string,
   options: NormalizePullRequestActivityOptions = {},
 ): NormalizePullRequestActivityResult {
@@ -46,7 +75,14 @@ export function normalizePullRequestActivity(
   let skippedCount = 0;
 
   try {
+    const workflowRawEventIds = new Set<number>();
+
     for (const rawEvent of rawEvents) {
+      if (rawEvent.eventType === "workflow_run") {
+        workflowRawEventIds.add(rawEvent.id);
+        continue;
+      }
+
       const normalizedEvent = normalizeRawEvent(rawEvent, currentUserLogin);
 
       if (normalizedEvent === undefined) {
@@ -56,6 +92,28 @@ export function normalizePullRequestActivity(
 
       normalizedEventRepository.insertNormalizedEvent(normalizedEvent);
       normalizedCount += 1;
+    }
+
+    if (workflowRawEventIds.size > 0) {
+      let normalizedWorkflowCount = 0;
+
+      for (const ciOutcomeEvent of deriveMissingCiOutcomeEvents({
+        pullRequest,
+        currentUserLogin,
+        rawEvents: rawEventRepository.listRawEventsForPullRequest(pullRequest.id),
+        normalizedEvents: normalizedEventRepository.listNormalizedEventsForPullRequest(
+          pullRequest.id,
+        ),
+      })) {
+        normalizedEventRepository.insertNormalizedEvent(ciOutcomeEvent);
+        normalizedCount += 1;
+
+        if (workflowRawEventIds.has(ciOutcomeEvent.rawEventId)) {
+          normalizedWorkflowCount += 1;
+        }
+      }
+
+      skippedCount += workflowRawEventIds.size - normalizedWorkflowCount;
     }
   } catch (error) {
     if (error instanceof PullRequestActivityNormalizationError) {
@@ -182,7 +240,7 @@ function mapNormalizedEventType(
     case "committed":
       return "commit_pushed";
     case "workflow_run":
-      // CI needs cross-run derivation in later slice.
+      // CI outcomes derive from workflow history, not single raw events.
       return undefined;
     default:
       return undefined;
@@ -201,6 +259,156 @@ function mapReviewEventType(payload: Record<string, unknown>): string {
   }
 
   return "review_submitted";
+}
+
+function deriveMissingCiOutcomeEvents(input: {
+  pullRequest: Pick<PullRequestRecord, "id" | "lastSeenHeadSha">;
+  currentUserLogin: string;
+  rawEvents: RawEventRecord[];
+  normalizedEvents: NormalizedEventRecord[];
+}): DerivedCiOutcomeEvent[] {
+  const headSha = normalizeHeadSha(input.pullRequest.lastSeenHeadSha);
+
+  if (headSha === null) {
+    return [];
+  }
+
+  const existingCiOutcomeRawEventIds = new Set(
+    input.normalizedEvents.flatMap((event) =>
+      isCiOutcomeEventType(event.eventType) && event.rawEventId !== null ? [event.rawEventId] : [],
+    ),
+  );
+  const workflowHistory = input.rawEvents.flatMap((rawEvent) => {
+    if (rawEvent.eventType !== "workflow_run") {
+      return [];
+    }
+
+    const snapshot = parseWorkflowRunSnapshot(rawEvent);
+
+    return snapshot.headSha === headSha ? [{ rawEvent, snapshot }] : [];
+  });
+  const workflowRunSnapshots = new Map<string, WorkflowRunSnapshot>();
+  const derivedEvents: DerivedCiOutcomeEvent[] = [];
+  let previousOutcome: CiOutcomeEventType | undefined;
+
+  for (const [index, workflowRun] of workflowHistory.entries()) {
+    workflowRunSnapshots.set(String(workflowRun.snapshot.workflowRunId), workflowRun.snapshot);
+
+    const nextOutcome = resolveCiOutcomeEventType(workflowRunSnapshots);
+
+    if (nextOutcome === previousOutcome) {
+      continue;
+    }
+
+    if (
+      nextOutcome === "ci_succeeded" &&
+      shouldDelayInitialCiSuccess({
+        workflowHistory,
+        currentIndex: index,
+        observedWorkflowRunIds: workflowRunSnapshots,
+        previousOutcome,
+      })
+    ) {
+      continue;
+    }
+
+    previousOutcome = nextOutcome;
+
+    if (nextOutcome === undefined || existingCiOutcomeRawEventIds.has(workflowRun.rawEvent.id)) {
+      continue;
+    }
+
+    derivedEvents.push({
+      rawEventId: workflowRun.rawEvent.id,
+      pullRequestId: workflowRun.rawEvent.pullRequestId,
+      eventType: nextOutcome,
+      actorLogin: workflowRun.rawEvent.actorLogin,
+      actorClass: classifyActor({
+        currentUserLogin: input.currentUserLogin,
+        actorLogin: workflowRun.rawEvent.actorLogin,
+        actorType: workflowRun.snapshot.actorType,
+      }),
+      payloadJson: serializeNormalizedPayload(
+        workflowRun.rawEvent,
+        buildCiOutcomePayload(workflowRun.snapshot),
+      ),
+      occurredAt: workflowRun.rawEvent.occurredAt,
+    });
+  }
+
+  return derivedEvents;
+}
+
+function parseWorkflowRunSnapshot(rawEvent: RawEventRecord): WorkflowRunSnapshot {
+  const payload = parseRawPayload(rawEvent);
+
+  return {
+    workflowRunId: readWorkflowRunId(payload, rawEvent),
+    headSha: readRequiredNormalizedString(payload.head_sha, rawEvent, "workflow run.head_sha"),
+    status: readRequiredNormalizedString(payload.status, rawEvent, "workflow run.status"),
+    conclusion: readOptionalNormalizedString(payload.conclusion),
+    actorType: readActorType(payload),
+    name: readOptionalString(payload.name),
+    url: readOptionalString(payload.html_url),
+  };
+}
+
+function buildCiOutcomePayload(
+  workflowRun: WorkflowRunSnapshot,
+): Record<string, number | string | null> {
+  return {
+    headSha: workflowRun.headSha,
+    workflowRunId: workflowRun.workflowRunId,
+    workflowName: workflowRun.name,
+    workflowRunStatus: workflowRun.status,
+    workflowRunConclusion: workflowRun.conclusion,
+    url: workflowRun.url,
+  };
+}
+
+function resolveCiOutcomeEventType(
+  workflowRuns: ReadonlyMap<string, WorkflowRunSnapshot>,
+): CiOutcomeEventType | undefined {
+  if (workflowRuns.size === 0) {
+    return undefined;
+  }
+
+  let allSucceeded = true;
+
+  for (const workflowRun of workflowRuns.values()) {
+    if (workflowRun.conclusion === "failure") {
+      return "ci_failed";
+    }
+
+    if (workflowRun.status !== "completed" || workflowRun.conclusion !== "success") {
+      allSucceeded = false;
+    }
+  }
+
+  return allSucceeded ? "ci_succeeded" : undefined;
+}
+
+function isCiOutcomeEventType(eventType: string): eventType is CiOutcomeEventType {
+  return eventType === "ci_failed" || eventType === "ci_succeeded";
+}
+
+function shouldDelayInitialCiSuccess(input: {
+  workflowHistory: readonly WorkflowRunHistoryEntry[];
+  currentIndex: number;
+  observedWorkflowRunIds: ReadonlyMap<string, WorkflowRunSnapshot>;
+  previousOutcome: CiOutcomeEventType | undefined;
+}): boolean {
+  if (input.previousOutcome !== undefined) {
+    return false;
+  }
+
+  for (const laterWorkflowRun of input.workflowHistory.slice(input.currentIndex + 1)) {
+    if (!input.observedWorkflowRunIds.has(String(laterWorkflowRun.snapshot.workflowRunId))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function serializeNormalizedPayload(
@@ -265,8 +473,56 @@ function readOptionalString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function readRequiredNormalizedString(
+  value: unknown,
+  rawEvent: Pick<RawEventRecord, "id">,
+  fieldName: string,
+): string {
+  const normalizedValue = readOptionalNormalizedString(value);
+
+  if (normalizedValue !== null) {
+    return normalizedValue;
+  }
+
+  throw new PullRequestActivityNormalizationError(
+    `Raw event ${rawEvent.id} ${fieldName} must be a non-empty string`,
+  );
+}
+
+function readOptionalNormalizedString(value: unknown): string | null {
+  const stringValue = readOptionalString(value)?.trim().toLowerCase();
+  return stringValue && stringValue.length > 0 ? stringValue : null;
+}
+
 function readOptionalInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+}
+
+function readWorkflowRunId(
+  payload: Record<string, unknown>,
+  rawEvent: Pick<RawEventRecord, "id">,
+): number | string {
+  const numericId = readOptionalInteger(payload.id);
+
+  if (numericId !== null) {
+    return numericId;
+  }
+
+  const stringId = readOptionalString(payload.id)?.trim();
+
+  if (stringId && stringId.length > 0) {
+    return stringId;
+  }
+
+  const nodeId = readOptionalString(payload.node_id)?.trim();
+
+  if (nodeId && nodeId.length > 0) {
+    return nodeId;
+  }
+
+  throw new PullRequestActivityNormalizationError(
+    `Raw event ${rawEvent.id} workflow run payload must include id or node_id`,
+  );
 }
 
 function readCommitMessageHeadline(payload: Record<string, unknown>): string | null {
@@ -301,6 +557,12 @@ function normalizeReviewState(state: string | null): string | null {
 function normalizeActorType(actorType: string | null | undefined): string | null {
   return typeof actorType === "string" && actorType.trim().length > 0
     ? actorType.trim().toLowerCase()
+    : null;
+}
+
+function normalizeHeadSha(headSha: string | null | undefined): string | null {
+  return typeof headSha === "string" && headSha.trim().length > 0
+    ? headSha.trim().toLowerCase()
     : null;
 }
 

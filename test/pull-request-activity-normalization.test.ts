@@ -60,7 +60,7 @@ describe("classifyActor", () => {
 });
 
 describe("normalizePullRequestActivity", () => {
-  it("persists comment and review payload needed for later rules", () => {
+  it("persists comment, review, and ci payload needed for later rules", () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);
     const normalizedEventRepository = new NormalizedEventRepository(database);
@@ -190,28 +190,30 @@ describe("normalizePullRequestActivity", () => {
         occurredAt: "2026-04-10T12:07:00.000Z",
       }).rawEvent;
 
-      rawEventRepository.insertRawEvent({
+      const workflowRunRawEvent = rawEventRepository.insertRawEvent({
         pullRequestId: pullRequest.id,
         source: "github_actions_workflow_run",
-        sourceId: "4001:2026-04-10T12:04:00.000Z",
+        sourceId: "4001:2026-04-10T12:08:00.000Z",
         eventType: "workflow_run",
         actorLogin: "github-actions[bot]",
-        payloadJson: JSON.stringify({
-          id: 4001,
-          actor: {
-            login: "github-actions[bot]",
-            type: "Bot",
-          },
-          conclusion: "success",
-          head_sha: "abc123",
-        }),
+        payloadJson: JSON.stringify(
+          createWorkflowRunPayload({
+            id: 4001,
+            actorLogin: "github-actions[bot]",
+            actorType: "Bot",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "success",
+            updatedAt: "2026-04-10T12:08:00.000Z",
+          }),
+        ),
         occurredAt: "2026-04-10T12:08:00.000Z",
-      });
+      }).rawEvent;
 
       expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
         processedCount: 8,
-        normalizedCount: 7,
-        skippedCount: 1,
+        normalizedCount: 8,
+        skippedCount: 0,
       });
 
       expect(
@@ -302,14 +304,280 @@ describe("normalizePullRequestActivity", () => {
           actorClass: "self",
           payload: {},
         },
+        {
+          rawEventId: workflowRunRawEvent?.id ?? null,
+          eventType: "ci_succeeded",
+          actorLogin: "github-actions[bot]",
+          actorClass: "bot",
+          payload: {
+            headSha: "abc123",
+            workflowRunId: 4001,
+            workflowName: "CI",
+            workflowRunStatus: "completed",
+            workflowRunConclusion: "success",
+            url: "https://github.com/acme/octopulse/actions/runs/4001",
+          },
+        },
       ]);
 
       expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
-        processedCount: 1,
+        processedCount: 0,
         normalizedCount: 0,
+        skippedCount: 0,
+      });
+      expect(normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id)).toHaveLength(8);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("derives ci_failed when any workflow run on current head sha fails", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "5101:2026-04-10T12:30:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createWorkflowRunPayload({
+            id: 5101,
+            actorLogin: "octocat",
+            actorType: "User",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "success",
+            updatedAt: "2026-04-10T12:30:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:30:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "5102:2026-04-10T12:31:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createWorkflowRunPayload({
+            id: 5102,
+            actorLogin: "octocat",
+            actorType: "User",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "failure",
+            updatedAt: "2026-04-10T12:31:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:31:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 2,
+        normalizedCount: 1,
         skippedCount: 1,
       });
-      expect(normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id)).toHaveLength(7);
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          actorLogin: event.actorLogin,
+          actorClass: event.actorClass,
+          payload: parseNormalizedPayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          eventType: "ci_failed",
+          actorLogin: "octocat",
+          actorClass: "self",
+          payload: {
+            headSha: "abc123",
+            workflowRunId: 5102,
+            workflowName: "CI",
+            workflowRunStatus: "completed",
+            workflowRunConclusion: "failure",
+            url: "https://github.com/acme/octopulse/actions/runs/5102",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("preserves red-to-green ci transitions on same head sha", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "5201:2026-04-10T12:40:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createWorkflowRunPayload({
+            id: 5201,
+            actorLogin: "octocat",
+            actorType: "User",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "failure",
+            updatedAt: "2026-04-10T12:40:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:40:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 1,
+        normalizedCount: 1,
+        skippedCount: 0,
+      });
+
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "5201:2026-04-10T12:45:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createWorkflowRunPayload({
+            id: 5201,
+            actorLogin: "octocat",
+            actorType: "User",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "success",
+            updatedAt: "2026-04-10T12:45:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:45:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 1,
+        normalizedCount: 1,
+        skippedCount: 0,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          payload: parseNormalizedPayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          eventType: "ci_failed",
+          payload: {
+            headSha: "abc123",
+            workflowRunId: 5201,
+            workflowName: "CI",
+            workflowRunStatus: "completed",
+            workflowRunConclusion: "failure",
+            url: "https://github.com/acme/octopulse/actions/runs/5201",
+          },
+        },
+        {
+          eventType: "ci_succeeded",
+          payload: {
+            headSha: "abc123",
+            workflowRunId: 5201,
+            workflowName: "CI",
+            workflowRunStatus: "completed",
+            workflowRunConclusion: "success",
+            url: "https://github.com/acme/octopulse/actions/runs/5201",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("ignores workflow runs from stale head shas", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const pullRequestRepository = new PullRequestRepository(database);
+
+    try {
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "5301:2026-04-10T12:50:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createWorkflowRunPayload({
+            id: 5301,
+            actorLogin: "octocat",
+            actorType: "User",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "failure",
+            updatedAt: "2026-04-10T12:50:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:50:00.000Z",
+      });
+
+      const updatedPullRequest = pullRequestRepository.upsertPullRequest(
+        createPullRequestInput({
+          lastSeenHeadSha: "def456",
+        }),
+      );
+
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "5302:2026-04-10T12:51:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createWorkflowRunPayload({
+            id: 5302,
+            actorLogin: "octocat",
+            actorType: "User",
+            headSha: "def456",
+            status: "completed",
+            conclusion: "success",
+            updatedAt: "2026-04-10T12:51:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:51:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, updatedPullRequest, "octocat")).toEqual({
+        processedCount: 2,
+        normalizedCount: 1,
+        skippedCount: 1,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          payload: parseNormalizedPayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          eventType: "ci_succeeded",
+          payload: {
+            headSha: "def456",
+            workflowRunId: 5302,
+            workflowName: "CI",
+            workflowRunStatus: "completed",
+            workflowRunConclusion: "success",
+            url: "https://github.com/acme/octopulse/actions/runs/5302",
+          },
+        },
+      ]);
     } finally {
       database.close();
     }
@@ -762,5 +1030,29 @@ function createCommittedTimelinePayload(overrides: {
         date: overrides.committedAt,
       },
     },
+  };
+}
+
+function createWorkflowRunPayload(overrides: {
+  id: number;
+  actorLogin: string;
+  actorType: string;
+  headSha: string;
+  status: string;
+  conclusion: string | null;
+  updatedAt: string;
+}): Record<string, unknown> {
+  return {
+    id: overrides.id,
+    name: "CI",
+    actor: {
+      login: overrides.actorLogin,
+      type: overrides.actorType,
+    },
+    head_sha: overrides.headSha,
+    status: overrides.status,
+    conclusion: overrides.conclusion,
+    updated_at: overrides.updatedAt,
+    html_url: `https://github.com/acme/octopulse/actions/runs/${overrides.id}`,
   };
 }

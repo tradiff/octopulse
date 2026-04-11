@@ -329,6 +329,11 @@ describe("pollTrackedPullRequests", () => {
           actorLogin: "octocat",
           actorClass: "self",
         },
+        {
+          eventType: "ci_failed",
+          actorLogin: "octocat",
+          actorClass: "self",
+        },
       ]);
     } finally {
       database.close();
@@ -544,6 +549,11 @@ describe("pollTrackedPullRequests", () => {
         },
         {
           eventType: "pr_merged",
+          actorLogin: "octocat",
+          actorClass: "self",
+        },
+        {
+          eventType: "ci_succeeded",
           actorLogin: "octocat",
           actorClass: "self",
         },
