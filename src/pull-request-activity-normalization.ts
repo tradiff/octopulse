@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   NormalizedEventRepository,
   type ActorClass,
+  type DecisionState,
   type InsertNormalizedEventInput,
   type NormalizedEventRecord,
 } from "./normalized-event-repository.js";
@@ -162,16 +163,19 @@ function normalizeRawEvent(
     return undefined;
   }
 
+  const actorClass = classifyActor({
+    currentUserLogin,
+    actorLogin: rawEvent.actorLogin,
+    actorType: readActorType(payload),
+  });
+
   return {
     rawEventId: rawEvent.id,
     pullRequestId: rawEvent.pullRequestId,
     eventType,
     actorLogin: rawEvent.actorLogin,
-    actorClass: classifyActor({
-      currentUserLogin,
-      actorLogin: rawEvent.actorLogin,
-      actorType: readActorType(payload),
-    }),
+    actorClass,
+    decisionState: resolveDecisionState(eventType, actorClass),
     payloadJson: serializeNormalizedPayload(rawEvent, buildNormalizedPayload(rawEvent, payload)),
     occurredAt: rawEvent.occurredAt,
   };
@@ -318,16 +322,19 @@ function deriveMissingCiOutcomeEvents(input: {
       continue;
     }
 
+    const actorClass = classifyActor({
+      currentUserLogin: input.currentUserLogin,
+      actorLogin: workflowRun.rawEvent.actorLogin,
+      actorType: workflowRun.snapshot.actorType,
+    });
+
     derivedEvents.push({
       rawEventId: workflowRun.rawEvent.id,
       pullRequestId: workflowRun.rawEvent.pullRequestId,
       eventType: nextOutcome,
       actorLogin: workflowRun.rawEvent.actorLogin,
-      actorClass: classifyActor({
-        currentUserLogin: input.currentUserLogin,
-        actorLogin: workflowRun.rawEvent.actorLogin,
-        actorType: workflowRun.snapshot.actorType,
-      }),
+      actorClass,
+      decisionState: resolveDecisionState(nextOutcome, actorClass),
       payloadJson: serializeNormalizedPayload(
         workflowRun.rawEvent,
         buildCiOutcomePayload(workflowRun.snapshot),
@@ -390,6 +397,14 @@ function resolveCiOutcomeEventType(
 
 function isCiOutcomeEventType(eventType: string): eventType is CiOutcomeEventType {
   return eventType === "ci_failed" || eventType === "ci_succeeded";
+}
+
+function resolveDecisionState(eventType: string, actorClass: ActorClass): DecisionState {
+  if (actorClass === "self" && !isCiOutcomeEventType(eventType)) {
+    return "suppressed_self_action";
+  }
+
+  return "notified";
 }
 
 function shouldDelayInitialCiSuccess(input: {

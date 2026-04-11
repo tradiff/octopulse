@@ -68,6 +68,100 @@ describe("classifyActor", () => {
 });
 
 describe("normalizePullRequestActivity", () => {
+  it("suppresses self-authored direct actions but keeps ci outcomes notified", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_comment",
+        sourceId: "1101",
+        eventType: "issue_comment",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createIssueCommentFixture({
+            id: 1101,
+            actorLogin: "octocat",
+            actorType: "User",
+            body: "I pushed follow-up",
+            createdAt: "2026-04-10T12:00:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:00:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_timeline",
+        sourceId: "1102",
+        eventType: "merged",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createTimelineEventFixture({
+            id: 1102,
+            actorLogin: "octocat",
+            actorType: "User",
+            event: "merged",
+            createdAt: "2026-04-10T12:01:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "1103:2026-04-10T12:02:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createWorkflowRunFixture({
+            id: 1103,
+            actorLogin: "octocat",
+            actorType: "User",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "success",
+            updatedAt: "2026-04-10T12:02:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:02:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 3,
+        normalizedCount: 3,
+        skippedCount: 0,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          actorClass: event.actorClass,
+          decisionState: event.decisionState,
+        })),
+      ).toEqual([
+        {
+          eventType: "issue_comment",
+          actorClass: "self",
+          decisionState: "suppressed_self_action",
+        },
+        {
+          eventType: "pr_merged",
+          actorClass: "self",
+          decisionState: "suppressed_self_action",
+        },
+        {
+          eventType: "ci_succeeded",
+          actorClass: "self",
+          decisionState: "notified",
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("persists comment, review, and ci payload needed for later rules", () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);
@@ -867,6 +961,58 @@ describe("normalizePullRequestActivity", () => {
           eventType: "review_submitted",
           reviewState: "DISMISSED",
         },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("persists all supported decision states", () => {
+    const { database, pullRequest } = createPullRequest();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        decisionState: "notified",
+        occurredAt: "2026-04-10T12:31:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        decisionState: "suppressed_self_action",
+        occurredAt: "2026-04-10T12:32:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        decisionState: "suppressed_rule",
+        occurredAt: "2026-04-10T12:33:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        decisionState: "notified_ai_fallback",
+        occurredAt: "2026-04-10T12:34:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        decisionState: "error",
+        occurredAt: "2026-04-10T12:35:00.000Z",
+      });
+
+      expect(
+        normalizedEventRepository
+          .listNormalizedEventsForPullRequest(pullRequest.id)
+          .map((event) => event.decisionState),
+      ).toEqual([
+        "notified",
+        "suppressed_self_action",
+        "suppressed_rule",
+        "notified_ai_fallback",
+        "error",
       ]);
     } finally {
       database.close();

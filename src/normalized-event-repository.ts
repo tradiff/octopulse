@@ -2,6 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 
 export type ActorClass = "self" | "human_other" | "bot";
 
+export type DecisionState =
+  | "notified"
+  | "suppressed_self_action"
+  | "suppressed_rule"
+  | "notified_ai_fallback"
+  | "error";
+
 export interface NormalizedEventRecord {
   id: number;
   rawEventId: number | null;
@@ -9,7 +16,7 @@ export interface NormalizedEventRecord {
   eventType: string;
   actorLogin: string | null;
   actorClass: ActorClass | null;
-  decisionState: string | null;
+  decisionState: DecisionState | null;
   summary: string | null;
   payloadJson: string;
   occurredAt: string;
@@ -22,7 +29,7 @@ export interface InsertNormalizedEventInput {
   eventType: string;
   actorLogin?: string | null;
   actorClass?: ActorClass | null;
-  decisionState?: string | null;
+  decisionState?: DecisionState | null;
   summary?: string | null;
   payloadJson?: string;
   occurredAt: string;
@@ -122,7 +129,7 @@ function mapNormalizedEventRow(row: unknown): NormalizedEventRecord {
     eventType: readString(value.event_type, "NormalizedEvent.event_type"),
     actorLogin: readNullableString(value.actor_login, "NormalizedEvent.actor_login"),
     actorClass: readNullableActorClass(value.actor_class, "NormalizedEvent.actor_class"),
-    decisionState: readNullableString(value.decision_state, "NormalizedEvent.decision_state"),
+    decisionState: readNullableDecisionState(value.decision_state, "NormalizedEvent.decision_state"),
     summary: readNullableString(value.summary, "NormalizedEvent.summary"),
     payloadJson: readString(value.payload_json, "NormalizedEvent.payload_json"),
     occurredAt: readString(value.occurred_at, "NormalizedEvent.occurred_at"),
@@ -183,6 +190,28 @@ function readNullableActorClass(value: unknown, fieldName: string): ActorClass |
 
   throw new NormalizedEventRepositoryError(
     `${fieldName} must be self, human_other, bot, or null`,
+  );
+}
+
+function readNullableDecisionState(value: unknown, fieldName: string): DecisionState | null {
+  if (value === null) {
+    return null;
+  }
+
+  const decisionState = readString(value, fieldName);
+
+  if (
+    decisionState === "notified" ||
+    decisionState === "suppressed_self_action" ||
+    decisionState === "suppressed_rule" ||
+    decisionState === "notified_ai_fallback" ||
+    decisionState === "error"
+  ) {
+    return decisionState;
+  }
+
+  throw new NormalizedEventRepositoryError(
+    `${fieldName} must be notified, suppressed_self_action, suppressed_rule, notified_ai_fallback, error, or null`,
   );
 }
 
