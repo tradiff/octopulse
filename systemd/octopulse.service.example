@@ -7,7 +7,8 @@ Wants=network-online.target
 Type=simple
 
 # Copy this file to ~/.config/systemd/user/octopulse.service and replace
-# __REPO_ROOT__ with the absolute path to this repository checkout.
+# __REPO_ROOT__ with the absolute path to this repository checkout, or run
+# `npm run install:user-service` from repo root to install it automatically.
 WorkingDirectory=__REPO_ROOT__
 ExecStart=/usr/bin/env mise exec -- npm run start
 Restart=on-failure

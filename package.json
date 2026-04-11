@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
+    "install:user-service": "tsx src/install-user-service.ts",
     "start": "tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json",
