@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { renderAppDocument } from "../src/app.js";
 
 describe("renderAppDocument", () => {
-  it("renders one combined pull request list", () => {
+  it("renders pull requests on root page", () => {
     const html = renderAppDocument({
       trackedPullRequests: [
         createPullRequestRecord({
@@ -31,6 +31,8 @@ describe("renderAppDocument", () => {
     expect(html).toContain("Pull Requests");
     expect(html).toContain("Track Pull Request");
     expect(html).toContain('action="/tracked-pull-requests/manual-track"');
+    expect(html).toContain('href="/notification-history"');
+    expect(html).toContain('href="/raw-events"');
     expect(html).toContain("acme/octopulse #7");
     expect(html).toContain("acme/worker #18");
     expect(html).toContain("Track recurring discovery output");
@@ -39,6 +41,9 @@ describe("renderAppDocument", () => {
     expect(html).toContain("Closed");
     expect(html).toContain("Untrack");
     expect(html).toContain("Track Again");
+    expect(html).not.toContain('name="event-type"');
+    expect(html).not.toContain('class="notification-history-panel"');
+    expect(html).not.toContain('class="raw-events-panel"');
   });
 
   it("renders empty-state messages when no pull requests are available", () => {
@@ -59,8 +64,9 @@ describe("renderAppDocument", () => {
     expect(html).toContain("acme/octopulse #7 is already tracked.");
   });
 
-  it("renders notification history with delivery and decision details", () => {
+  it("renders notification history on its own page", () => {
     const html = renderAppDocument({
+      currentPage: "notification-history",
       notificationHistory: [
         {
           id: 9,
@@ -81,6 +87,8 @@ describe("renderAppDocument", () => {
     });
 
     expect(html).toContain("Notification History");
+    expect(html).toContain('action="/notification-history"');
+    expect(html).toContain("notification-history-panel");
     expect(html).toContain("acme/octopulse PR #7");
     expect(html).toContain("1 comment, CI failed");
     expect(html).toContain("Sent");
@@ -88,10 +96,14 @@ describe("renderAppDocument", () => {
     expect(html).toContain("Notified");
     expect(html).toContain("AI fallback");
     expect(html).toContain("Delivered 2026-04-10 12:02:45 UTC");
+    expect(html).toContain('name="event-type"');
+    expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
+    expect(html).not.toContain('class="pull-request-panel"');
   });
 
-  it("renders normalized raw events with expandable raw JSON", () => {
+  it("renders normalized raw events on its own page", () => {
     const html = renderAppDocument({
+      currentPage: "raw-events",
       rawEvents: [
         {
           id: 17,
@@ -114,6 +126,8 @@ describe("renderAppDocument", () => {
     });
 
     expect(html).toContain("Raw Events");
+    expect(html).toContain('action="/raw-events"');
+    expect(html).toContain("raw-events-panel");
     expect(html).toContain("acme/octopulse #7");
     expect(html).toContain("Review Changes Requested");
     expect(html).toContain("Actor alice");
@@ -121,10 +135,13 @@ describe("renderAppDocument", () => {
     expect(html).toContain("Raw JSON");
     expect(html).toContain("&quot;CHANGES_REQUESTED&quot;");
     expect(html).toContain('<details class="raw-event-details">');
+    expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
+    expect(html).not.toContain('class="pull-request-panel"');
   });
 
-  it("renders filter controls and available options", () => {
+  it("renders activity filter controls and available options", () => {
     const html = renderAppDocument({
+      currentPage: "notification-history",
       uiFilters: {
         pullRequestState: "inactive",
         repository: "acme/worker",
@@ -143,6 +160,7 @@ describe("renderAppDocument", () => {
     });
 
     expect(html).toContain("Filters");
+    expect(html).toContain('action="/notification-history"');
     expect(html).toContain('name="pr-state"');
     expect(html).toContain("Untracked only");
     expect(html).toContain("acme/worker");

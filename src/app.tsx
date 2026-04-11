@@ -5,7 +5,7 @@ import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
 import {
-  countActiveUiFilters,
+  DEFAULT_UI_FILTERS,
   type UiFilterOptions,
   type UiFilterValues,
 } from "./ui-filters.js";
@@ -15,6 +15,8 @@ export interface AppFlashMessage {
   text: string;
 }
 
+export type AppPage = "pull-requests" | "notification-history" | "raw-events";
+
 interface RenderAppDocumentOptions {
   trackedPullRequests?: PullRequestRecord[];
   inactivePullRequests?: PullRequestRecord[];
@@ -23,7 +25,22 @@ interface RenderAppDocumentOptions {
   flashMessage?: AppFlashMessage | undefined;
   uiFilters?: UiFilterValues;
   uiFilterOptions?: UiFilterOptions;
+  currentPage?: AppPage;
 }
+
+type PageFilterField = keyof UiFilterValues;
+
+const PULL_REQUEST_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestState", "repository"];
+const ACTIVITY_FILTER_FIELDS: readonly PageFilterField[] = [
+  "pullRequestState",
+  "repository",
+  "eventType",
+  "decisionState",
+  "actorClass",
+  "startDate",
+  "endDate",
+];
+const APP_PAGES: readonly AppPage[] = ["pull-requests", "notification-history", "raw-events"];
 
 function AppShell({
   trackedPullRequests,
@@ -33,80 +50,89 @@ function AppShell({
   flashMessage,
   uiFilters,
   uiFilterOptions,
+  currentPage,
 }: Required<RenderAppDocumentOptions>) {
-  const hasActiveFilters = countActiveUiFilters(uiFilters) > 0;
+  const hasActiveFilters = countActivePageFilters(uiFilters, currentPage) > 0;
   const pullRequests = [...trackedPullRequests, ...inactivePullRequests];
 
   return (
     <main>
-      <span className="eyebrow">Local GitHub PR pulse</span>
       <h1>Octopulse</h1>
-      <p>
-        Local pull request state is rendered from persisted Octopulse database so tracked and
-        untracked work, notification history, and raw events stay visible and filterable.
-      </p>
-      <FilterPanel uiFilters={uiFilters} uiFilterOptions={uiFilterOptions} />
-      <section className="panel manual-track-panel">
-        <div className="panel-header">
-          <h2>Track Pull Request</h2>
-        </div>
-        <p>Paste a GitHub pull request URL to start tracking it locally.</p>
-        <form method="post" action="/tracked-pull-requests/manual-track" className="track-form">
-          <label className="input-label" htmlFor="pull-request-url">
-            Pull request URL
-          </label>
-          <div className="track-form-row">
-            <input
-              id="pull-request-url"
-              name="url"
-              type="url"
-              required
-              placeholder="https://github.com/octo-org/octo-repo/pull/123"
-              className="text-input"
-            />
-            <button type="submit" className="action-button primary-button">
-              Track PR
-            </button>
+      <PageNavigation currentPage={currentPage} uiFilters={uiFilters} />
+      {currentPage === "pull-requests" ? (
+        <section className="panel manual-track-panel">
+          <div className="panel-header">
+            <h2>Track Pull Request</h2>
           </div>
-        </form>
-        {flashMessage ? <FlashMessage message={flashMessage} /> : null}
-      </section>
-      <div className="grid">
-        <PullRequestList
-          title="Pull Requests"
-          emptyMessage={formatPullRequestEmptyMessage(uiFilters, hasActiveFilters)}
-          pullRequests={pullRequests}
-          renderAction={renderPullRequestAction}
-        />
-        <NotificationHistoryPanel
-          notificationHistory={notificationHistory}
-          hasActiveFilters={hasActiveFilters}
-        />
-        <RawEventsPanel rawEvents={rawEvents} hasActiveFilters={hasActiveFilters} />
+          <p>Paste a GitHub pull request URL to start tracking it locally.</p>
+          <form method="post" action="/tracked-pull-requests/manual-track" className="track-form">
+            <label className="input-label" htmlFor="pull-request-url">
+              Pull request URL
+            </label>
+            <div className="track-form-row">
+              <input
+                id="pull-request-url"
+                name="url"
+                type="url"
+                required
+                placeholder="https://github.com/octo-org/octo-repo/pull/123"
+                className="text-input"
+              />
+              <button type="submit" className="action-button primary-button">
+                Track PR
+              </button>
+            </div>
+          </form>
+          {flashMessage ? <FlashMessage message={flashMessage} /> : null}
+        </section>
+      ) : null}
+      <FilterPanel currentPage={currentPage} uiFilters={uiFilters} uiFilterOptions={uiFilterOptions} />
+      <div className="page-content">
+        {currentPage === "pull-requests" ? (
+          <PullRequestList
+            title="Pull Requests"
+            emptyMessage={formatPullRequestEmptyMessage(uiFilters, hasActiveFilters)}
+            pullRequests={pullRequests}
+            renderAction={renderPullRequestAction}
+          />
+        ) : null}
+        {currentPage === "notification-history" ? (
+          <NotificationHistoryPanel
+            notificationHistory={notificationHistory}
+            hasActiveFilters={hasActiveFilters}
+          />
+        ) : null}
+        {currentPage === "raw-events" ? (
+          <RawEventsPanel rawEvents={rawEvents} hasActiveFilters={hasActiveFilters} />
+        ) : null}
       </div>
     </main>
   );
 }
 
 function FilterPanel({
+  currentPage,
   uiFilters,
   uiFilterOptions,
 }: {
+  currentPage: AppPage;
   uiFilters: UiFilterValues;
   uiFilterOptions: UiFilterOptions;
 }) {
-  const activeFilterCount = countActiveUiFilters(uiFilters);
+  const activeFilterCount = countActivePageFilters(uiFilters, currentPage);
+  const pagePath = formatPagePath(currentPage);
+  const showsActivityFilters = currentPage !== "pull-requests";
 
   return (
     <section className="panel filters-panel">
       <div className="panel-header">
         <div>
           <h2>Filters</h2>
-          <p className="panel-description">Refine pull requests, notification history, and raw events.</p>
+          <p className="panel-description">{formatFilterDescription(currentPage)}</p>
         </div>
         <span className="count">{activeFilterCount}</span>
       </div>
-      <form method="get" action="/" className="filters-form">
+      <form method="get" action={pagePath} className="filters-form">
         <div className="filters-grid">
           <label className="filter-field">
             <span className="input-label">Tracked state</span>
@@ -127,68 +153,105 @@ function FilterPanel({
               ))}
             </select>
           </label>
-          <label className="filter-field">
-            <span className="input-label">Event type</span>
-            <select name="event-type" defaultValue={uiFilters.eventType} className="text-input">
-              <option value="">All event types</option>
-              {uiFilterOptions.eventTypes.map((eventType) => (
-                <option key={eventType} value={eventType}>
-                  {formatEventTypeLabel(eventType)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="filter-field">
-            <span className="input-label">Decision state</span>
-            <select name="decision-state" defaultValue={uiFilters.decisionState} className="text-input">
-              <option value="">All decision states</option>
-              {uiFilterOptions.decisionStates.map((decisionState) => (
-                <option key={decisionState} value={decisionState}>
-                  {formatDecisionStateLabel(decisionState)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="filter-field">
-            <span className="input-label">Actor type</span>
-            <select name="actor-type" defaultValue={uiFilters.actorClass} className="text-input">
-              <option value="">All actors</option>
-              {uiFilterOptions.actorClasses.map((actorClass) => (
-                <option key={actorClass} value={actorClass}>
-                  {formatActorClassLabel(actorClass)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="filter-field">
-            <span className="input-label">Start date</span>
-            <input
-              name="start-date"
-              type="date"
-              defaultValue={uiFilters.startDate}
-              className="text-input"
-            />
-          </label>
-          <label className="filter-field">
-            <span className="input-label">End date</span>
-            <input
-              name="end-date"
-              type="date"
-              defaultValue={uiFilters.endDate}
-              className="text-input"
-            />
-          </label>
+          {showsActivityFilters ? (
+            <>
+              <label className="filter-field">
+                <span className="input-label">Event type</span>
+                <select name="event-type" defaultValue={uiFilters.eventType} className="text-input">
+                  <option value="">All event types</option>
+                  {uiFilterOptions.eventTypes.map((eventType) => (
+                    <option key={eventType} value={eventType}>
+                      {formatEventTypeLabel(eventType)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="filter-field">
+                <span className="input-label">Decision state</span>
+                <select
+                  name="decision-state"
+                  defaultValue={uiFilters.decisionState}
+                  className="text-input"
+                >
+                  <option value="">All decision states</option>
+                  {uiFilterOptions.decisionStates.map((decisionState) => (
+                    <option key={decisionState} value={decisionState}>
+                      {formatDecisionStateLabel(decisionState)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="filter-field">
+                <span className="input-label">Actor type</span>
+                <select name="actor-type" defaultValue={uiFilters.actorClass} className="text-input">
+                  <option value="">All actors</option>
+                  {uiFilterOptions.actorClasses.map((actorClass) => (
+                    <option key={actorClass} value={actorClass}>
+                      {formatActorClassLabel(actorClass)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="filter-field">
+                <span className="input-label">Start date</span>
+                <input
+                  name="start-date"
+                  type="date"
+                  defaultValue={uiFilters.startDate}
+                  className="text-input"
+                />
+              </label>
+              <label className="filter-field">
+                <span className="input-label">End date</span>
+                <input
+                  name="end-date"
+                  type="date"
+                  defaultValue={uiFilters.endDate}
+                  className="text-input"
+                />
+              </label>
+            </>
+          ) : null}
         </div>
         <div className="filters-actions">
           <button type="submit" className="action-button primary-button">
             Apply Filters
           </button>
-          <a href="/" className="action-button clear-filters-link">
+          <a href={pagePath} className="action-button clear-filters-link">
             Clear
           </a>
         </div>
       </form>
     </section>
+  );
+}
+
+function PageNavigation({
+  currentPage,
+  uiFilters,
+}: {
+  currentPage: AppPage;
+  uiFilters: UiFilterValues;
+}) {
+  return (
+    <nav className="page-nav" aria-label="Octopulse pages">
+      <div className="page-nav-list">
+        {APP_PAGES.map((page) => {
+          const isCurrentPage = page === currentPage;
+
+          return (
+            <a
+              key={page}
+              href={buildPageHref(page, uiFilters)}
+              className={`page-nav-link ${isCurrentPage ? "page-nav-link-current" : ""}`.trim()}
+              aria-current={isCurrentPage ? "page" : undefined}
+            >
+              {formatPageLabel(page)}
+            </a>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
 
@@ -434,15 +497,8 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
   const notificationHistory = options.notificationHistory ?? [];
   const rawEvents = options.rawEvents ?? [];
   const flashMessage = options.flashMessage;
-  const uiFilters: UiFilterValues = options.uiFilters ?? {
-    pullRequestState: "all",
-    repository: "",
-    eventType: "",
-    decisionState: "",
-    actorClass: "",
-    startDate: "",
-    endDate: "",
-  };
+  const currentPage = options.currentPage ?? "pull-requests";
+  const uiFilters: UiFilterValues = options.uiFilters ?? DEFAULT_UI_FILTERS;
   const uiFilterOptions: UiFilterOptions = options.uiFilterOptions ?? {
     repositories: [],
     eventTypes: [],
@@ -490,23 +546,53 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               font-size: 0.875rem;
             }
 
-            h1 {
-              margin: 0 0 12px;
-              font-size: clamp(2rem, 5vw, 3rem);
-            }
+             h1 {
+               margin: 0 0 12px;
+               font-size: clamp(2rem, 5vw, 3rem);
+             }
 
-            p {
-              margin: 0;
-              line-height: 1.6;
-              color: #cbd5e1;
-            }
+             p {
+               margin: 0;
+               line-height: 1.6;
+               color: #cbd5e1;
+             }
 
-            .grid {
-              display: grid;
-              gap: 16px;
-              margin-top: 32px;
-              grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            }
+             .page-nav {
+               margin-top: 32px;
+               border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+             }
+
+             .page-nav-list {
+               display: flex;
+               flex-wrap: wrap;
+               gap: 20px;
+             }
+
+             .page-nav-link {
+               display: inline-flex;
+               align-items: center;
+               justify-content: center;
+               padding: 0 0 12px;
+               border-bottom: 2px solid transparent;
+               background: transparent;
+               color: #94a3b8;
+               font-size: 0.95rem;
+               font-weight: 600;
+               text-decoration: none;
+             }
+
+             .page-nav-link:hover {
+               color: #e2e8f0;
+             }
+
+             .page-nav-link-current {
+               border-bottom-color: #38bdf8;
+               color: #e2e8f0;
+             }
+
+             .page-content {
+               margin-top: 32px;
+             }
 
             .manual-track-panel {
               margin-top: 32px;
@@ -912,20 +998,105 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
         </head>
         <body>
           <div id="app">
-            <AppShell
-              trackedPullRequests={trackedPullRequests}
-              inactivePullRequests={inactivePullRequests}
-              notificationHistory={notificationHistory}
-              rawEvents={rawEvents}
-              flashMessage={flashMessage}
-              uiFilters={uiFilters}
-              uiFilterOptions={uiFilterOptions}
-            />
-          </div>
-        </body>
-      </html>,
+              <AppShell
+                trackedPullRequests={trackedPullRequests}
+                inactivePullRequests={inactivePullRequests}
+                notificationHistory={notificationHistory}
+                rawEvents={rawEvents}
+                flashMessage={flashMessage}
+                uiFilters={uiFilters}
+                uiFilterOptions={uiFilterOptions}
+                currentPage={currentPage}
+              />
+            </div>
+          </body>
+        </html>,
     ),
   ].join("");
+}
+
+function countActivePageFilters(filters: UiFilterValues, page: AppPage): number {
+  let count = 0;
+
+  for (const field of getPageFilterFields(page)) {
+    if (filters[field] !== DEFAULT_UI_FILTERS[field]) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function getPageFilterFields(page: AppPage): readonly PageFilterField[] {
+  return page === "pull-requests" ? PULL_REQUEST_FILTER_FIELDS : ACTIVITY_FILTER_FIELDS;
+}
+
+function buildPageHref(page: AppPage, uiFilters: UiFilterValues): string {
+  const searchParams = new URLSearchParams();
+
+  for (const field of getPageFilterFields(page)) {
+    if (uiFilters[field] === DEFAULT_UI_FILTERS[field]) {
+      continue;
+    }
+
+    searchParams.set(formatFilterSearchParamKey(field), uiFilters[field]);
+  }
+
+  const pagePath = formatPagePath(page);
+  const search = searchParams.toString();
+
+  return search.length > 0 ? `${pagePath}?${search}` : pagePath;
+}
+
+function formatFilterSearchParamKey(field: PageFilterField): string {
+  switch (field) {
+    case "pullRequestState":
+      return "pr-state";
+    case "repository":
+      return "repo";
+    case "eventType":
+      return "event-type";
+    case "decisionState":
+      return "decision-state";
+    case "actorClass":
+      return "actor-type";
+    case "startDate":
+      return "start-date";
+    case "endDate":
+      return "end-date";
+  }
+}
+
+function formatPagePath(page: AppPage): string {
+  if (page === "pull-requests") {
+    return "/";
+  }
+
+  return `/${page}`;
+}
+
+function formatPageLabel(page: AppPage): string {
+  if (page === "pull-requests") {
+    return "Pull Requests";
+  }
+
+  if (page === "notification-history") {
+    return "Notification History";
+  }
+
+  return "Raw Events";
+}
+
+function formatFilterDescription(page: AppPage): string {
+  if (page === "pull-requests") {
+    return "Refine tracked and untracked pull requests.";
+  }
+
+  if (page === "notification-history") {
+    return "Refine notification history.";
+  }
+
+  return "Refine normalized raw events.";
 }
 
 function formatDeliveryStatusLabel(deliveryStatus: NotificationHistoryEntry["deliveryStatus"]): string {

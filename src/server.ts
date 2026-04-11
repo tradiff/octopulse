@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { renderAppDocument, type AppFlashMessage } from "./app.js";
+import { renderAppDocument, type AppFlashMessage, type AppPage } from "./app.js";
 import {
   ManualPullRequestTrackingError,
   type TrackPullRequestByUrlResult,
@@ -95,6 +95,7 @@ async function handleRequest(
 ): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
   const { pathname, searchParams } = requestUrl;
+  const documentPage = readDocumentPage(pathname);
   const trackedPullRequestMatch = pathname.match(/^\/api\/tracked-pull-requests\/(\d+)$/);
   const documentUntrackMatch = pathname.match(/^\/tracked-pull-requests\/(\d+)\/untrack$/);
 
@@ -176,7 +177,7 @@ async function handleRequest(
     return;
   }
 
-  if (supportsDocumentResponse(request) && pathname === "/") {
+  if (supportsDocumentResponse(request) && documentPage) {
     const trackedPullRequests = options.listTrackedPullRequests
       ? await options.listTrackedPullRequests()
       : [];
@@ -209,6 +210,7 @@ async function handleRequest(
         ...(flashMessage ? { flashMessage } : {}),
         uiFilters,
         uiFilterOptions,
+        currentPage: documentPage,
       }),
     );
     return;
@@ -497,7 +499,7 @@ function createDocumentRedirectLocation(request: IncomingMessage): URL {
     try {
       const location = new URL(referer);
 
-      if (location.pathname === "/") {
+      if (readDocumentPage(location.pathname)) {
         location.searchParams.delete("flash-kind");
         location.searchParams.delete("flash-text");
         return location;
@@ -508,6 +510,22 @@ function createDocumentRedirectLocation(request: IncomingMessage): URL {
   }
 
   return new URL("/", "http://127.0.0.1");
+}
+
+function readDocumentPage(pathname: string): AppPage | undefined {
+  if (pathname === "/") {
+    return "pull-requests";
+  }
+
+  if (pathname === "/notification-history") {
+    return "notification-history";
+  }
+
+  if (pathname === "/raw-events") {
+    return "raw-events";
+  }
+
+  return undefined;
 }
 
 function createTrackFlashMessage(result: TrackPullRequestByUrlResult): AppFlashMessage {
