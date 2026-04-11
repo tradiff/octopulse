@@ -95,7 +95,8 @@ describe("renderAppDocument", () => {
     expect(html).toContain("Bundled");
     expect(html).toContain("Notified");
     expect(html).toContain("AI fallback");
-    expect(html).toContain("Delivered 2026-04-10 12:02:45 UTC");
+    expect(html).toContain(`Created ${formatExpectedLocalHistoryTimestamp("2026-04-10 12:02:30")}`);
+    expect(html).toContain(`Delivered ${formatExpectedLocalHistoryTimestamp("2026-04-10T12:02:45.000Z")}`);
     expect(html).toContain('name="event-type"');
     expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
     expect(html).not.toContain('class="pull-request-panel"');
@@ -134,6 +135,7 @@ describe("renderAppDocument", () => {
     expect(html).toContain("Immediate timing");
     expect(html).toContain("Raw JSON");
     expect(html).toContain("&quot;CHANGES_REQUESTED&quot;");
+    expect(html).toContain(formatExpectedLocalHistoryTimestamp("2026-04-10T12:04:00.000Z"));
     expect(html).toContain('<details class="raw-event-details">');
     expect(html).not.toContain('action="/tracked-pull-requests/manual-track"');
     expect(html).not.toContain('class="pull-request-panel"');
@@ -221,4 +223,46 @@ function createPullRequestRecord(
     updatedAt: "2026-04-10 12:00:00",
     ...overrides,
   };
+}
+
+const SQLITE_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const NAIVE_ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+  timeZoneName: "short",
+});
+
+function formatExpectedLocalHistoryTimestamp(timestamp: string): string {
+  const normalizedTimestamp = normalizeHistoryTimestamp(timestamp);
+  const parsedTimestamp = new Date(normalizedTimestamp);
+
+  if (Number.isNaN(parsedTimestamp.getTime())) {
+    return timestamp;
+  }
+
+  const parts = Object.fromEntries(
+    HISTORY_TIMESTAMP_FORMATTER.formatToParts(parsedTimestamp)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}${parts.timeZoneName ? ` ${parts.timeZoneName}` : ""}`;
+}
+
+function normalizeHistoryTimestamp(timestamp: string): string {
+  if (SQLITE_TIMESTAMP_PATTERN.test(timestamp)) {
+    return `${timestamp.replace(" ", "T")}Z`;
+  }
+
+  if (NAIVE_ISO_TIMESTAMP_PATTERN.test(timestamp)) {
+    return `${timestamp}Z`;
+  }
+
+  return timestamp;
 }

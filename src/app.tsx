@@ -41,6 +41,18 @@ const ACTIVITY_FILTER_FIELDS: readonly PageFilterField[] = [
   "endDate",
 ];
 const APP_PAGES: readonly AppPage[] = ["pull-requests", "notification-history", "raw-events"];
+const SQLITE_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const NAIVE_ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+  timeZoneName: "short",
+});
 
 function AppShell({
   trackedPullRequests,
@@ -1150,11 +1162,45 @@ function formatDecisionStateLabel(
 }
 
 function formatHistoryTimestamp(timestamp: string): string {
-  if (timestamp.includes("T")) {
-    return timestamp.replace("T", " ").replace(/\.\d+Z$/, " UTC").replace(/Z$/, " UTC");
+  const normalizedTimestamp = normalizeHistoryTimestamp(timestamp);
+  const parsedTimestamp = new Date(normalizedTimestamp);
+
+  if (Number.isNaN(parsedTimestamp.getTime())) {
+    return timestamp;
   }
 
-  return `${timestamp} UTC`;
+  const parts = Object.fromEntries(
+    HISTORY_TIMESTAMP_FORMATTER.formatToParts(parsedTimestamp)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+
+  const year = parts.year;
+  const month = parts.month;
+  const day = parts.day;
+  const hour = parts.hour;
+  const minute = parts.minute;
+  const second = parts.second;
+
+  if (year && month && day && hour && minute && second) {
+    const timeZoneName = parts.timeZoneName ? ` ${parts.timeZoneName}` : "";
+
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}${timeZoneName}`;
+  }
+
+  return HISTORY_TIMESTAMP_FORMATTER.format(parsedTimestamp);
+}
+
+function normalizeHistoryTimestamp(timestamp: string): string {
+  if (SQLITE_TIMESTAMP_PATTERN.test(timestamp)) {
+    return `${timestamp.replace(" ", "T")}Z`;
+  }
+
+  if (NAIVE_ISO_TIMESTAMP_PATTERN.test(timestamp)) {
+    return `${timestamp}Z`;
+  }
+
+  return timestamp;
 }
 
 function formatEventTypeLabel(eventType: string): string {
