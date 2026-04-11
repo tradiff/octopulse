@@ -1,3 +1,4 @@
+import { runFirstRunAuthoredPullRequestDiscovery } from "./authored-pull-request-discovery.js";
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./database.js";
 import { initializeGitHubAuth } from "./github.js";
@@ -10,6 +11,7 @@ async function main(): Promise<void> {
     const config = loadConfig();
     const githubAuth = await initializeGitHubAuth(config);
     database = initializeDatabase(config.paths);
+    await runFirstRunAuthoredPullRequestDiscovery(database, githubAuth);
     const server = await startServer();
 
     server.once("close", () => {

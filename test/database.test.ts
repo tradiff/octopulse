@@ -25,6 +25,7 @@ describe("initializeDatabase", () => {
       expect(existsSync(paths.stateDirPath)).toBe(true);
       expect(existsSync(paths.databasePath)).toBe(true);
       expect(readTableNames(database)).toEqual([
+        "AppState",
         "EventBundle",
         "NormalizedEvent",
         "NotificationRecord",

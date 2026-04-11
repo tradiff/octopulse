@@ -1,0 +1,275 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { resolveAppPaths } from "../src/config.js";
+import { initializeDatabase } from "../src/database.js";
+import {
+  runFirstRunAuthoredPullRequestDiscovery,
+  type DiscoveredPullRequest,
+  type PullRequestCoordinates,
+} from "../src/authored-pull-request-discovery.js";
+import {
+  PullRequestRepository,
+  type UpsertPullRequestInput,
+} from "../src/pull-request-repository.js";
+
+const FIRST_RUN_DISCOVERY_COMPLETED_KEY = "first_run_authored_pull_request_discovery_completed";
+const OBSERVED_AT = "2026-04-10T12:00:00.000Z";
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const tempDir of tempDirs.splice(0)) {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+describe("runFirstRunAuthoredPullRequestDiscovery", () => {
+  it("persists discovered pull requests and records first-run completion", async () => {
+    const { database, repository } = createRepository();
+    const client = { kind: "fake-client" };
+    const searchOpenAuthoredPullRequests = vi.fn(async () => [
+      {
+        repositoryOwner: "acme",
+        repositoryName: "octopulse",
+        number: 7,
+      },
+      {
+        repositoryOwner: "widgets",
+        repositoryName: "dashboard",
+        number: 42,
+      },
+    ] satisfies PullRequestCoordinates[]);
+    const fetchPullRequestDetail = vi.fn(
+      async (_client: typeof client, coordinates: PullRequestCoordinates) =>
+        createDiscoveredPullRequest(coordinates),
+    );
+
+    try {
+      await expect(
+        runFirstRunAuthoredPullRequestDiscovery(
+          database,
+          {
+            client,
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            searchOpenAuthoredPullRequests,
+            fetchPullRequestDetail,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        didRun: true,
+        discoveredCount: 2,
+      });
+
+      expect(searchOpenAuthoredPullRequests).toHaveBeenCalledWith(client, "octocat");
+      expect(fetchPullRequestDetail).toHaveBeenCalledTimes(2);
+
+      const trackedPullRequests = repository
+        .listTrackedPullRequests()
+        .sort((left, right) => left.githubPullRequestId - right.githubPullRequestId);
+
+      expect(trackedPullRequests).toHaveLength(2);
+      expect(trackedPullRequests.map((pullRequest) => pullRequest.githubPullRequestId)).toEqual([
+        101,
+        4201,
+      ]);
+      expect(trackedPullRequests.every((pullRequest) => pullRequest.isTracked)).toBe(true);
+      expect(
+        trackedPullRequests.every((pullRequest) => pullRequest.isStickyUntracked === false),
+      ).toBe(true);
+      expect(trackedPullRequests.every((pullRequest) => pullRequest.trackingReason === "auto")).toBe(
+        true,
+      );
+      expect(trackedPullRequests.every((pullRequest) => pullRequest.lastSeenAt === OBSERVED_AT)).toBe(
+        true,
+      );
+      expect(readAppStateValue(database, FIRST_RUN_DISCOVERY_COMPLETED_KEY)).toBe("true");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps sticky manual untrack state when discovery sees an existing pull request", async () => {
+    const { database, repository } = createRepository();
+
+    try {
+      repository.upsertPullRequest(createPullRequestInput());
+      repository.updatePullRequestTrackingState(101, {
+        isTracked: false,
+        trackingReason: "manual",
+        isStickyUntracked: true,
+      });
+
+      await runFirstRunAuthoredPullRequestDiscovery(
+        database,
+        {
+          client: { kind: "fake-client" },
+          currentUserLogin: "octocat",
+        },
+        {
+          pullRequestRepository: repository,
+          searchOpenAuthoredPullRequests: async () => [
+            {
+              repositoryOwner: "acme",
+              repositoryName: "octopulse",
+              number: 7,
+            },
+          ],
+          fetchPullRequestDetail: async (_client, coordinates) =>
+            createDiscoveredPullRequest(coordinates, {
+              title: "Refresh authored PR discovery",
+              lastSeenHeadSha: "def456",
+            }),
+          observedAt: OBSERVED_AT,
+        },
+      );
+
+      expect(repository.listTrackedPullRequests()).toHaveLength(0);
+
+      const inactivePullRequests = repository.listInactivePullRequests();
+      expect(inactivePullRequests).toHaveLength(1);
+      expect(inactivePullRequests[0]?.githubPullRequestId).toBe(101);
+      expect(inactivePullRequests[0]?.isTracked).toBe(false);
+      expect(inactivePullRequests[0]?.trackingReason).toBe("manual");
+      expect(inactivePullRequests[0]?.isStickyUntracked).toBe(true);
+      expect(inactivePullRequests[0]?.title).toBe("Refresh authored PR discovery");
+      expect(inactivePullRequests[0]?.lastSeenHeadSha).toBe("def456");
+      expect(inactivePullRequests[0]?.lastSeenAt).toBe(OBSERVED_AT);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("skips discovery after first-run completion is already persisted", async () => {
+    const { database, repository } = createRepository();
+    const searchOpenAuthoredPullRequests = vi.fn(async () => [] as PullRequestCoordinates[]);
+    const fetchPullRequestDetail = vi.fn();
+
+    try {
+      writeAppStateValue(database, FIRST_RUN_DISCOVERY_COMPLETED_KEY, "true");
+
+      await expect(
+        runFirstRunAuthoredPullRequestDiscovery(
+          database,
+          {
+            client: { kind: "fake-client" },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            searchOpenAuthoredPullRequests,
+            fetchPullRequestDetail,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        didRun: false,
+        discoveredCount: 0,
+      });
+
+      expect(searchOpenAuthoredPullRequests).not.toHaveBeenCalled();
+      expect(fetchPullRequestDetail).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+});
+
+function createRepository(): {
+  database: ReturnType<typeof initializeDatabase>;
+  repository: PullRequestRepository;
+} {
+  const homeDir = createTempDir("octopulse-first-run-discovery-home-");
+  const database = initializeDatabase(resolveAppPaths({ homeDir }));
+
+  return {
+    database,
+    repository: new PullRequestRepository(database),
+  };
+}
+
+function createTempDir(prefix: string): string {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(tempDir);
+  return tempDir;
+}
+
+function createDiscoveredPullRequest(
+  coordinates: PullRequestCoordinates,
+  overrides: Partial<DiscoveredPullRequest> = {},
+): DiscoveredPullRequest {
+  const githubPullRequestId = coordinates.number === 42 ? 4201 : 101;
+
+  return {
+    githubPullRequestId,
+    repositoryOwner: coordinates.repositoryOwner,
+    repositoryName: coordinates.repositoryName,
+    number: coordinates.number,
+    url: `https://github.com/${coordinates.repositoryOwner}/${coordinates.repositoryName}/pull/${coordinates.number}`,
+    authorLogin: "octocat",
+    title: `Pull request ${coordinates.number}`,
+    state: "open",
+    isDraft: false,
+    closedAt: null,
+    mergedAt: null,
+    lastSeenHeadSha: coordinates.number === 42 ? "xyz789" : "abc123",
+    ...overrides,
+  };
+}
+
+function createPullRequestInput(
+  overrides: Partial<UpsertPullRequestInput> = {},
+): UpsertPullRequestInput {
+  const input: UpsertPullRequestInput = {
+    githubPullRequestId: 101,
+    repositoryOwner: "acme",
+    repositoryName: "octopulse",
+    number: 7,
+    url: "https://github.com/acme/octopulse/pull/7",
+    authorLogin: "octocat",
+    title: "Add pull request polling",
+    state: "open",
+    isDraft: false,
+    lastSeenAt: "2026-04-10T11:55:00.000Z",
+    closedAt: null,
+    mergedAt: null,
+    graceUntil: null,
+    lastSeenHeadSha: "abc123",
+  };
+
+  if (overrides.tracking) {
+    input.tracking = overrides.tracking;
+  }
+
+  return {
+    ...input,
+    ...overrides,
+  };
+}
+
+function readAppStateValue(
+  database: ReturnType<typeof initializeDatabase>,
+  key: string,
+): string | undefined {
+  const row = database.prepare("SELECT value FROM AppState WHERE key = ?").get(key);
+
+  if (row?.value === undefined) {
+    return undefined;
+  }
+
+  return String(row.value);
+}
+
+function writeAppStateValue(
+  database: ReturnType<typeof initializeDatabase>,
+  key: string,
+  value: string,
+): void {
+  database.prepare("INSERT INTO AppState (key, value) VALUES (?, ?)").run(key, value);
+}
