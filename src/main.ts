@@ -5,6 +5,7 @@ import {
   startRecurringAuthoredPullRequestDiscovery,
   type RecurringAuthoredPullRequestDiscoveryHandle,
 } from "./authored-pull-request-discovery.js";
+import { createOpenAiBotActivityClassifier } from "./bot-activity-classification.js";
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./database.js";
 import { initializeGitHubAuth } from "./github.js";
@@ -25,6 +26,9 @@ async function main(): Promise<void> {
   try {
     const config = loadConfig();
     const githubAuth = await initializeGitHubAuth(config);
+    const botActivityClassifier = config.openAiApiKey
+      ? createOpenAiBotActivityClassifier({ apiKey: config.openAiApiKey })
+      : undefined;
     const currentDatabase = initializeDatabase(config.paths);
     const pullRequestRepository = new PullRequestRepository(currentDatabase);
     database = currentDatabase;
@@ -50,6 +54,7 @@ async function main(): Promise<void> {
       {
         intervalMs: config.timings.trackedPullRequestPollMs,
         pullRequestRepository,
+        ...(botActivityClassifier ? { botActivityClassifier } : {}),
       },
     );
 

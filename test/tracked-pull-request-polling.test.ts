@@ -690,6 +690,159 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
+  it("classifies bot comments and reviews before bundling", async () => {
+    const { database, repository } = createRepository();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const eventBundleRepository = new EventBundleRepository(database);
+    const botActivityClassifier = vi.fn(async (text: string) =>
+      text.includes("failed")
+        ? {
+            decision: "notify" as const,
+            reason: "Failure needs human attention",
+          }
+        : {
+            decision: "suppress" as const,
+            reason: "Routine bot update",
+          },
+    );
+    const request = vi.fn(async (route: string) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+          return {
+            data: [
+              createIssueCommentFixture({
+                id: 9801,
+                actorLogin: "alice",
+                createdAt: "2026-04-10T12:41:00.000Z",
+                body: "Human update",
+              }),
+              createIssueCommentFixture({
+                id: 9802,
+                actorLogin: "dependabot[bot]",
+                actorType: "Bot",
+                createdAt: "2026-04-10T12:41:10.000Z",
+                body: "Routine dependency bump",
+              }),
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+          return {
+            data: [],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+          return {
+            data: [
+              createReviewCommentFixture({
+                id: 9803,
+                actorLogin: "ci-bot[bot]",
+                actorType: "Bot",
+                createdAt: "2026-04-10T12:41:20.000Z",
+                body: "Build failed on linux",
+              }),
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return {
+            data: [],
+          };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          return {
+            data: {
+              total_count: 0,
+              workflow_runs: [],
+            },
+          };
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      repository.upsertPullRequest(createPullRequestInput());
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+            botActivityClassifier,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      const pullRequest = repository.listTrackedPullRequests()[0];
+      const bundles = eventBundleRepository.listEventBundlesForPullRequest(pullRequest?.id ?? -1);
+
+      expect(botActivityClassifier.mock.calls.map((call) => call[0])).toEqual([
+        "Routine dependency bump",
+        "Build failed on linux",
+      ]);
+      expect(bundles).toHaveLength(1);
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest?.id ?? -1).map((event) => ({
+          eventType: event.eventType,
+          decisionState: event.decisionState,
+          eventBundleId: event.eventBundleId,
+          payload: JSON.parse(event.payloadJson) as Record<string, unknown>,
+        })),
+      ).toEqual([
+        {
+          eventType: "issue_comment",
+          decisionState: "notified",
+          eventBundleId: bundles[0]?.id ?? null,
+          payload: {
+            commentId: 9801,
+            bodyText: "Human update",
+            url: "https://github.com/acme/octopulse/pull/7#issuecomment-9801",
+          },
+        },
+        {
+          eventType: "issue_comment",
+          decisionState: "suppressed_rule",
+          eventBundleId: null,
+          payload: {
+            commentId: 9802,
+            bodyText: "Routine dependency bump",
+            url: "https://github.com/acme/octopulse/pull/7#issuecomment-9802",
+            aiDecision: "suppress",
+            aiReasoning: "Routine bot update",
+          },
+        },
+        {
+          eventType: "review_inline_comment",
+          decisionState: "notified_ai",
+          eventBundleId: bundles[0]?.id ?? null,
+          payload: {
+            commentId: 9803,
+            reviewId: null,
+            inReplyToCommentId: null,
+            bodyText: "Build failed on linux",
+            path: "src/main.ts",
+            url: "https://github.com/acme/octopulse/pull/7#discussion_r9803",
+            aiDecision: "notify",
+            aiReasoning: "Failure needs human attention",
+          },
+        },
+      ]);
+      expect(
+        normalizedEventRepository.listNormalizedEventsForBundle(bundles[0]?.id ?? -1).map((event) => event.eventType),
+      ).toEqual(["issue_comment", "review_inline_comment"]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("ignores comment and review edits during repeated polling", async () => {
     const { database, repository } = createRepository();
     const rawEventRepository = new RawEventRepository(database);

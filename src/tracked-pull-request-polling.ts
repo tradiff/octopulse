@@ -2,6 +2,10 @@ import { DatabaseSync } from "node:sqlite";
 
 import { Octokit } from "octokit";
 
+import {
+  classifyBotPullRequestActivity,
+  type BotActivityClassifier,
+} from "./bot-activity-classification.js";
 import { bundlePullRequestEvents } from "./event-bundling.js";
 import type { GitHubAuthContext } from "./github.js";
 import { ingestPullRequestActivity } from "./pull-request-activity-ingestion.js";
@@ -14,6 +18,7 @@ import {
 export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   pullRequestRepository?: Pick<PullRequestRepository, "listPullRequestsForPolling">;
   pollPullRequest?: (client: TClient, pullRequest: PullRequestRecord) => Promise<void>;
+  botActivityClassifier?: BotActivityClassifier;
   observedAt?: string;
   onError?: (error: PullRequestPollingError) => void;
 }
@@ -46,11 +51,25 @@ export async function pollTrackedPullRequests<TClient>(
   options: PollTrackedPullRequestsOptions<TClient> = {},
 ): Promise<PollTrackedPullRequestsResult> {
   const pullRequestRepository = options.pullRequestRepository ?? new PullRequestRepository(database);
+  const botActivityClassifier = options.botActivityClassifier;
   const pollPullRequest =
     options.pollPullRequest ??
     (async (client: TClient, pullRequest: PullRequestRecord) => {
       await ingestPullRequestActivity(database, client, pullRequest);
       normalizePullRequestActivity(database, pullRequest, githubAuth.currentUserLogin);
+
+      if (botActivityClassifier) {
+        try {
+          await classifyBotPullRequestActivity(database, pullRequest.id, {
+            botActivityClassifier,
+          });
+        } catch (error) {
+          console.error(
+            `Octopulse bot activity classification failed for pull request ${formatPullRequestLabel(pullRequest)}: ${getErrorMessage(error)}`,
+          );
+        }
+      }
+
       bundlePullRequestEvents(database, pullRequest.id);
     });
   const onError = options.onError ?? logTrackedPullRequestPollingError;

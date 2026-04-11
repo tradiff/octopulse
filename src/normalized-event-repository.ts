@@ -4,6 +4,7 @@ export type ActorClass = "self" | "human_other" | "bot";
 
 export type DecisionState =
   | "notified"
+  | "notified_ai"
   | "suppressed_self_action"
   | "suppressed_rule"
   | "notified_ai_fallback"
@@ -11,7 +12,11 @@ export type DecisionState =
 
 export type NotificationTiming = "immediate";
 
-const BUNDLE_ELIGIBLE_DECISION_STATES = ["notified", "notified_ai_fallback"] as const;
+const BUNDLE_ELIGIBLE_DECISION_STATES = [
+  "notified",
+  "notified_ai",
+  "notified_ai_fallback",
+] as const;
 const BUNDLE_ELIGIBLE_EVENT_TYPES = [
   "issue_comment",
   "review_submitted",
@@ -23,6 +28,13 @@ const BUNDLE_ELIGIBLE_EVENT_TYPES = [
   "pr_reopened",
   "ready_for_review",
   "converted_to_draft",
+] as const;
+const AI_ELIGIBLE_EVENT_TYPES = [
+  "issue_comment",
+  "review_submitted",
+  "review_inline_comment",
+  "review_approved",
+  "review_changes_requested",
 ] as const;
 
 export interface NormalizedEventRecord {
@@ -166,6 +178,26 @@ export class NormalizedEventRepository {
     return rows.map((row) => mapNormalizedEventRow(row));
   }
 
+  listAiEligibleUnbundledEventsForPullRequest(pullRequestId: number): NormalizedEventRecord[] {
+    const eventTypePlaceholders = AI_ELIGIBLE_EVENT_TYPES.map(() => "?").join(", ");
+    const rows = this.database
+      .prepare(
+        `
+          SELECT *
+          FROM NormalizedEvent
+          WHERE pull_request_id = ?
+            AND event_bundle_id IS NULL
+            AND actor_class = 'bot'
+            AND decision_state = 'notified'
+            AND event_type IN (${eventTypePlaceholders})
+          ORDER BY occurred_at ASC, id ASC
+        `,
+      )
+      .all(pullRequestId, ...AI_ELIGIBLE_EVENT_TYPES);
+
+    return rows.map((row) => mapNormalizedEventRow(row));
+  }
+
   assignEventBundle(normalizedEventIds: readonly number[], eventBundleId: number): void {
     if (normalizedEventIds.length === 0) {
       return;
@@ -187,6 +219,33 @@ export class NormalizedEventRepository {
     } catch (error) {
       throw new NormalizedEventRepositoryError(
         `Failed to assign normalized events to bundle ${eventBundleId}: ${getErrorMessage(error)}`,
+      );
+    }
+  }
+
+  updateNormalizedEventDecision(
+    id: number,
+    input: { decisionState: DecisionState; payloadJson: string },
+  ): NormalizedEventRecord {
+    try {
+      this.database
+        .prepare(
+          `
+            UPDATE NormalizedEvent
+            SET decision_state = ?, payload_json = ?
+            WHERE id = ?
+          `,
+        )
+        .run(input.decisionState, input.payloadJson, id);
+
+      return this.requireNormalizedEventById(id);
+    } catch (error) {
+      if (error instanceof NormalizedEventRepositoryError) {
+        throw error;
+      }
+
+      throw new NormalizedEventRepositoryError(
+        `Failed to update normalized event ${id} decision state: ${getErrorMessage(error)}`,
       );
     }
   }
@@ -296,6 +355,7 @@ function readNullableDecisionState(value: unknown, fieldName: string): DecisionS
 
   if (
     decisionState === "notified" ||
+    decisionState === "notified_ai" ||
     decisionState === "suppressed_self_action" ||
     decisionState === "suppressed_rule" ||
     decisionState === "notified_ai_fallback" ||
@@ -305,7 +365,7 @@ function readNullableDecisionState(value: unknown, fieldName: string): DecisionS
   }
 
   throw new NormalizedEventRepositoryError(
-    `${fieldName} must be notified, suppressed_self_action, suppressed_rule, notified_ai_fallback, error, or null`,
+    `${fieldName} must be notified, notified_ai, suppressed_self_action, suppressed_rule, notified_ai_fallback, error, or null`,
   );
 }
 

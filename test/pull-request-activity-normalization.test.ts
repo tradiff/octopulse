@@ -1021,14 +1021,20 @@ describe("normalizePullRequestActivity", () => {
       normalizedEventRepository.insertNormalizedEvent({
         pullRequestId: pullRequest.id,
         eventType: "issue_comment",
-        decisionState: "notified_ai_fallback",
+        decisionState: "notified_ai",
         occurredAt: "2026-04-10T12:34:00.000Z",
       });
       normalizedEventRepository.insertNormalizedEvent({
         pullRequestId: pullRequest.id,
         eventType: "issue_comment",
-        decisionState: "error",
+        decisionState: "notified_ai_fallback",
         occurredAt: "2026-04-10T12:35:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        decisionState: "error",
+        occurredAt: "2026-04-10T12:36:00.000Z",
       });
 
       expect(
@@ -1039,6 +1045,7 @@ describe("normalizePullRequestActivity", () => {
         "notified",
         "suppressed_self_action",
         "suppressed_rule",
+        "notified_ai",
         "notified_ai_fallback",
         "error",
       ]);
