@@ -52,6 +52,16 @@ export interface FirstRunAuthoredPullRequestDiscoveryResult
   didRun: boolean;
 }
 
+export interface StartRecurringAuthoredPullRequestDiscoveryOptions<TClient = Octokit>
+  extends DiscoverOpenAuthoredPullRequestsOptions<TClient> {
+  intervalMs: number;
+  onError?: (error: PullRequestDiscoveryError) => void;
+}
+
+export interface RecurringAuthoredPullRequestDiscoveryHandle {
+  stop(): void;
+}
+
 export class PullRequestDiscoveryError extends Error {
   constructor(message: string) {
     super(message);
@@ -78,6 +88,62 @@ export async function runFirstRunAuthoredPullRequestDiscovery<TClient>(
     didRun: true,
     discoveredCount: result.discoveredCount,
   };
+}
+
+export function startRecurringAuthoredPullRequestDiscovery<TClient>(
+  database: DatabaseSync,
+  githubAuth: GitHubAuthContext<TClient>,
+  options: StartRecurringAuthoredPullRequestDiscoveryOptions<TClient>,
+): RecurringAuthoredPullRequestDiscoveryHandle {
+  const { intervalMs, onError, ...discoveryOptions } = options;
+
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    throw new PullRequestDiscoveryError(
+      "Recurring authored pull request discovery interval must be greater than zero",
+    );
+  }
+
+  let isStopped = false;
+  let isRunning = false;
+  const timer = setInterval(() => {
+    void runDiscoveryCycle();
+  }, intervalMs);
+
+  timer.unref?.();
+
+  return {
+    stop(): void {
+      if (isStopped) {
+        return;
+      }
+
+      isStopped = true;
+      clearInterval(timer);
+    },
+  };
+
+  async function runDiscoveryCycle(): Promise<void> {
+    if (isStopped || isRunning) {
+      return;
+    }
+
+    isRunning = true;
+
+    try {
+      await discoverOpenAuthoredPullRequests(database, githubAuth, discoveryOptions);
+    } catch (error) {
+      const discoveryError =
+        error instanceof PullRequestDiscoveryError
+          ? error
+          : new PullRequestDiscoveryError(
+              `Failed to discover open authored pull requests: ${getErrorMessage(error)}`,
+            );
+
+      (onError ?? logRecurringDiscoveryError)(discoveryError);
+    } finally {
+      isRunning = false;
+    }
+  }
 }
 
 export async function discoverOpenAuthoredPullRequests<TClient>(
@@ -356,6 +422,10 @@ function readBoolean(value: unknown, fieldName: string): boolean {
 
 function formatPullRequestLabel(coordinates: PullRequestCoordinates): string {
   return `${coordinates.repositoryOwner}/${coordinates.repositoryName}#${coordinates.number}`;
+}
+
+function logRecurringDiscoveryError(error: PullRequestDiscoveryError): void {
+  console.error(`Octopulse recurring authored pull request discovery failed: ${error.message}`);
 }
 
 function getErrorMessage(error: unknown): string {

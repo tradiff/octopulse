@@ -8,6 +8,7 @@ import { resolveAppPaths } from "../src/config.js";
 import { initializeDatabase } from "../src/database.js";
 import {
   runFirstRunAuthoredPullRequestDiscovery,
+  startRecurringAuthoredPullRequestDiscovery,
   type DiscoveredPullRequest,
   type PullRequestCoordinates,
 } from "../src/authored-pull-request-discovery.js";
@@ -17,10 +18,13 @@ import {
 } from "../src/pull-request-repository.js";
 
 const FIRST_RUN_DISCOVERY_COMPLETED_KEY = "first_run_authored_pull_request_discovery_completed";
+const DISCOVERY_INTERVAL_MS = 5 * 60_000;
 const OBSERVED_AT = "2026-04-10T12:00:00.000Z";
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
+
   for (const tempDir of tempDirs.splice(0)) {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -176,6 +180,199 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
       expect(searchOpenAuthoredPullRequests).not.toHaveBeenCalled();
       expect(fetchPullRequestDetail).not.toHaveBeenCalled();
     } finally {
+      database.close();
+    }
+  });
+});
+
+describe("startRecurringAuthoredPullRequestDiscovery", () => {
+  it("runs discovery on the configured interval and persists newly opened pull requests", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    const { database, repository } = createRepository();
+    const client = { kind: "fake-client" };
+    let currentCoordinates: PullRequestCoordinates[] = [
+      {
+        repositoryOwner: "acme",
+        repositoryName: "octopulse",
+        number: 7,
+      },
+    ];
+    const searchOpenAuthoredPullRequests = vi.fn(async () =>
+      currentCoordinates.map((coordinates) => ({ ...coordinates })),
+    );
+    const fetchPullRequestDetail = vi.fn(
+      async (_client: typeof client, coordinates: PullRequestCoordinates) =>
+        createDiscoveredPullRequest(coordinates),
+    );
+
+    const handle = startRecurringAuthoredPullRequestDiscovery(
+      database,
+      {
+        client,
+        currentUserLogin: "octocat",
+      },
+      {
+        intervalMs: DISCOVERY_INTERVAL_MS,
+        pullRequestRepository: repository,
+        searchOpenAuthoredPullRequests,
+        fetchPullRequestDetail,
+      },
+    );
+
+    try {
+      expect(searchOpenAuthoredPullRequests).not.toHaveBeenCalled();
+      expect(repository.listTrackedPullRequests()).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(DISCOVERY_INTERVAL_MS);
+
+      expect(searchOpenAuthoredPullRequests).toHaveBeenCalledTimes(1);
+      expect(fetchPullRequestDetail).toHaveBeenCalledTimes(1);
+      expect(repository.listTrackedPullRequests()).toHaveLength(1);
+      expect(repository.listTrackedPullRequests()[0]?.githubPullRequestId).toBe(101);
+
+      currentCoordinates = [
+        {
+          repositoryOwner: "acme",
+          repositoryName: "octopulse",
+          number: 7,
+        },
+        {
+          repositoryOwner: "widgets",
+          repositoryName: "dashboard",
+          number: 42,
+        },
+      ];
+
+      await vi.advanceTimersByTimeAsync(DISCOVERY_INTERVAL_MS);
+
+      const trackedPullRequests = repository
+        .listTrackedPullRequests()
+        .sort((left, right) => left.githubPullRequestId - right.githubPullRequestId);
+
+      expect(searchOpenAuthoredPullRequests).toHaveBeenCalledTimes(2);
+      expect(fetchPullRequestDetail).toHaveBeenCalledTimes(3);
+      expect(trackedPullRequests).toHaveLength(2);
+      expect(trackedPullRequests.map((pullRequest) => pullRequest.githubPullRequestId)).toEqual([
+        101,
+        4201,
+      ]);
+      expect(trackedPullRequests.every((pullRequest) => pullRequest.lastSeenAt === "2026-04-10T12:10:00.000Z")).toBe(true);
+    } finally {
+      handle.stop();
+      database.close();
+    }
+  });
+
+  it("keeps sticky manual untrack state during recurring discovery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    const { database, repository } = createRepository();
+    repository.upsertPullRequest(createPullRequestInput());
+    repository.updatePullRequestTrackingState(101, {
+      isTracked: false,
+      trackingReason: "manual",
+      isStickyUntracked: true,
+    });
+
+    const handle = startRecurringAuthoredPullRequestDiscovery(
+      database,
+      {
+        client: { kind: "fake-client" },
+        currentUserLogin: "octocat",
+      },
+      {
+        intervalMs: DISCOVERY_INTERVAL_MS,
+        pullRequestRepository: repository,
+        searchOpenAuthoredPullRequests: async () => [
+          {
+            repositoryOwner: "acme",
+            repositoryName: "octopulse",
+            number: 7,
+          },
+        ],
+        fetchPullRequestDetail: async (_client, coordinates) =>
+          createDiscoveredPullRequest(coordinates, {
+            title: "Refresh recurring authored PR discovery",
+            lastSeenHeadSha: "def456",
+          }),
+      },
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(DISCOVERY_INTERVAL_MS);
+
+      expect(repository.listTrackedPullRequests()).toHaveLength(0);
+
+      const inactivePullRequests = repository.listInactivePullRequests();
+      expect(inactivePullRequests).toHaveLength(1);
+      expect(inactivePullRequests[0]?.githubPullRequestId).toBe(101);
+      expect(inactivePullRequests[0]?.isTracked).toBe(false);
+      expect(inactivePullRequests[0]?.trackingReason).toBe("manual");
+      expect(inactivePullRequests[0]?.isStickyUntracked).toBe(true);
+      expect(inactivePullRequests[0]?.title).toBe("Refresh recurring authored PR discovery");
+      expect(inactivePullRequests[0]?.lastSeenHeadSha).toBe("def456");
+      expect(inactivePullRequests[0]?.lastSeenAt).toBe("2026-04-10T12:05:00.000Z");
+    } finally {
+      handle.stop();
+      database.close();
+    }
+  });
+
+  it("reports recurring discovery failures and continues on the next interval", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    const { database, repository } = createRepository();
+    const onError = vi.fn();
+    let shouldFail = true;
+
+    const handle = startRecurringAuthoredPullRequestDiscovery(
+      database,
+      {
+        client: { kind: "fake-client" },
+        currentUserLogin: "octocat",
+      },
+      {
+        intervalMs: DISCOVERY_INTERVAL_MS,
+        pullRequestRepository: repository,
+        searchOpenAuthoredPullRequests: async () => {
+          if (shouldFail) {
+            shouldFail = false;
+            throw new Error("temporary GitHub outage");
+          }
+
+          return [
+            {
+              repositoryOwner: "acme",
+              repositoryName: "octopulse",
+              number: 7,
+            },
+          ];
+        },
+        fetchPullRequestDetail: async (_client, coordinates) => createDiscoveredPullRequest(coordinates),
+        onError,
+      },
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(DISCOVERY_INTERVAL_MS);
+
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError.mock.calls[0]?.[0]).toMatchObject({
+        message: "Failed to discover open authored pull requests: temporary GitHub outage",
+      });
+      expect(repository.listTrackedPullRequests()).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(DISCOVERY_INTERVAL_MS);
+
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(repository.listTrackedPullRequests()).toHaveLength(1);
+      expect(repository.listTrackedPullRequests()[0]?.githubPullRequestId).toBe(101);
+    } finally {
+      handle.stop();
       database.close();
     }
   });
