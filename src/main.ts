@@ -11,11 +11,16 @@ import { initializeGitHubAuth } from "./github.js";
 import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request-tracking.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
 import { readServerOrigin, startServer } from "./server.js";
+import {
+  startRecurringTrackedPullRequestPolling,
+  type RecurringTrackedPullRequestPollingHandle,
+} from "./tracked-pull-request-polling.js";
 
 async function main(): Promise<void> {
   let database: ReturnType<typeof initializeDatabase> | undefined;
   let server: Server | undefined;
   let recurringDiscovery: RecurringAuthoredPullRequestDiscoveryHandle | undefined;
+  let recurringTrackedPullRequestPolling: RecurringTrackedPullRequestPollingHandle | undefined;
 
   try {
     const config = loadConfig();
@@ -39,9 +44,18 @@ async function main(): Promise<void> {
     recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(currentDatabase, githubAuth, {
       intervalMs: config.timings.discoveryPollMs,
     });
+    recurringTrackedPullRequestPolling = startRecurringTrackedPullRequestPolling(
+      currentDatabase,
+      githubAuth,
+      {
+        intervalMs: config.timings.trackedPullRequestPollMs,
+        pullRequestRepository,
+      },
+    );
 
     server.once("close", () => {
       recurringDiscovery?.stop();
+      recurringTrackedPullRequestPolling?.stop();
       closeDatabaseQuietly(database);
     });
 
@@ -50,6 +64,7 @@ async function main(): Promise<void> {
     );
   } catch (error) {
     recurringDiscovery?.stop();
+    recurringTrackedPullRequestPolling?.stop();
     await closeServerQuietly(server);
     closeDatabaseQuietly(database);
     const message = error instanceof Error ? error.message : "Unknown startup error";

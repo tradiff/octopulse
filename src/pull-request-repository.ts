@@ -192,6 +192,27 @@ export class PullRequestRepository {
     return this.listByTrackedState(false);
   }
 
+  listPullRequestsForPolling(observedAt: string): PullRequestRecord[] {
+    const rows = this.database
+      .prepare(
+        `
+          SELECT *
+          FROM PullRequest
+          WHERE is_tracked = 1
+             OR (
+                  is_tracked = 0
+              AND is_sticky_untracked = 0
+              AND grace_until IS NOT NULL
+              AND grace_until > ?
+                )
+          ORDER BY updated_at DESC, id DESC
+        `,
+      )
+      .all(observedAt);
+
+    return rows.map((row) => mapPullRequestRow(row));
+  }
+
   updatePullRequestTrackingState(
     githubPullRequestId: number,
     tracking: PullRequestTrackingState,
