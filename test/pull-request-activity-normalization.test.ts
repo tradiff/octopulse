@@ -60,7 +60,7 @@ describe("classifyActor", () => {
 });
 
 describe("normalizePullRequestActivity", () => {
-  it("persists normalized events linked to raw activity", () => {
+  it("persists comment and review payload needed for later rules", () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);
     const normalizedEventRepository = new NormalizedEventRepository(database);
@@ -72,32 +72,106 @@ describe("normalizePullRequestActivity", () => {
         sourceId: "1001",
         eventType: "issue_comment",
         actorLogin: "alice",
-        payloadJson: JSON.stringify({
-          id: 1001,
-          user: {
-            login: "alice",
-            type: "User",
-          },
-          body: "Ship it",
-        }),
+        payloadJson: JSON.stringify(
+          createIssueCommentPayload({
+            id: 1001,
+            actorLogin: "alice",
+            actorType: "User",
+            body: "Ship it",
+            createdAt: "2026-04-10T12:01:00.000Z",
+          }),
+        ),
         occurredAt: "2026-04-10T12:01:00.000Z",
+      }).rawEvent;
+      const botIssueCommentRawEvent = rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_comment",
+        sourceId: "1002",
+        eventType: "issue_comment",
+        actorLogin: "renovate[bot]",
+        payloadJson: JSON.stringify(
+          createIssueCommentPayload({
+            id: 1002,
+            actorLogin: "renovate[bot]",
+            actorType: "Bot",
+            body: "Automerge blocked until checks pass",
+            createdAt: "2026-04-10T12:02:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:02:00.000Z",
       }).rawEvent;
       const reviewRawEvent = rawEventRepository.insertRawEvent({
         pullRequestId: pullRequest.id,
         source: "github_pull_request_review",
         sourceId: "2001",
         eventType: "pull_request_review",
-        actorLogin: "renovate[bot]",
-        payloadJson: JSON.stringify({
-          id: 2001,
-          user: {
-            login: "renovate[bot]",
-            type: "Bot",
-          },
-          state: "APPROVED",
-          body: "LGTM",
-        }),
-        occurredAt: "2026-04-10T12:02:00.000Z",
+        actorLogin: "bob",
+        payloadJson: JSON.stringify(
+          createReviewPayload({
+            id: 2001,
+            actorLogin: "bob",
+            actorType: "User",
+            state: "APPROVED",
+            body: "LGTM",
+            submittedAt: "2026-04-10T12:03:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:03:00.000Z",
+      }).rawEvent;
+      const changesRequestedReviewRawEvent = rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review",
+        sourceId: "2002",
+        eventType: "pull_request_review",
+        actorLogin: "carol",
+        payloadJson: JSON.stringify(
+          createReviewPayload({
+            id: 2002,
+            actorLogin: "carol",
+            actorType: "User",
+            state: "CHANGES_REQUESTED",
+            body: "Need test coverage",
+            submittedAt: "2026-04-10T12:04:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:04:00.000Z",
+      }).rawEvent;
+      const submittedReviewRawEvent = rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review",
+        sourceId: "2003",
+        eventType: "pull_request_review",
+        actorLogin: "review-bot[bot]",
+        payloadJson: JSON.stringify(
+          createReviewPayload({
+            id: 2003,
+            actorLogin: "review-bot[bot]",
+            actorType: "Bot",
+            state: "COMMENTED",
+            body: "Formatter suggests one change",
+            submittedAt: "2026-04-10T12:05:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:05:00.000Z",
+      }).rawEvent;
+      const inlineCommentRawEvent = rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review_comment",
+        sourceId: "3001",
+        eventType: "pull_request_review_comment",
+        actorLogin: "review-bot[bot]",
+        payloadJson: JSON.stringify(
+          createReviewCommentPayload({
+            id: 3001,
+            actorLogin: "review-bot[bot]",
+            actorType: "Bot",
+            reviewId: 2003,
+            body: "Inline note",
+            path: "src/main.ts",
+            createdAt: "2026-04-10T12:06:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:06:00.000Z",
       }).rawEvent;
       const timelineRawEvent = rawEventRepository.insertRawEvent({
         pullRequestId: pullRequest.id,
@@ -113,7 +187,7 @@ describe("normalizePullRequestActivity", () => {
           },
           event: "merged",
         }),
-        occurredAt: "2026-04-10T12:03:00.000Z",
+        occurredAt: "2026-04-10T12:07:00.000Z",
       }).rawEvent;
 
       rawEventRepository.insertRawEvent({
@@ -131,12 +205,12 @@ describe("normalizePullRequestActivity", () => {
           conclusion: "success",
           head_sha: "abc123",
         }),
-        occurredAt: "2026-04-10T12:04:00.000Z",
+        occurredAt: "2026-04-10T12:08:00.000Z",
       });
 
       expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
-        processedCount: 4,
-        normalizedCount: 3,
+        processedCount: 8,
+        normalizedCount: 7,
         skippedCount: 1,
       });
 
@@ -146,6 +220,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: event.eventType,
           actorLogin: event.actorLogin,
           actorClass: event.actorClass,
+          payload: parseNormalizedPayload(event.payloadJson),
         })),
       ).toEqual([
         {
@@ -153,18 +228,79 @@ describe("normalizePullRequestActivity", () => {
           eventType: "issue_comment",
           actorLogin: "alice",
           actorClass: "human_other",
+          payload: {
+            commentId: 1001,
+            bodyText: "Ship it",
+            url: "https://github.com/acme/octopulse/pull/7#issuecomment-1001",
+          },
+        },
+        {
+          rawEventId: botIssueCommentRawEvent?.id ?? null,
+          eventType: "issue_comment",
+          actorLogin: "renovate[bot]",
+          actorClass: "bot",
+          payload: {
+            commentId: 1002,
+            bodyText: "Automerge blocked until checks pass",
+            url: "https://github.com/acme/octopulse/pull/7#issuecomment-1002",
+          },
         },
         {
           rawEventId: reviewRawEvent?.id ?? null,
           eventType: "review_approved",
-          actorLogin: "renovate[bot]",
+          actorLogin: "bob",
+          actorClass: "human_other",
+          payload: {
+            reviewId: 2001,
+            reviewState: "APPROVED",
+            bodyText: "LGTM",
+            url: "https://github.com/acme/octopulse/pull/7#pullrequestreview-2001",
+          },
+        },
+        {
+          rawEventId: changesRequestedReviewRawEvent?.id ?? null,
+          eventType: "review_changes_requested",
+          actorLogin: "carol",
+          actorClass: "human_other",
+          payload: {
+            reviewId: 2002,
+            reviewState: "CHANGES_REQUESTED",
+            bodyText: "Need test coverage",
+            url: "https://github.com/acme/octopulse/pull/7#pullrequestreview-2002",
+          },
+        },
+        {
+          rawEventId: submittedReviewRawEvent?.id ?? null,
+          eventType: "review_submitted",
+          actorLogin: "review-bot[bot]",
           actorClass: "bot",
+          payload: {
+            reviewId: 2003,
+            reviewState: "COMMENTED",
+            bodyText: "Formatter suggests one change",
+            url: "https://github.com/acme/octopulse/pull/7#pullrequestreview-2003",
+          },
+        },
+        {
+          rawEventId: inlineCommentRawEvent?.id ?? null,
+          eventType: "review_inline_comment",
+          actorLogin: "review-bot[bot]",
+          actorClass: "bot",
+          payload: {
+            commentId: 3001,
+            reviewId: 2003,
+            inReplyToCommentId: null,
+            bodyText: "Inline note",
+            path: "src/main.ts",
+            url: "https://github.com/acme/octopulse/pull/7#discussion_r3001",
+          },
         },
         {
           rawEventId: timelineRawEvent?.id ?? null,
           eventType: "pr_merged",
           actorLogin: "octocat",
           actorClass: "self",
+          payload: {},
         },
       ]);
 
@@ -173,12 +309,129 @@ describe("normalizePullRequestActivity", () => {
         normalizedCount: 0,
         skippedCount: 1,
       });
-      expect(normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id)).toHaveLength(3);
+      expect(normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id)).toHaveLength(7);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("maps review states to normalized review event types", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review",
+        sourceId: "2101",
+        eventType: "pull_request_review",
+        actorLogin: "alice",
+        payloadJson: JSON.stringify(
+          createReviewPayload({
+            id: 2101,
+            actorLogin: "alice",
+            actorType: "User",
+            state: "APPROVED",
+            body: "Approved",
+            submittedAt: "2026-04-10T12:11:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:11:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review",
+        sourceId: "2102",
+        eventType: "pull_request_review",
+        actorLogin: "bob",
+        payloadJson: JSON.stringify(
+          createReviewPayload({
+            id: 2102,
+            actorLogin: "bob",
+            actorType: "User",
+            state: "CHANGES_REQUESTED",
+            body: "Please revise",
+            submittedAt: "2026-04-10T12:12:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:12:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review",
+        sourceId: "2103",
+        eventType: "pull_request_review",
+        actorLogin: "carol",
+        payloadJson: JSON.stringify(
+          createReviewPayload({
+            id: 2103,
+            actorLogin: "carol",
+            actorType: "User",
+            state: "COMMENTED",
+            body: "Question",
+            submittedAt: "2026-04-10T12:13:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:13:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review",
+        sourceId: "2104",
+        eventType: "pull_request_review",
+        actorLogin: "dave",
+        payloadJson: JSON.stringify(
+          createReviewPayload({
+            id: 2104,
+            actorLogin: "dave",
+            actorType: "User",
+            state: "DISMISSED",
+            body: "Dismissed after rebase",
+            submittedAt: "2026-04-10T12:14:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:14:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 4,
+        normalizedCount: 4,
+        skippedCount: 0,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          reviewState: parseNormalizedPayload(event.payloadJson).reviewState,
+        })),
+      ).toEqual([
+        {
+          eventType: "review_approved",
+          reviewState: "APPROVED",
+        },
+        {
+          eventType: "review_changes_requested",
+          reviewState: "CHANGES_REQUESTED",
+        },
+        {
+          eventType: "review_submitted",
+          reviewState: "COMMENTED",
+        },
+        {
+          eventType: "review_submitted",
+          reviewState: "DISMISSED",
+        },
+      ]);
     } finally {
       database.close();
     }
   });
 });
+
+function parseNormalizedPayload(payloadJson: string): Record<string, unknown> {
+  return JSON.parse(payloadJson) as Record<string, unknown>;
+}
 
 function createPullRequest(): {
   database: ReturnType<typeof initializeDatabase>;
@@ -227,5 +480,68 @@ function createPullRequestInput(
   return {
     ...input,
     ...overrides,
+  };
+}
+
+function createIssueCommentPayload(overrides: {
+  id: number;
+  actorLogin: string;
+  actorType: string;
+  body: string;
+  createdAt: string;
+}): Record<string, unknown> {
+  return {
+    id: overrides.id,
+    user: {
+      login: overrides.actorLogin,
+      type: overrides.actorType,
+    },
+    body: overrides.body,
+    created_at: overrides.createdAt,
+    html_url: `https://github.com/acme/octopulse/pull/7#issuecomment-${overrides.id}`,
+  };
+}
+
+function createReviewPayload(overrides: {
+  id: number;
+  actorLogin: string;
+  actorType: string;
+  state: string;
+  body: string;
+  submittedAt: string;
+}): Record<string, unknown> {
+  return {
+    id: overrides.id,
+    user: {
+      login: overrides.actorLogin,
+      type: overrides.actorType,
+    },
+    state: overrides.state,
+    body: overrides.body,
+    submitted_at: overrides.submittedAt,
+    html_url: `https://github.com/acme/octopulse/pull/7#pullrequestreview-${overrides.id}`,
+  };
+}
+
+function createReviewCommentPayload(overrides: {
+  id: number;
+  actorLogin: string;
+  actorType: string;
+  reviewId: number;
+  body: string;
+  path: string;
+  createdAt: string;
+}): Record<string, unknown> {
+  return {
+    id: overrides.id,
+    user: {
+      login: overrides.actorLogin,
+      type: overrides.actorType,
+    },
+    pull_request_review_id: overrides.reviewId,
+    body: overrides.body,
+    path: overrides.path,
+    created_at: overrides.createdAt,
+    html_url: `https://github.com/acme/octopulse/pull/7#discussion_r${overrides.id}`,
   };
 }

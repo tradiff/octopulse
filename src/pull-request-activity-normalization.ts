@@ -114,9 +114,41 @@ function normalizeRawEvent(
       actorLogin: rawEvent.actorLogin,
       actorType: readActorType(payload),
     }),
-    payloadJson: "{}",
+    payloadJson: serializeNormalizedPayload(rawEvent, buildNormalizedPayload(rawEvent, payload)),
     occurredAt: rawEvent.occurredAt,
   };
+}
+
+function buildNormalizedPayload(
+  rawEvent: RawEventRecord,
+  payload: Record<string, unknown>,
+): Record<string, number | string | null> | undefined {
+  switch (rawEvent.eventType) {
+    case "issue_comment":
+      return {
+        commentId: readOptionalInteger(payload.id),
+        bodyText: readOptionalString(payload.body),
+        url: readOptionalString(payload.html_url),
+      };
+    case "pull_request_review":
+      return {
+        reviewId: readOptionalInteger(payload.id),
+        reviewState: normalizeReviewState(readOptionalString(payload.state)),
+        bodyText: readOptionalString(payload.body),
+        url: readOptionalString(payload.html_url),
+      };
+    case "pull_request_review_comment":
+      return {
+        commentId: readOptionalInteger(payload.id),
+        reviewId: readOptionalInteger(payload.pull_request_review_id),
+        inReplyToCommentId: readOptionalInteger(payload.in_reply_to_id),
+        bodyText: readOptionalString(payload.body),
+        path: readOptionalString(payload.path),
+        url: readOptionalString(payload.html_url),
+      };
+    default:
+      return undefined;
+  }
 }
 
 function mapNormalizedEventType(
@@ -149,7 +181,7 @@ function mapNormalizedEventType(
 }
 
 function mapReviewEventType(payload: Record<string, unknown>): string {
-  const state = readOptionalString(payload.state)?.toUpperCase();
+  const state = normalizeReviewState(readOptionalString(payload.state));
 
   if (state === "APPROVED") {
     return "review_approved";
@@ -160,6 +192,29 @@ function mapReviewEventType(payload: Record<string, unknown>): string {
   }
 
   return "review_submitted";
+}
+
+function serializeNormalizedPayload(
+  rawEvent: Pick<RawEventRecord, "id">,
+  payload: Record<string, number | string | null> | undefined,
+): string {
+  if (payload === undefined) {
+    return "{}";
+  }
+
+  try {
+    const payloadJson = JSON.stringify(payload);
+
+    if (payloadJson === undefined) {
+      throw new Error("Normalized payload must be serializable JSON");
+    }
+
+    return payloadJson;
+  } catch (error) {
+    throw new PullRequestActivityNormalizationError(
+      `Failed to serialize normalized payload for raw event ${rawEvent.id}: ${getErrorMessage(error)}`,
+    );
+  }
 }
 
 function parseRawPayload(rawEvent: RawEventRecord): Record<string, unknown> {
@@ -194,6 +249,20 @@ function readOptionalActorType(value: unknown): string | null {
 
 function readOptionalString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function readOptionalInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+}
+
+function normalizeReviewState(state: string | null): string | null {
+  if (state === null) {
+    return null;
+  }
+
+  const normalizedState = state.trim().toUpperCase();
+
+  return normalizedState.length > 0 ? normalizedState : null;
 }
 
 function normalizeActorType(actorType: string | null | undefined): string | null {
