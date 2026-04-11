@@ -1,5 +1,6 @@
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./database.js";
+import { initializeGitHubAuth } from "./github.js";
 import { readServerOrigin, startServer } from "./server.js";
 
 async function main(): Promise<void> {
@@ -7,6 +8,7 @@ async function main(): Promise<void> {
 
   try {
     const config = loadConfig();
+    const githubAuth = await initializeGitHubAuth(config);
     database = initializeDatabase(config.paths);
     const server = await startServer();
 
@@ -14,7 +16,9 @@ async function main(): Promise<void> {
       closeDatabaseQuietly(database);
     });
 
-    console.log(`Octopulse listening at ${readServerOrigin(server)}`);
+    console.log(
+      `Octopulse listening at ${readServerOrigin(server)} for GitHub user ${githubAuth.currentUserLogin}`,
+    );
   } catch (error) {
     closeDatabaseQuietly(database);
     const message = error instanceof Error ? error.message : "Unknown startup error";
