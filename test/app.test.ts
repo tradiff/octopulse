@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { renderAppDocument } from "../src/app.js";
 
 describe("renderAppDocument", () => {
-  it("renders tracked and inactive pull request lists", () => {
+  it("renders one combined pull request list", () => {
     const html = renderAppDocument({
       trackedPullRequests: [
         createPullRequestRecord({
@@ -28,8 +28,7 @@ describe("renderAppDocument", () => {
       ],
     });
 
-    expect(html).toContain("Tracked Pull Requests");
-    expect(html).toContain("Inactive Pull Requests");
+    expect(html).toContain("Pull Requests");
     expect(html).toContain("Track Pull Request");
     expect(html).toContain('action="/tracked-pull-requests/manual-track"');
     expect(html).toContain("acme/octopulse #7");
@@ -45,8 +44,7 @@ describe("renderAppDocument", () => {
   it("renders empty-state messages when no pull requests are available", () => {
     const html = renderAppDocument();
 
-    expect(html).toContain("No tracked pull requests yet.");
-    expect(html).toContain("No inactive pull requests yet.");
+    expect(html).toContain("No pull requests yet.");
   });
 
   it("renders flash messages for UI actions", () => {
@@ -146,7 +144,7 @@ describe("renderAppDocument", () => {
 
     expect(html).toContain("Filters");
     expect(html).toContain('name="pr-state"');
-    expect(html).toContain("Inactive only");
+    expect(html).toContain("Untracked only");
     expect(html).toContain("acme/worker");
     expect(html).toContain("Issue Comment");
     expect(html).toContain("Rule suppressed");

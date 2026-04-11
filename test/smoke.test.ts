@@ -8,7 +8,7 @@ describe("renderAppDocument", () => {
 
     expect(html).toContain("<!DOCTYPE html>");
     expect(html).toContain("<title>Octopulse</title>");
-    expect(html).toContain("Tracked Pull Requests");
+    expect(html).toContain("Pull Requests");
     expect(html).toContain("Notification History");
   });
 });

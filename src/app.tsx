@@ -35,14 +35,15 @@ function AppShell({
   uiFilterOptions,
 }: Required<RenderAppDocumentOptions>) {
   const hasActiveFilters = countActiveUiFilters(uiFilters) > 0;
+  const pullRequests = [...trackedPullRequests, ...inactivePullRequests];
 
   return (
     <main>
       <span className="eyebrow">Local GitHub PR pulse</span>
       <h1>Octopulse</h1>
       <p>
-        Local pull request state is rendered from the persisted Octopulse database so tracked and
-        inactive work, notification history, and raw events stay visible and filterable.
+        Local pull request state is rendered from persisted Octopulse database so tracked and
+        untracked work, notification history, and raw events stay visible and filterable.
       </p>
       <FilterPanel uiFilters={uiFilters} uiFilterOptions={uiFilterOptions} />
       <section className="panel manual-track-panel">
@@ -72,40 +73,10 @@ function AppShell({
       </section>
       <div className="grid">
         <PullRequestList
-          title="Tracked Pull Requests"
-          emptyMessage={
-            hasActiveFilters
-              ? "No tracked pull requests match current filters."
-              : "No tracked pull requests yet."
-          }
-          pullRequests={trackedPullRequests}
-          renderAction={(pullRequest) => (
-            <form
-              method="post"
-              action={`/tracked-pull-requests/${pullRequest.githubPullRequestId}/untrack`}
-            >
-              <button type="submit" className="action-button">
-                Untrack
-              </button>
-            </form>
-          )}
-        />
-        <PullRequestList
-          title="Inactive Pull Requests"
-          emptyMessage={
-            hasActiveFilters
-              ? "No inactive pull requests match current filters."
-              : "No inactive pull requests yet."
-          }
-          pullRequests={inactivePullRequests}
-          renderAction={(pullRequest) => (
-            <form method="post" action="/inactive-pull-requests/retrack">
-              <input type="hidden" name="url" value={pullRequest.url} />
-              <button type="submit" className="action-button primary-button">
-                Track Again
-              </button>
-            </form>
-          )}
+          title="Pull Requests"
+          emptyMessage={formatPullRequestEmptyMessage(uiFilters, hasActiveFilters)}
+          pullRequests={pullRequests}
+          renderAction={renderPullRequestAction}
         />
         <NotificationHistoryPanel
           notificationHistory={notificationHistory}
@@ -142,7 +113,7 @@ function FilterPanel({
             <select name="pr-state" defaultValue={uiFilters.pullRequestState} className="text-input">
               <option value="all">All pull requests</option>
               <option value="tracked">Tracked only</option>
-              <option value="inactive">Inactive only</option>
+              <option value="inactive">Untracked only</option>
             </select>
           </label>
           <label className="filter-field">
@@ -378,6 +349,11 @@ function PullRequestList({
                   {pullRequest.repositoryOwner}/{pullRequest.repositoryName} #{pullRequest.number}
                 </a>
                 <div className="pull-request-controls">
+                  <span
+                    className={`tracking-pill ${pullRequest.isTracked ? "tracking-pill-tracked" : "tracking-pill-untracked"}`}
+                  >
+                    {formatTrackingStateLabel(pullRequest)}
+                  </span>
                   <span className="state-pill">{formatStateLabel(pullRequest)}</span>
                   {renderAction ? renderAction(pullRequest) : null}
                 </div>
@@ -394,6 +370,50 @@ function PullRequestList({
 
 function FlashMessage({ message }: { message: AppFlashMessage }) {
   return <p className={`flash-message flash-${message.kind}`}>{message.text}</p>;
+}
+
+function formatPullRequestEmptyMessage(
+  uiFilters: UiFilterValues,
+  hasActiveFilters: boolean,
+): string {
+  if (!hasActiveFilters) {
+    return "No pull requests yet.";
+  }
+
+  if (uiFilters.pullRequestState === "tracked") {
+    return "No tracked pull requests match current filters.";
+  }
+
+  if (uiFilters.pullRequestState === "inactive") {
+    return "No untracked pull requests match current filters.";
+  }
+
+  return "No pull requests match current filters.";
+}
+
+function renderPullRequestAction(pullRequest: PullRequestRecord): ReactNode {
+  if (pullRequest.isTracked) {
+    return (
+      <form method="post" action={`/tracked-pull-requests/${pullRequest.githubPullRequestId}/untrack`}>
+        <button type="submit" className="action-button">
+          Untrack
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <form method="post" action="/inactive-pull-requests/retrack">
+      <input type="hidden" name="url" value={pullRequest.url} />
+      <button type="submit" className="action-button primary-button">
+        Track Again
+      </button>
+    </form>
+  );
+}
+
+function formatTrackingStateLabel(pullRequest: PullRequestRecord): string {
+  return pullRequest.isTracked ? "Tracked" : "Untracked";
 }
 
 function formatStateLabel(pullRequest: PullRequestRecord): string {
@@ -596,6 +616,10 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               grid-column: 1 / -1;
             }
 
+            .pull-request-panel {
+              grid-column: 1 / -1;
+            }
+
             .track-form {
               margin-top: 16px;
             }
@@ -746,6 +770,26 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               background: rgba(148, 163, 184, 0.14);
               color: #cbd5e1;
               white-space: nowrap;
+            }
+
+            .tracking-pill {
+              display: inline-flex;
+              align-items: center;
+              border-radius: 999px;
+              padding: 4px 8px;
+              font-size: 0.75rem;
+              font-weight: 600;
+              white-space: nowrap;
+            }
+
+            .tracking-pill-tracked {
+              background: rgba(34, 197, 94, 0.12);
+              color: #86efac;
+            }
+
+            .tracking-pill-untracked {
+              background: rgba(250, 204, 21, 0.14);
+              color: #fde68a;
             }
 
             .history-pill,
