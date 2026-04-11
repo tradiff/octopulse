@@ -1,0 +1,20 @@
+[Unit]
+Description=Octopulse local PR activity monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Copy this file to ~/.config/systemd/user/octopulse.service and replace
+# __REPO_ROOT__ with the absolute path to this repository checkout.
+WorkingDirectory=__REPO_ROOT__
+ExecStart=/usr/bin/env mise exec -- npm run start
+Restart=on-failure
+RestartSec=5
+# The app logs to stdout and stderr; systemd forwards both streams to journald.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
