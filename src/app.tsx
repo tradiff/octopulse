@@ -4,6 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
+import {
+  countActiveUiFilters,
+  type UiFilterOptions,
+  type UiFilterValues,
+} from "./ui-filters.js";
 
 export interface AppFlashMessage {
   kind: "success" | "error";
@@ -16,6 +21,8 @@ interface RenderAppDocumentOptions {
   notificationHistory?: NotificationHistoryEntry[];
   rawEvents?: RawEventsEntry[];
   flashMessage?: AppFlashMessage | undefined;
+  uiFilters?: UiFilterValues;
+  uiFilterOptions?: UiFilterOptions;
 }
 
 function AppShell({
@@ -24,15 +31,20 @@ function AppShell({
   notificationHistory,
   rawEvents,
   flashMessage,
+  uiFilters,
+  uiFilterOptions,
 }: Required<RenderAppDocumentOptions>) {
+  const hasActiveFilters = countActiveUiFilters(uiFilters) > 0;
+
   return (
     <main>
       <span className="eyebrow">Local GitHub PR pulse</span>
       <h1>Octopulse</h1>
       <p>
         Local pull request state is rendered from the persisted Octopulse database so tracked and
-        inactive work is visible at a glance.
+        inactive work, notification history, and raw events stay visible and filterable.
       </p>
+      <FilterPanel uiFilters={uiFilters} uiFilterOptions={uiFilterOptions} />
       <section className="panel manual-track-panel">
         <div className="panel-header">
           <h2>Track Pull Request</h2>
@@ -61,7 +73,11 @@ function AppShell({
       <div className="grid">
         <PullRequestList
           title="Tracked Pull Requests"
-          emptyMessage="No tracked pull requests yet."
+          emptyMessage={
+            hasActiveFilters
+              ? "No tracked pull requests match current filters."
+              : "No tracked pull requests yet."
+          }
           pullRequests={trackedPullRequests}
           renderAction={(pullRequest) => (
             <form
@@ -76,7 +92,11 @@ function AppShell({
         />
         <PullRequestList
           title="Inactive Pull Requests"
-          emptyMessage="No inactive pull requests yet."
+          emptyMessage={
+            hasActiveFilters
+              ? "No inactive pull requests match current filters."
+              : "No inactive pull requests yet."
+          }
           pullRequests={inactivePullRequests}
           renderAction={(pullRequest) => (
             <form method="post" action="/inactive-pull-requests/retrack">
@@ -87,17 +107,126 @@ function AppShell({
             </form>
           )}
         />
-        <NotificationHistoryPanel notificationHistory={notificationHistory} />
-        <RawEventsPanel rawEvents={rawEvents} />
+        <NotificationHistoryPanel
+          notificationHistory={notificationHistory}
+          hasActiveFilters={hasActiveFilters}
+        />
+        <RawEventsPanel rawEvents={rawEvents} hasActiveFilters={hasActiveFilters} />
       </div>
     </main>
   );
 }
 
+function FilterPanel({
+  uiFilters,
+  uiFilterOptions,
+}: {
+  uiFilters: UiFilterValues;
+  uiFilterOptions: UiFilterOptions;
+}) {
+  const activeFilterCount = countActiveUiFilters(uiFilters);
+
+  return (
+    <section className="panel filters-panel">
+      <div className="panel-header">
+        <div>
+          <h2>Filters</h2>
+          <p className="panel-description">Refine pull requests, notification history, and raw events.</p>
+        </div>
+        <span className="count">{activeFilterCount}</span>
+      </div>
+      <form method="get" action="/" className="filters-form">
+        <div className="filters-grid">
+          <label className="filter-field">
+            <span className="input-label">Tracked state</span>
+            <select name="pr-state" defaultValue={uiFilters.pullRequestState} className="text-input">
+              <option value="all">All pull requests</option>
+              <option value="tracked">Tracked only</option>
+              <option value="inactive">Inactive only</option>
+            </select>
+          </label>
+          <label className="filter-field">
+            <span className="input-label">Repository</span>
+            <select name="repo" defaultValue={uiFilters.repository} className="text-input">
+              <option value="">All repositories</option>
+              {uiFilterOptions.repositories.map((repository) => (
+                <option key={repository} value={repository}>
+                  {repository}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="filter-field">
+            <span className="input-label">Event type</span>
+            <select name="event-type" defaultValue={uiFilters.eventType} className="text-input">
+              <option value="">All event types</option>
+              {uiFilterOptions.eventTypes.map((eventType) => (
+                <option key={eventType} value={eventType}>
+                  {formatEventTypeLabel(eventType)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="filter-field">
+            <span className="input-label">Decision state</span>
+            <select name="decision-state" defaultValue={uiFilters.decisionState} className="text-input">
+              <option value="">All decision states</option>
+              {uiFilterOptions.decisionStates.map((decisionState) => (
+                <option key={decisionState} value={decisionState}>
+                  {formatDecisionStateLabel(decisionState)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="filter-field">
+            <span className="input-label">Actor type</span>
+            <select name="actor-type" defaultValue={uiFilters.actorClass} className="text-input">
+              <option value="">All actors</option>
+              {uiFilterOptions.actorClasses.map((actorClass) => (
+                <option key={actorClass} value={actorClass}>
+                  {formatActorClassLabel(actorClass)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="filter-field">
+            <span className="input-label">Start date</span>
+            <input
+              name="start-date"
+              type="date"
+              defaultValue={uiFilters.startDate}
+              className="text-input"
+            />
+          </label>
+          <label className="filter-field">
+            <span className="input-label">End date</span>
+            <input
+              name="end-date"
+              type="date"
+              defaultValue={uiFilters.endDate}
+              className="text-input"
+            />
+          </label>
+        </div>
+        <div className="filters-actions">
+          <button type="submit" className="action-button primary-button">
+            Apply Filters
+          </button>
+          <a href="/" className="action-button clear-filters-link">
+            Clear
+          </a>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function NotificationHistoryPanel({
   notificationHistory,
+  hasActiveFilters,
 }: {
   notificationHistory: NotificationHistoryEntry[];
+  hasActiveFilters: boolean;
 }) {
   return (
     <section className="panel notification-history-panel">
@@ -106,7 +235,11 @@ function NotificationHistoryPanel({
         <span className="count">{notificationHistory.length}</span>
       </div>
       {notificationHistory.length === 0 ? (
-        <p>No notification history yet.</p>
+        <p>
+          {hasActiveFilters
+            ? "No notification history matches current filters."
+            : "No notification history yet."}
+        </p>
       ) : (
         <ul className="notification-history-list">
           {notificationHistory.map((entry) => (
@@ -148,7 +281,13 @@ function NotificationHistoryPanel({
   );
 }
 
-function RawEventsPanel({ rawEvents }: { rawEvents: RawEventsEntry[] }) {
+function RawEventsPanel({
+  rawEvents,
+  hasActiveFilters,
+}: {
+  rawEvents: RawEventsEntry[];
+  hasActiveFilters: boolean;
+}) {
   return (
     <section className="panel raw-events-panel">
       <div className="panel-header">
@@ -156,7 +295,11 @@ function RawEventsPanel({ rawEvents }: { rawEvents: RawEventsEntry[] }) {
         <span className="count">{rawEvents.length}</span>
       </div>
       {rawEvents.length === 0 ? (
-        <p>No normalized events yet.</p>
+        <p>
+          {hasActiveFilters
+            ? "No normalized events match current filters."
+            : "No normalized events yet."}
+        </p>
       ) : (
         <ul className="raw-events-list">
           {rawEvents.map((entry) => (
@@ -271,6 +414,21 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
   const notificationHistory = options.notificationHistory ?? [];
   const rawEvents = options.rawEvents ?? [];
   const flashMessage = options.flashMessage;
+  const uiFilters: UiFilterValues = options.uiFilters ?? {
+    pullRequestState: "all",
+    repository: "",
+    eventType: "",
+    decisionState: "",
+    actorClass: "",
+    startDate: "",
+    endDate: "",
+  };
+  const uiFilterOptions: UiFilterOptions = options.uiFilterOptions ?? {
+    repositories: [],
+    eventTypes: [],
+    decisionStates: [],
+    actorClasses: [],
+  };
 
   return [
     "<!DOCTYPE html>",
@@ -331,6 +489,10 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
             }
 
             .manual-track-panel {
+              margin-top: 32px;
+            }
+
+            .filters-panel {
               margin-top: 32px;
             }
 
@@ -436,6 +598,33 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
 
             .track-form {
               margin-top: 16px;
+            }
+
+            .filters-form {
+              margin-top: 16px;
+            }
+
+            .filters-grid {
+              display: grid;
+              gap: 12px;
+              grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            }
+
+            .filter-field {
+              display: grid;
+              gap: 8px;
+            }
+
+            .filters-actions {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              margin-top: 16px;
+            }
+
+            .panel-description {
+              margin-top: 4px;
+              font-size: 0.875rem;
             }
 
             .track-form-row {
@@ -603,6 +792,9 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
             }
 
             .action-button {
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
               padding: 8px 12px;
               border: 1px solid rgba(148, 163, 184, 0.24);
               border-radius: 999px;
@@ -611,12 +803,17 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               font: inherit;
               font-size: 0.875rem;
               cursor: pointer;
+              text-decoration: none;
             }
 
             .primary-button {
               border-color: rgba(56, 189, 248, 0.4);
               background: rgba(8, 47, 73, 0.92);
               color: #7dd3fc;
+            }
+
+            .clear-filters-link {
+              color: #cbd5e1;
             }
 
             .flash-message {
@@ -641,6 +838,11 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               }
 
               .track-form-row {
+                flex-direction: column;
+              }
+
+              .filters-actions {
+                align-items: stretch;
                 flex-direction: column;
               }
 
@@ -672,6 +874,8 @@ export function renderAppDocument(options: RenderAppDocumentOptions = {}): strin
               notificationHistory={notificationHistory}
               rawEvents={rawEvents}
               flashMessage={flashMessage}
+              uiFilters={uiFilters}
+              uiFilterOptions={uiFilterOptions}
             />
           </div>
         </body>

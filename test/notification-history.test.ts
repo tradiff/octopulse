@@ -83,22 +83,30 @@ describe("listNotificationHistory", () => {
         deliveredAt: "2026-04-10T12:02:45.000Z",
       });
 
-      expect(listNotificationHistory(database)).toEqual([
-        expect.objectContaining({
-          title: "acme/octopulse PR #7",
-          deliveryStatus: "sent",
-          decisionStates: ["notified_ai_fallback", "notified"],
-          sourceKind: "bundle",
-          deliveredAt: "2026-04-10T12:02:45.000Z",
-        }),
-        expect.objectContaining({
-          title: "acme/octopulse PR #7",
-          deliveryStatus: "pending",
-          decisionStates: ["notified"],
-          sourceKind: "immediate",
-          deliveredAt: null,
-        }),
-      ]);
+        expect(listNotificationHistory(database)).toEqual([
+          expect.objectContaining({
+            title: "acme/octopulse PR #7",
+            deliveryStatus: "sent",
+            decisionStates: ["notified_ai_fallback", "notified"],
+            eventTypes: ["issue_comment", "ci_failed"],
+            actorClasses: ["bot"],
+            sourceKind: "bundle",
+            repositoryKey: "acme/octopulse",
+            isTracked: true,
+            deliveredAt: "2026-04-10T12:02:45.000Z",
+          }),
+          expect.objectContaining({
+            title: "acme/octopulse PR #7",
+            deliveryStatus: "pending",
+            decisionStates: ["notified"],
+            eventTypes: ["review_approved"],
+            actorClasses: ["human_other"],
+            sourceKind: "immediate",
+            repositoryKey: "acme/octopulse",
+            isTracked: true,
+            deliveredAt: null,
+          }),
+        ]);
     } finally {
       database.close();
     }

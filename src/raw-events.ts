@@ -9,6 +9,8 @@ import type { NotificationDeliveryStatus } from "./notification-record-repositor
 
 export interface RawEventsEntry {
   id: number;
+  repositoryKey: string;
+  isTracked: boolean;
   pullRequestLabel: string;
   pullRequestTitle: string;
   pullRequestUrl: string;
@@ -39,6 +41,7 @@ export function listRawEvents(database: DatabaseSync): RawEventsEntry[] {
             normalized_event.id,
             pull_request.repository_owner,
             pull_request.repository_name,
+            pull_request.is_tracked,
             pull_request.number,
             pull_request.url,
             pull_request.title,
@@ -88,6 +91,8 @@ function mapRawEventsEntry(row: unknown): RawEventsEntry {
 
   return {
     id: readInteger(value.id, "RawEvents.id"),
+    repositoryKey: `${readString(value.repository_owner, "RawEvents.repository_owner")}/${readString(value.repository_name, "RawEvents.repository_name")}`,
+    isTracked: readBoolean(value.is_tracked, "RawEvents.is_tracked"),
     pullRequestLabel: `${readString(value.repository_owner, "RawEvents.repository_owner")}/${readString(value.repository_name, "RawEvents.repository_name")} #${readInteger(value.number, "RawEvents.number")}`,
     pullRequestTitle: readString(value.title, "RawEvents.title"),
     pullRequestUrl: readString(value.url, "RawEvents.url"),
@@ -137,6 +142,20 @@ function readNullableString(value: unknown, fieldName: string): string | null {
   }
 
   return readString(value, fieldName);
+}
+
+function readBoolean(value: unknown, fieldName: string): boolean {
+  const numericValue = readInteger(value, fieldName);
+
+  if (numericValue === 0) {
+    return false;
+  }
+
+  if (numericValue === 1) {
+    return true;
+  }
+
+  throw new RawEventsError(`${fieldName} must be stored as 0 or 1`);
 }
 
 function readNullableActorClass(value: unknown, fieldName: string): ActorClass | null {

@@ -60,12 +60,18 @@ describe("startServer", () => {
           createdAt: "2026-04-10 12:03:00",
           deliveredAt: null,
           decisionStates: ["notified" as const],
+          eventTypes: ["review_approved"],
+          actorClasses: ["human_other" as const],
           sourceKind: "immediate" as const,
+          repositoryKey: "acme/octopulse",
+          isTracked: true,
         },
       ],
       listRawEvents: async () => [
         {
           id: 17,
+          repositoryKey: "acme/octopulse",
+          isTracked: true,
           pullRequestLabel: "acme/octopulse #7",
           pullRequestTitle: "Add pull request polling",
           pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
@@ -100,6 +106,116 @@ describe("startServer", () => {
     expect(html).toContain("Raw Events");
     expect(html).toContain("Review Changes Requested");
     expect(html).toContain("Raw JSON");
+  });
+
+  it("applies UI filters across pull requests, history, and raw events", async () => {
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listTrackedPullRequests: async () => [createPullRequestResponseRecord()],
+      listInactivePullRequests: async () => [
+        createPullRequestResponseRecord({
+          id: 2,
+          githubPullRequestId: 202,
+          repositoryName: "worker",
+          number: 12,
+          title: "Keep inactive list visible",
+          url: "https://github.com/acme/worker/pull/12",
+          state: "closed",
+          isTracked: false,
+          isStickyUntracked: true,
+        }),
+      ],
+      listNotificationHistory: async () => [
+        {
+          id: 1,
+          title: "acme/octopulse PR #7",
+          body: "alice approved review\nAdd pull request polling",
+          clickUrl: "https://github.com/acme/octopulse/pull/7",
+          deliveryStatus: "pending" as const,
+          createdAt: "2026-04-10 12:03:00",
+          deliveredAt: null,
+          decisionStates: ["notified" as const],
+          eventTypes: ["review_approved"],
+          actorClasses: ["human_other" as const],
+          sourceKind: "immediate" as const,
+          repositoryKey: "acme/octopulse",
+          isTracked: true,
+        },
+        {
+          id: 2,
+          title: "acme/worker PR #12",
+          body: "CI failed\nKeep inactive list visible",
+          clickUrl: "https://github.com/acme/worker/pull/12",
+          deliveryStatus: "sent" as const,
+          createdAt: "2026-04-11 09:00:00",
+          deliveredAt: "2026-04-11T09:00:05.000Z",
+          decisionStates: ["suppressed_rule" as const],
+          eventTypes: ["issue_comment"],
+          actorClasses: ["bot" as const],
+          sourceKind: "bundle" as const,
+          repositoryKey: "acme/worker",
+          isTracked: false,
+        },
+      ],
+      listRawEvents: async () => [
+        {
+          id: 17,
+          repositoryKey: "acme/octopulse",
+          isTracked: true,
+          pullRequestLabel: "acme/octopulse #7",
+          pullRequestTitle: "Add pull request polling",
+          pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+          eventType: "review_changes_requested",
+          actorLogin: "alice",
+          actorClass: "human_other" as const,
+          decisionState: "notified" as const,
+          notificationTiming: "immediate" as const,
+          occurredAt: "2026-04-10T12:04:00.000Z",
+          rawPayloadJson: '{"state":"CHANGES_REQUESTED"}',
+          notificationSourceKind: "immediate" as const,
+          notificationDeliveryStatus: "sent" as const,
+        },
+        {
+          id: 18,
+          repositoryKey: "acme/worker",
+          isTracked: false,
+          pullRequestLabel: "acme/worker #12",
+          pullRequestTitle: "Keep inactive list visible",
+          pullRequestUrl: "https://github.com/acme/worker/pull/12",
+          eventType: "issue_comment",
+          actorLogin: "ci-bot[bot]",
+          actorClass: "bot" as const,
+          decisionState: "suppressed_rule" as const,
+          notificationTiming: null,
+          occurredAt: "2026-04-11T09:00:00.000Z",
+          rawPayloadJson: '{"body":"CI says hello"}',
+          notificationSourceKind: "bundle" as const,
+          notificationDeliveryStatus: "pending" as const,
+        },
+      ],
+    });
+    servers.push(server);
+
+    const query = new URLSearchParams({
+      "pr-state": "inactive",
+      repo: "acme/worker",
+      "event-type": "issue_comment",
+      "decision-state": "suppressed_rule",
+      "actor-type": "bot",
+      "start-date": "2026-04-11",
+      "end-date": "2026-04-11",
+    });
+    const response = await fetch(`${readServerOrigin(server)}/?${query}`);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Keep inactive list visible");
+    expect(html).not.toContain("Add pull request polling");
+    expect(html).not.toContain("alice approved review");
+    expect(html).toContain("CI failed");
+    expect(html).toContain("ci-bot[bot]");
+    expect(html).toContain('value="2026-04-11"');
   });
 
   it("handles manual track form submissions and shows a success message", async () => {

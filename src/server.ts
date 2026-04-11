@@ -10,6 +10,14 @@ import {
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
+import {
+  buildUiFilterOptions,
+  filterInactivePullRequests,
+  filterNotificationHistory,
+  filterRawEvents,
+  filterTrackedPullRequests,
+  readUiFilterValues,
+} from "./ui-filters.js";
 
 export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_PORT = 3000;
@@ -180,6 +188,13 @@ async function handleRequest(
       : [];
     const rawEvents = options.listRawEvents ? await options.listRawEvents() : [];
     const flashMessage = readFlashMessage(searchParams);
+    const uiFilters = readUiFilterValues(searchParams);
+    const uiFilterOptions = buildUiFilterOptions({
+      trackedPullRequests,
+      inactivePullRequests,
+      notificationHistory,
+      rawEvents,
+    });
 
     respond(
       response,
@@ -187,11 +202,13 @@ async function handleRequest(
       200,
       "text/html; charset=utf-8",
       renderAppDocument({
-        trackedPullRequests,
-        inactivePullRequests,
-        notificationHistory,
-        rawEvents,
+        trackedPullRequests: filterTrackedPullRequests(trackedPullRequests, uiFilters),
+        inactivePullRequests: filterInactivePullRequests(inactivePullRequests, uiFilters),
+        notificationHistory: filterNotificationHistory(notificationHistory, uiFilters),
+        rawEvents: filterRawEvents(rawEvents, uiFilters),
         ...(flashMessage ? { flashMessage } : {}),
+        uiFilters,
+        uiFilterOptions,
       }),
     );
     return;
@@ -464,13 +481,33 @@ function redirectToDocumentMessage(
   response: ServerResponse,
   flashMessage: AppFlashMessage,
 ): void {
-  const location = new URL("/", "http://127.0.0.1");
+  const location = createDocumentRedirectLocation(request);
   location.searchParams.set("flash-kind", flashMessage.kind);
   location.searchParams.set("flash-text", flashMessage.text);
 
   response.statusCode = 303;
   response.setHeader("Location", `${location.pathname}${location.search}`);
   response.end(request.method === "HEAD" ? undefined : "");
+}
+
+function createDocumentRedirectLocation(request: IncomingMessage): URL {
+  const referer = request.headers.referer;
+
+  if (typeof referer === "string") {
+    try {
+      const location = new URL(referer);
+
+      if (location.pathname === "/") {
+        location.searchParams.delete("flash-kind");
+        location.searchParams.delete("flash-text");
+        return location;
+      }
+    } catch {
+      // Fall back to root when the browser did not send a valid referer.
+    }
+  }
+
+  return new URL("/", "http://127.0.0.1");
 }
 
 function createTrackFlashMessage(result: TrackPullRequestByUrlResult): AppFlashMessage {

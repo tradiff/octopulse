@@ -73,7 +73,11 @@ describe("renderAppDocument", () => {
           createdAt: "2026-04-10 12:02:30",
           deliveredAt: "2026-04-10T12:02:45.000Z",
           decisionStates: ["notified", "notified_ai_fallback"],
+          eventTypes: ["issue_comment", "ci_failed"],
+          actorClasses: ["bot"],
           sourceKind: "bundle",
+          repositoryKey: "acme/octopulse",
+          isTracked: true,
         },
       ],
     });
@@ -93,6 +97,8 @@ describe("renderAppDocument", () => {
       rawEvents: [
         {
           id: 17,
+          repositoryKey: "acme/octopulse",
+          isTracked: true,
           pullRequestLabel: "acme/octopulse #7",
           pullRequestTitle: "Add pull request polling",
           pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
@@ -117,6 +123,38 @@ describe("renderAppDocument", () => {
     expect(html).toContain("Raw JSON");
     expect(html).toContain("&quot;CHANGES_REQUESTED&quot;");
     expect(html).toContain('<details class="raw-event-details">');
+  });
+
+  it("renders filter controls and available options", () => {
+    const html = renderAppDocument({
+      uiFilters: {
+        pullRequestState: "inactive",
+        repository: "acme/worker",
+        eventType: "issue_comment",
+        decisionState: "suppressed_rule",
+        actorClass: "bot",
+        startDate: "2026-04-10",
+        endDate: "2026-04-11",
+      },
+      uiFilterOptions: {
+        repositories: ["acme/octopulse", "acme/worker"],
+        eventTypes: ["issue_comment", "review_changes_requested"],
+        decisionStates: ["notified", "suppressed_rule"],
+        actorClasses: ["human_other", "bot"],
+      },
+    });
+
+    expect(html).toContain("Filters");
+    expect(html).toContain('name="pr-state"');
+    expect(html).toContain("Inactive only");
+    expect(html).toContain("acme/worker");
+    expect(html).toContain("Issue Comment");
+    expect(html).toContain("Rule suppressed");
+    expect(html).toContain("Bot");
+    expect(html).toContain('name="start-date"');
+    expect(html).toContain('value="2026-04-10"');
+    expect(html).toContain('value="2026-04-11"');
+    expect(html).toContain("Apply Filters");
   });
 });
 

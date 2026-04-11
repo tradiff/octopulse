@@ -102,12 +102,14 @@ describe("listRawEvents", () => {
         deliveryStatus: "pending",
       });
 
-      expect(listRawEvents(database)).toEqual([
-        {
-          id: bundledEvent.id,
-          pullRequestLabel: "acme/octopulse #7",
-          pullRequestTitle: "Add notifications",
-          pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+        expect(listRawEvents(database)).toEqual([
+          {
+            id: bundledEvent.id,
+            repositoryKey: "acme/octopulse",
+            isTracked: true,
+            pullRequestLabel: "acme/octopulse #7",
+            pullRequestTitle: "Add notifications",
+            pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
           eventType: "issue_comment",
           actorLogin: "ci-bot[bot]",
           actorClass: "bot",
@@ -118,11 +120,13 @@ describe("listRawEvents", () => {
           notificationSourceKind: "bundle",
           notificationDeliveryStatus: "pending",
         },
-        {
-          id: immediateEvent.id,
-          pullRequestLabel: "acme/octopulse #7",
-          pullRequestTitle: "Add notifications",
-          pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+          {
+            id: immediateEvent.id,
+            repositoryKey: "acme/octopulse",
+            isTracked: true,
+            pullRequestLabel: "acme/octopulse #7",
+            pullRequestTitle: "Add notifications",
+            pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
           eventType: "review_changes_requested",
           actorLogin: "alice",
           actorClass: "human_other",
