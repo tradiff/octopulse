@@ -34,7 +34,7 @@ export type BotActivityClassifier = (
 ) => Promise<BotActivityAiClassification> | BotActivityAiClassification;
 
 export interface ClassifyBotPullRequestActivityOptions {
-  botActivityClassifier: BotActivityClassifier;
+  botActivityClassifier?: BotActivityClassifier;
   normalizedEventRepository?: Pick<
     NormalizedEventRepository,
     "listAiEligibleUnbundledEventsForPullRequest" | "updateNormalizedEventDecision"
@@ -46,6 +46,7 @@ export interface ClassifyBotPullRequestActivityResult {
   classifiedCount: number;
   notifiedCount: number;
   suppressedCount: number;
+  fallbackCount: number;
 }
 
 export interface CreateOpenAiBotActivityClassifierOptions {
@@ -85,6 +86,7 @@ export async function classifyBotPullRequestActivity(
   let classifiedCount = 0;
   let notifiedCount = 0;
   let suppressedCount = 0;
+  let fallbackCount = 0;
 
   for (const event of eligibleEvents) {
     const payload = parseNormalizedPayload(event);
@@ -94,14 +96,26 @@ export async function classifyBotPullRequestActivity(
       continue;
     }
 
+    if (!options.botActivityClassifier) {
+      persistFallbackDecision(normalizedEventRepository, event, payload, {
+        reason: "OpenAI classification unavailable: api key not configured",
+      });
+      fallbackCount += 1;
+      notifiedCount += 1;
+      continue;
+    }
+
     let classification: BotActivityAiClassification;
 
     try {
       classification = await options.botActivityClassifier(bodyText);
     } catch (error) {
-      throw new BotActivityClassificationError(
-        `Failed to classify normalized event ${event.id}: ${getErrorMessage(error)}`,
-      );
+      persistFallbackDecision(normalizedEventRepository, event, payload, {
+        reason: `OpenAI classification failed: ${getErrorMessage(error)}`,
+      });
+      fallbackCount += 1;
+      notifiedCount += 1;
+      continue;
     }
 
     const decisionState = mapAiDecisionToDecisionState(classification.decision);
@@ -136,6 +150,7 @@ export async function classifyBotPullRequestActivity(
     classifiedCount,
     notifiedCount,
     suppressedCount,
+    fallbackCount,
   };
 }
 
@@ -246,6 +261,29 @@ function serializePayload(
   } catch (error) {
     throw new BotActivityClassificationError(
       `Failed to serialize normalized payload for event ${event.id}: ${getErrorMessage(error)}`,
+    );
+  }
+}
+
+function persistFallbackDecision(
+  normalizedEventRepository: Pick<NormalizedEventRepository, "updateNormalizedEventDecision">,
+  event: Pick<NormalizedEventRecord, "id">,
+  payload: JsonObject,
+  input: { reason: string },
+): void {
+  const payloadJson = serializePayload(event, {
+    ...payload,
+    aiFallbackReason: input.reason,
+  });
+
+  try {
+    normalizedEventRepository.updateNormalizedEventDecision(event.id, {
+      decisionState: "notified_ai_fallback",
+      payloadJson,
+    });
+  } catch (error) {
+    throw new BotActivityClassificationError(
+      `Failed to persist AI fallback decision for normalized event ${event.id}: ${getErrorMessage(error)}`,
     );
   }
 }

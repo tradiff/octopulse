@@ -88,6 +88,7 @@ describe("classifyBotPullRequestActivity", () => {
         classifiedCount: 2,
         notifiedCount: 1,
         suppressedCount: 1,
+        fallbackCount: 0,
       });
 
       expect(classifier).toHaveBeenCalledTimes(2);
@@ -132,6 +133,100 @@ describe("classifyBotPullRequestActivity", () => {
           decisionState: "notified",
           payload: {
             workflowName: "CI",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("marks bot activity for fallback notify when OpenAI is not configured", async () => {
+    const { database, pullRequest } = createPullRequest();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        actorLogin: "dependabot[bot]",
+        actorClass: "bot",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ bodyText: "Routine dependency bump" }),
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+
+      await expect(
+        classifyBotPullRequestActivity(database, pullRequest.id, {}),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        classifiedCount: 0,
+        notifiedCount: 1,
+        suppressedCount: 0,
+        fallbackCount: 1,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          decisionState: event.decisionState,
+          payload: parsePayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          decisionState: "notified_ai_fallback",
+          payload: {
+            bodyText: "Routine dependency bump",
+            aiFallbackReason: "OpenAI classification unavailable: api key not configured",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("falls back to notify when AI classification fails", async () => {
+    const { database, pullRequest } = createPullRequest();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const classifier = vi.fn(async () => {
+      throw new Error("request timed out");
+    });
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_inline_comment",
+        actorLogin: "ci-bot[bot]",
+        actorClass: "bot",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ bodyText: "Build failed on ubuntu-latest" }),
+        occurredAt: "2026-04-10T12:02:00.000Z",
+      });
+
+      await expect(
+        classifyBotPullRequestActivity(database, pullRequest.id, {
+          botActivityClassifier: classifier,
+        }),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        classifiedCount: 0,
+        notifiedCount: 1,
+        suppressedCount: 0,
+        fallbackCount: 1,
+      });
+
+      expect(classifier).toHaveBeenCalledTimes(1);
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          decisionState: event.decisionState,
+          payload: parsePayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          decisionState: "notified_ai_fallback",
+          payload: {
+            bodyText: "Build failed on ubuntu-latest",
+            aiFallbackReason: "OpenAI classification failed: request timed out",
           },
         },
       ]);

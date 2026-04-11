@@ -58,16 +58,14 @@ export async function pollTrackedPullRequests<TClient>(
       await ingestPullRequestActivity(database, client, pullRequest);
       normalizePullRequestActivity(database, pullRequest, githubAuth.currentUserLogin);
 
-      if (botActivityClassifier) {
-        try {
-          await classifyBotPullRequestActivity(database, pullRequest.id, {
-            botActivityClassifier,
-          });
-        } catch (error) {
-          console.error(
-            `Octopulse bot activity classification failed for pull request ${formatPullRequestLabel(pullRequest)}: ${getErrorMessage(error)}`,
-          );
-        }
+      try {
+        await classifyBotPullRequestActivity(database, pullRequest.id, {
+          ...(botActivityClassifier ? { botActivityClassifier } : {}),
+        });
+      } catch (error) {
+        console.error(
+          `Octopulse bot activity classification failed for pull request ${formatPullRequestLabel(pullRequest)}: ${getErrorMessage(error)}`,
+        );
       }
 
       bundlePullRequestEvents(database, pullRequest.id);

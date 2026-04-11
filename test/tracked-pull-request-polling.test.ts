@@ -344,6 +344,94 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
+  it("marks bot comments for fallback notify when no OpenAI classifier is configured", async () => {
+    const { database, repository } = createRepository();
+    const eventBundleRepository = new EventBundleRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const request = vi.fn(async (route: string) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+          return {
+            data: [
+              createIssueCommentFixture({
+                id: 9701,
+                actorLogin: "dependabot[bot]",
+                actorType: "Bot",
+                createdAt: "2026-04-10T12:10:00.000Z",
+                body: "Routine dependency bump",
+              }),
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+          return { data: [] };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+          return { data: [] };
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return { data: [] };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          return {
+            data: {
+              total_count: 0,
+              workflow_runs: [],
+            },
+          };
+        default:
+          throw new Error(`Unexpected route: ${route}`);
+      }
+    });
+
+    try {
+      repository.upsertPullRequest(createPullRequestInput());
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      const pullRequest = repository.listTrackedPullRequests()[0];
+      const bundles = eventBundleRepository.listEventBundlesForPullRequest(pullRequest?.id ?? -1);
+
+      expect(bundles).toHaveLength(1);
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest?.id ?? -1).map((event) => ({
+          eventType: event.eventType,
+          decisionState: event.decisionState,
+          eventBundleId: event.eventBundleId,
+          payload: JSON.parse(event.payloadJson) as Record<string, unknown>,
+        })),
+      ).toEqual([
+        {
+          eventType: "issue_comment",
+          decisionState: "notified_ai_fallback",
+          eventBundleId: bundles[0]?.id ?? null,
+          payload: {
+            commentId: 9701,
+            bodyText: "Routine dependency bump",
+            url: "https://github.com/acme/octopulse/pull/7#issuecomment-9701",
+            aiFallbackReason: "OpenAI classification unavailable: api key not configured",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("keeps repeated polling idempotent and reuses comment fetch cursors", async () => {
     const { database, repository } = createRepository();
     const rawEventRepository = new RawEventRepository(database);
