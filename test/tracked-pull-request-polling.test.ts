@@ -304,32 +304,38 @@ describe("pollTrackedPullRequests", () => {
             eventType: event.eventType,
             actorLogin: event.actorLogin,
             actorClass: event.actorClass,
+            notificationTiming: event.notificationTiming,
           })),
       ).toEqual([
         {
           eventType: "issue_comment",
           actorLogin: "alice",
           actorClass: "human_other",
+          notificationTiming: null,
         },
         {
           eventType: "review_approved",
           actorLogin: "bob",
           actorClass: "human_other",
+          notificationTiming: "immediate",
         },
         {
           eventType: "review_inline_comment",
           actorLogin: "carol",
           actorClass: "human_other",
+          notificationTiming: null,
         },
         {
           eventType: "pr_merged",
           actorLogin: "octocat",
           actorClass: "self",
+          notificationTiming: null,
         },
         {
           eventType: "ci_failed",
           actorLogin: "octocat",
           actorClass: "self",
+          notificationTiming: null,
         },
       ]);
     } finally {

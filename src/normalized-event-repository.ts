@@ -9,6 +9,8 @@ export type DecisionState =
   | "notified_ai_fallback"
   | "error";
 
+export type NotificationTiming = "immediate";
+
 export interface NormalizedEventRecord {
   id: number;
   rawEventId: number | null;
@@ -17,6 +19,7 @@ export interface NormalizedEventRecord {
   actorLogin: string | null;
   actorClass: ActorClass | null;
   decisionState: DecisionState | null;
+  notificationTiming: NotificationTiming | null;
   summary: string | null;
   payloadJson: string;
   occurredAt: string;
@@ -30,6 +33,7 @@ export interface InsertNormalizedEventInput {
   actorLogin?: string | null;
   actorClass?: ActorClass | null;
   decisionState?: DecisionState | null;
+  notificationTiming?: NotificationTiming | null;
   summary?: string | null;
   payloadJson?: string;
   occurredAt: string;
@@ -57,10 +61,11 @@ export class NormalizedEventRepository {
               actor_login,
               actor_class,
               decision_state,
+              notification_timing,
               summary,
               payload_json,
               occurred_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
         )
         .run(
@@ -70,6 +75,7 @@ export class NormalizedEventRepository {
           input.actorLogin ?? null,
           input.actorClass ?? null,
           input.decisionState ?? null,
+          input.notificationTiming ?? null,
           input.summary ?? null,
           input.payloadJson ?? "{}",
           input.occurredAt,
@@ -130,6 +136,10 @@ function mapNormalizedEventRow(row: unknown): NormalizedEventRecord {
     actorLogin: readNullableString(value.actor_login, "NormalizedEvent.actor_login"),
     actorClass: readNullableActorClass(value.actor_class, "NormalizedEvent.actor_class"),
     decisionState: readNullableDecisionState(value.decision_state, "NormalizedEvent.decision_state"),
+    notificationTiming: readNullableNotificationTiming(
+      value.notification_timing,
+      "NormalizedEvent.notification_timing",
+    ),
     summary: readNullableString(value.summary, "NormalizedEvent.summary"),
     payloadJson: readString(value.payload_json, "NormalizedEvent.payload_json"),
     occurredAt: readString(value.occurred_at, "NormalizedEvent.occurred_at"),
@@ -213,6 +223,23 @@ function readNullableDecisionState(value: unknown, fieldName: string): DecisionS
   throw new NormalizedEventRepositoryError(
     `${fieldName} must be notified, suppressed_self_action, suppressed_rule, notified_ai_fallback, error, or null`,
   );
+}
+
+function readNullableNotificationTiming(
+  value: unknown,
+  fieldName: string,
+): NotificationTiming | null {
+  if (value === null) {
+    return null;
+  }
+
+  const notificationTiming = readString(value, fieldName);
+
+  if (notificationTiming === "immediate") {
+    return notificationTiming;
+  }
+
+  throw new NormalizedEventRepositoryError(`${fieldName} must be immediate or null`);
 }
 
 function getErrorMessage(error: unknown): string {

@@ -139,22 +139,26 @@ describe("normalizePullRequestActivity", () => {
           eventType: event.eventType,
           actorClass: event.actorClass,
           decisionState: event.decisionState,
+          notificationTiming: event.notificationTiming,
         })),
       ).toEqual([
         {
           eventType: "issue_comment",
           actorClass: "self",
           decisionState: "suppressed_self_action",
+          notificationTiming: null,
         },
         {
           eventType: "pr_merged",
           actorClass: "self",
           decisionState: "suppressed_self_action",
+          notificationTiming: null,
         },
         {
           eventType: "ci_succeeded",
           actorClass: "self",
           decisionState: "notified",
+          notificationTiming: null,
         },
       ]);
     } finally {
@@ -324,6 +328,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: event.eventType,
           actorLogin: event.actorLogin,
           actorClass: event.actorClass,
+          notificationTiming: event.notificationTiming,
           payload: parseNormalizedPayload(event.payloadJson),
         })),
       ).toEqual([
@@ -332,6 +337,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: "issue_comment",
           actorLogin: "alice",
           actorClass: "human_other",
+          notificationTiming: null,
           payload: {
             commentId: 1001,
             bodyText: "Ship it",
@@ -343,6 +349,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: "issue_comment",
           actorLogin: "renovate[bot]",
           actorClass: "bot",
+          notificationTiming: null,
           payload: {
             commentId: 1002,
             bodyText: "Automerge blocked until checks pass",
@@ -354,6 +361,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: "review_approved",
           actorLogin: "bob",
           actorClass: "human_other",
+          notificationTiming: "immediate",
           payload: {
             reviewId: 2001,
             reviewState: "APPROVED",
@@ -366,6 +374,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: "review_changes_requested",
           actorLogin: "carol",
           actorClass: "human_other",
+          notificationTiming: "immediate",
           payload: {
             reviewId: 2002,
             reviewState: "CHANGES_REQUESTED",
@@ -378,6 +387,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: "review_submitted",
           actorLogin: "review-bot[bot]",
           actorClass: "bot",
+          notificationTiming: null,
           payload: {
             reviewId: 2003,
             reviewState: "COMMENTED",
@@ -390,6 +400,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: "review_inline_comment",
           actorLogin: "review-bot[bot]",
           actorClass: "bot",
+          notificationTiming: null,
           payload: {
             commentId: 3001,
             reviewId: 2003,
@@ -404,6 +415,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: "pr_merged",
           actorLogin: "octocat",
           actorClass: "self",
+          notificationTiming: null,
           payload: {},
         },
         {
@@ -411,6 +423,7 @@ describe("normalizePullRequestActivity", () => {
           eventType: "ci_succeeded",
           actorLogin: "github-actions[bot]",
           actorClass: "bot",
+          notificationTiming: null,
           payload: {
             headSha: "abc123",
             workflowRunId: 4001,
@@ -942,23 +955,38 @@ describe("normalizePullRequestActivity", () => {
       expect(
         normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
           eventType: event.eventType,
+          actorClass: event.actorClass,
+          decisionState: event.decisionState,
+          notificationTiming: event.notificationTiming,
           reviewState: parseNormalizedPayload(event.payloadJson).reviewState,
         })),
       ).toEqual([
         {
           eventType: "review_approved",
+          actorClass: "human_other",
+          decisionState: "notified",
+          notificationTiming: "immediate",
           reviewState: "APPROVED",
         },
         {
           eventType: "review_changes_requested",
+          actorClass: "human_other",
+          decisionState: "notified",
+          notificationTiming: "immediate",
           reviewState: "CHANGES_REQUESTED",
         },
         {
           eventType: "review_submitted",
+          actorClass: "human_other",
+          decisionState: "notified",
+          notificationTiming: null,
           reviewState: "COMMENTED",
         },
         {
           eventType: "review_submitted",
+          actorClass: "human_other",
+          decisionState: "notified",
+          notificationTiming: null,
           reviewState: "DISMISSED",
         },
       ]);
@@ -1013,6 +1041,81 @@ describe("normalizePullRequestActivity", () => {
         "suppressed_rule",
         "notified_ai_fallback",
         "error",
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not mark self or bot reviews for immediate notification timing", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+
+    try {
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review",
+        sourceId: "2201",
+        eventType: "pull_request_review",
+        actorLogin: "octocat",
+        payloadJson: JSON.stringify(
+          createReviewFixture({
+            id: 2201,
+            actorLogin: "octocat",
+            actorType: "User",
+            state: "APPROVED",
+            body: "Self approval",
+            submittedAt: "2026-04-10T12:41:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:41:00.000Z",
+      });
+      rawEventRepository.insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_pull_request_review",
+        sourceId: "2202",
+        eventType: "pull_request_review",
+        actorLogin: "review-bot[bot]",
+        payloadJson: JSON.stringify(
+          createReviewFixture({
+            id: 2202,
+            actorLogin: "review-bot[bot]",
+            actorType: "Bot",
+            state: "CHANGES_REQUESTED",
+            body: "Bot asks for changes",
+            submittedAt: "2026-04-10T12:42:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:42:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 2,
+        normalizedCount: 2,
+        skippedCount: 0,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          actorClass: event.actorClass,
+          decisionState: event.decisionState,
+          notificationTiming: event.notificationTiming,
+        })),
+      ).toEqual([
+        {
+          eventType: "review_approved",
+          actorClass: "self",
+          decisionState: "suppressed_self_action",
+          notificationTiming: null,
+        },
+        {
+          eventType: "review_changes_requested",
+          actorClass: "bot",
+          decisionState: "notified",
+          notificationTiming: null,
+        },
       ]);
     } finally {
       database.close();

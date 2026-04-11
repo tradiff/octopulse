@@ -5,6 +5,7 @@ import {
   type ActorClass,
   type DecisionState,
   type InsertNormalizedEventInput,
+  type NotificationTiming,
   type NormalizedEventRecord,
 } from "./normalized-event-repository.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
@@ -176,6 +177,7 @@ function normalizeRawEvent(
     actorLogin: rawEvent.actorLogin,
     actorClass,
     decisionState: resolveDecisionState(eventType, actorClass),
+    notificationTiming: resolveNotificationTiming(eventType, actorClass),
     payloadJson: serializeNormalizedPayload(rawEvent, buildNormalizedPayload(rawEvent, payload)),
     occurredAt: rawEvent.occurredAt,
   };
@@ -335,6 +337,7 @@ function deriveMissingCiOutcomeEvents(input: {
       actorLogin: workflowRun.rawEvent.actorLogin,
       actorClass,
       decisionState: resolveDecisionState(nextOutcome, actorClass),
+      notificationTiming: resolveNotificationTiming(nextOutcome, actorClass),
       payloadJson: serializeNormalizedPayload(
         workflowRun.rawEvent,
         buildCiOutcomePayload(workflowRun.snapshot),
@@ -405,6 +408,20 @@ function resolveDecisionState(eventType: string, actorClass: ActorClass): Decisi
   }
 
   return "notified";
+}
+
+function resolveNotificationTiming(
+  eventType: string,
+  actorClass: ActorClass,
+): NotificationTiming | null {
+  if (
+    actorClass === "human_other" &&
+    (eventType === "review_approved" || eventType === "review_changes_requested")
+  ) {
+    return "immediate";
+  }
+
+  return null;
 }
 
 function shouldDelayInitialCiSuccess(input: {
