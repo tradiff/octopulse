@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { createRoot } from "react-dom/client";
+import { Highlight, themes } from "prism-react-renderer";
 
 import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
@@ -70,6 +71,15 @@ const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hourCycle: "h23",
   timeZoneName: "short",
 });
+const RAW_EVENT_JSON_THEME = {
+  ...themes.oneDark,
+  plain: {
+    ...themes.oneDark.plain,
+    backgroundColor: "transparent",
+    background: "transparent",
+    color: "#cbd5e1",
+  },
+};
 
 function isLogLevel(value: string): value is LogLevel {
   return value === "debug" || value === "info" || value === "warn" || value === "error";
@@ -710,16 +720,80 @@ function RawEventsPanel({
                   </span>
                 ) : null}
               </div>
-              <details className="raw-event-details">
-                <summary>Raw JSON</summary>
-                <pre className="raw-event-json">{entry.rawPayloadJson ?? "No stored raw payload."}</pre>
-              </details>
+              <RawEventJsonDetails rawPayloadJson={entry.rawPayloadJson} />
             </li>
           ))}
         </ul>
       )}
     </section>
   );
+}
+
+function RawEventJsonDetails({ rawPayloadJson }: { rawPayloadJson: string | null }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <details
+      className="raw-event-details"
+      onToggle={(event) => {
+        setIsOpen(event.currentTarget.open);
+      }}
+    >
+      <summary>Raw JSON</summary>
+      {isOpen ? <RawEventJsonBlock rawPayloadJson={rawPayloadJson} /> : null}
+    </details>
+  );
+}
+
+function RawEventJsonBlock({ rawPayloadJson }: { rawPayloadJson: string | null }) {
+  if (rawPayloadJson === null) {
+    return <pre className="raw-event-json">No stored raw payload.</pre>;
+  }
+
+  const formattedJson = formatJsonForDisplay(rawPayloadJson);
+
+  if (formattedJson === null) {
+    return <pre className="raw-event-json">{rawPayloadJson}</pre>;
+  }
+
+  return <HighlightedJsonBlock code={formattedJson} className="raw-event-json" />;
+}
+
+function HighlightedJsonBlock({
+  code,
+  className,
+}: {
+  code: string;
+  className: string;
+}) {
+  return (
+    <Highlight theme={RAW_EVENT_JSON_THEME} code={code} language="json">
+      {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
+        <pre className={`${className} ${highlightClassName}`} style={style}>
+          <code>
+            {tokens.map((line, lineIndex) => (
+              <span
+                key={lineIndex}
+                {...getLineProps({ line, className: "raw-event-json-line" })}
+              >
+                {line.map((token, tokenIndex) => (
+                  <span key={tokenIndex} {...getTokenProps({ token })} />
+                ))}
+              </span>
+            ))}
+          </code>
+        </pre>
+      )}
+    </Highlight>
+  );
+}
+
+function formatJsonForDisplay(rawJson: string): string | null {
+  try {
+    return JSON.stringify(JSON.parse(rawJson), null, 2);
+  } catch {
+    return null;
+  }
 }
 
 function LogsPanel({
@@ -785,7 +859,10 @@ function LogsPanel({
                     </summary>
                   </details>
                   <LogEntrySummary entry={entry} />
-                  <pre className="raw-event-json logs-context-json">{JSON.stringify(entry.context, null, 2)}</pre>
+                  <HighlightedJsonBlock
+                    code={JSON.stringify(entry.context, null, 2)}
+                    className="raw-event-json logs-context-json"
+                  />
                 </>
               ) : (
                 <>
@@ -1714,6 +1791,14 @@ const APP_STYLES = `
     color: #cbd5e1;
     font-size: 0.8rem;
     line-height: 1.5;
+  }
+
+  .raw-event-json code {
+    display: block;
+  }
+
+  .raw-event-json-line {
+    display: block;
   }
 
   .state-pill {
