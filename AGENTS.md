@@ -2,7 +2,7 @@
 
 ## Project
 - Octopulse is a local Linux app for tracking GitHub pull request activity and surfacing noteworthy events.
-- The intended stack is Node.js with TypeScript, React for the local UI, SQLite for persistence, Octokit for GitHub access, OpenAI for limited bot-comment classification, and DBus or `libnotify` for desktop notifications.
+- The intended stack is Node.js with TypeScript, React for the local UI, SQLite for persistence, Octokit for GitHub access, OpenAI for limited bot-comment classification, `node-systray-v2` for tray integration, and DBus or `libnotify` for desktop notifications.
 
 ## Runtime Targets
 - Linux only

@@ -21,6 +21,7 @@ describe("SPA shell", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("<!DOCTYPE html>");
     expect(html).toContain("<title>Octopulse</title>");
+    expect(html).toContain('href="/favicon.png"');
     expect(html).toContain('<div id="root"></div>');
     expect(html).toContain('src="/app.js"');
   });

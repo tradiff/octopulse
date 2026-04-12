@@ -77,6 +77,7 @@ The app:
 - starts a localhost-only UI at `http://127.0.0.1:3000`
 - exposes a health endpoint at `http://127.0.0.1:3000/health`
 - runs recurring authored/review-requested PR discovery and tracked-PR polling in the same process
+- shows tray icon with `Open Octopulse`, `Open Logs`, and `Quit` menu actions when started in graphical session
 
 For active development:
 

@@ -1,8 +1,8 @@
 import freedesktopNotifications from "freedesktop-notifications";
-import { spawn } from "node:child_process";
 
 import { FileAvatarCache, type AvatarImageCache } from "./avatar-cache.js";
 import type { NotificationMarkup } from "./notification-rendering.js";
+import { openUrl } from "./open-url.js";
 
 export interface LinuxNotification {
   title: string;
@@ -197,21 +197,4 @@ function escapeMarkup(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-async function openUrl(url: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("xdg-open", [url], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`xdg-open exited with code ${code}`));
-      }
-    });
-  });
 }

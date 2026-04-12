@@ -26,12 +26,37 @@ import {
   startRecurringTrackedPullRequestPolling,
   type RecurringTrackedPullRequestPollingHandle,
 } from "./tracked-pull-request-polling.js";
+import { startTrayIcon, type TrayIconHandle } from "./tray-icon.js";
 
 async function main(): Promise<void> {
   let database: ReturnType<typeof initializeDatabase> | undefined;
   let server: Server | undefined;
   let recurringDiscovery: RecurringAuthoredPullRequestDiscoveryHandle | undefined;
   let recurringTrackedPullRequestPolling: RecurringTrackedPullRequestPollingHandle | undefined;
+  let trayIcon: TrayIconHandle | undefined;
+  let isShuttingDown = false;
+
+  const shutdown = async (reason: string): Promise<void> => {
+    if (isShuttingDown) {
+      return;
+    }
+
+    isShuttingDown = true;
+    getLogger().info("Octopulse shutdown initiated", { reason });
+    recurringDiscovery?.stop();
+    recurringDiscovery = undefined;
+    recurringTrackedPullRequestPolling?.stop();
+    recurringTrackedPullRequestPolling = undefined;
+    await closeTrayIconQuietly(trayIcon);
+    trayIcon = undefined;
+    await closeServerQuietly(server);
+    server = undefined;
+    closeDatabaseQuietly(database);
+    database = undefined;
+  };
+
+  bindProcessSignal("SIGINT", shutdown);
+  bindProcessSignal("SIGTERM", shutdown);
 
   const defaultPaths = resolveAppPaths();
   configureAppLogger({
@@ -97,6 +122,14 @@ async function main(): Promise<void> {
       resendNotificationRecord: (notificationRecordId: number) =>
         resendNotificationRecord(currentDatabase, { notificationRecordId, notificationDispatcher }),
     });
+    const serverOrigin = readServerOrigin(server);
+    trayIcon = await startTrayIcon({
+      serverOrigin,
+      onQuitRequested: async () => {
+        await shutdown("tray_quit");
+        process.exit(0);
+      },
+    });
     recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(currentDatabase, githubAuth, {
       intervalMs: config.timings.discoveryPollMs,
       notificationDispatcher,
@@ -123,17 +156,22 @@ async function main(): Promise<void> {
 
     server.once("close", () => {
       recurringDiscovery?.stop();
+      recurringDiscovery = undefined;
       recurringTrackedPullRequestPolling?.stop();
+      recurringTrackedPullRequestPolling = undefined;
       closeDatabaseQuietly(database);
+      database = undefined;
     });
 
     logger.info("Octopulse listening", {
-      origin: readServerOrigin(server),
+      origin: serverOrigin,
       githubUser: githubAuth.currentUserLogin,
+      trayIconVisible: trayIcon.isVisible,
     });
   } catch (error) {
     recurringDiscovery?.stop();
     recurringTrackedPullRequestPolling?.stop();
+    await closeTrayIconQuietly(trayIcon);
     await closeServerQuietly(server);
     closeDatabaseQuietly(database);
     const message = error instanceof Error ? error.message : "Unknown startup error";
@@ -173,4 +211,27 @@ async function closeServerQuietly(server: Server | undefined): Promise<void> {
   } catch {
     // Preserve the original startup failure.
   }
+}
+
+async function closeTrayIconQuietly(trayIcon: TrayIconHandle | undefined): Promise<void> {
+  if (!trayIcon) {
+    return;
+  }
+
+  try {
+    await trayIcon.stop();
+  } catch {
+    // Preserve the original startup or shutdown failure.
+  }
+}
+
+function bindProcessSignal(
+  signal: NodeJS.Signals,
+  shutdown: (reason: string) => Promise<void>,
+): void {
+  process.once(signal, () => {
+    void shutdown(signal).finally(() => {
+      process.exit(0);
+    });
+  });
 }

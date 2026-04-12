@@ -24,6 +24,7 @@
   "dependencies": {
     "freedesktop-notifications": "^2.1.1",
     "jimp": "^1.6.1",
+    "node-systray-v2": "github:Edgar-P-yan/node-systray-v2",
     "octokit": "^5.0.5",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.2.5",

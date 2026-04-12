@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { existsSync, readFileSync } from "node:fs";
 
+import { APP_ICON_PNG_URL } from "./app-icon.js";
 import {
   DEFAULT_LOG_VIEWER_ENTRY_LIMIT,
   getLogger,
@@ -26,6 +27,7 @@ const SPA_DOCUMENT = [
   "<head>",
   "  <meta charset=\"utf-8\" />",
   "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+  "  <link rel=\"icon\" type=\"image/png\" href=\"/favicon.png\" />",
   "  <title>Octopulse</title>",
   "</head>",
   "<body>",
@@ -131,6 +133,11 @@ async function handleRequest(
     return;
   }
 
+  if (supportsDocumentResponse(request) && (pathname === "/favicon.png" || pathname === "/favicon.ico")) {
+    handleFaviconRequest(request, response);
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/tracked-pull-requests") {
     await handlePullRequestListRequest(
       request,
@@ -228,6 +235,22 @@ function handleClientBundleRequest(request: IncomingMessage, response: ServerRes
 
   const source = readFileSync(CLIENT_BUNDLE_PATH, "utf8");
   respond(response, request.method, 200, "application/javascript; charset=utf-8", source);
+}
+
+function handleFaviconRequest(request: IncomingMessage, response: ServerResponse): void {
+  if (!existsSync(APP_ICON_PNG_URL)) {
+    respond(
+      response,
+      request.method,
+      503,
+      "text/plain; charset=utf-8",
+      "Favicon not found. Restore assets/tray/github-invertocat-white-clearspace.png.",
+    );
+    return;
+  }
+
+  const source = readFileSync(APP_ICON_PNG_URL);
+  respond(response, request.method, 200, "image/png", source);
 }
 
 async function handleManualTrackPullRequestRequest(
@@ -485,7 +508,7 @@ function respond(
   method: string | undefined,
   statusCode: number,
   contentType: string,
-  body: string,
+  body: string | Uint8Array,
 ): void {
   response.statusCode = statusCode;
   response.setHeader("Content-Type", contentType);

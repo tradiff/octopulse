@@ -67,6 +67,11 @@ systemctl --user disable octopulse.service
 
 The service is configured with `Restart=on-failure`, so systemd will try to bring it back if the process exits unexpectedly.
 
+Tray icon behavior:
+
+- foreground runs in a graphical session show tray icon with `Open Octopulse`, `Open Logs`, and `Quit`
+- `systemd --user` service runs usually do not expose tray icon unless the service inherits the desktop session environment
+
 ## Logs And Debugging
 
 Follow the live logs:

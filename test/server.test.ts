@@ -32,8 +32,21 @@ describe("startServer", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(html).toContain("<div id=\"root\"></div>");
+    expect(html).toContain('href="/favicon.png"');
     expect(html).toContain('src="/app.js"');
     expect(html).not.toContain("Track Pull Request");
+  });
+
+  it("serves the favicon asset", async () => {
+    const server = await startServer({ host: "127.0.0.1", port: 0 });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/favicon.png`);
+    const favicon = await response.arrayBuffer();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("image/png");
+    expect(favicon.byteLength).toBeGreaterThan(0);
   });
 
   it("serves pull request APIs", async () => {
