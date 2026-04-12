@@ -342,36 +342,38 @@ function App() {
         />
         {showTopFlashMessage ? <FlashMessage message={flashMessage} /> : null}
         {route.currentPage === "pull-requests" ? (
-          <section className="panel manual-track-panel">
-            <div className="panel-header">
-              <h2>Track Pull Request</h2>
-            </div>
-            <p>Paste a GitHub pull request URL to start tracking it locally.</p>
-            <form
-              method="post"
-              action="/tracked-pull-requests/manual-track"
-              className="track-form"
-              onSubmit={(event) => void handleTrackSubmit(event)}
-            >
-              <label className="input-label" htmlFor="pull-request-url">
-                Pull request URL
-              </label>
-              <div className="track-form-row">
-                <input
-                  id="pull-request-url"
-                  name="url"
-                  type="url"
-                  required
-                  placeholder="https://github.com/octo-org/octo-repo/pull/123"
-                  className="text-input"
-                  value={trackFormUrl}
-                  onChange={(event) => setTrackFormUrl(event.target.value)}
-                />
-                <button type="submit" className="action-button primary-button">
-                  Track PR
-                </button>
-              </div>
-            </form>
+          <section className="manual-track-panel">
+            <details className="manual-track-details">
+              <summary className="manual-track-summary">Manually track PR</summary>
+              <p className="manual-track-description">
+                Paste GitHub pull request URL to start tracking it locally.
+              </p>
+              <form
+                method="post"
+                action="/tracked-pull-requests/manual-track"
+                className="track-form"
+                onSubmit={(event) => void handleTrackSubmit(event)}
+              >
+                <label className="input-label" htmlFor="pull-request-url">
+                  Pull request URL
+                </label>
+                <div className="track-form-row">
+                  <input
+                    id="pull-request-url"
+                    name="url"
+                    type="url"
+                    required
+                    placeholder="https://github.com/octo-org/octo-repo/pull/123"
+                    className="text-input"
+                    value={trackFormUrl}
+                    onChange={(event) => setTrackFormUrl(event.target.value)}
+                  />
+                  <button type="submit" className="action-button">
+                    Track PR
+                  </button>
+                </div>
+              </form>
+            </details>
             {flashMessage ? <FlashMessage message={flashMessage} /> : null}
           </section>
         ) : null}
@@ -1429,7 +1431,43 @@ const APP_STYLES = `
   }
 
   .manual-track-panel {
-    margin-top: 32px;
+    margin-top: 24px;
+  }
+
+  .manual-track-details {
+    padding: 12px 14px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.42);
+  }
+
+  .manual-track-summary {
+    color: #cbd5e1;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .manual-track-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .manual-track-summary::before {
+    content: "+";
+    display: inline-block;
+    width: 16px;
+    color: #94a3b8;
+  }
+
+  .manual-track-details[open] .manual-track-summary::before {
+    content: "-";
+  }
+
+  .manual-track-description {
+    margin: 12px 0 0;
+    font-size: 0.875rem;
+    color: #94a3b8;
   }
 
   .filters-panel {
