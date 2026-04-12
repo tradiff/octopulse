@@ -47,6 +47,7 @@ describe("preparePullRequestNotifications", () => {
         actorLogin: "bob",
         actorClass: "human_other",
         decisionState: "notified",
+        payloadJson: JSON.stringify({ bodyText: "Need test coverage" }),
         occurredAt: "2026-04-10T12:01:00.000Z",
       });
       normalizedEventRepository.insertNormalizedEvent({
@@ -87,8 +88,8 @@ describe("preparePullRequestNotifications", () => {
         expect.objectContaining({
           normalizedEventId: null,
           eventBundleId: bundle?.id ?? null,
-          title: "acme/octopulse PR #7",
-          body: "1 comment, CI failed\nAdd notifications",
+          title: "acme/octopulse #7 Add notifications",
+          body: "bob: 💬 Need test coverage\n\nCI failed",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
           deliveryStatus: "pending",
         }),
@@ -118,6 +119,7 @@ describe("preparePullRequestNotifications", () => {
         actorLogin: "alice",
         actorClass: "human_other",
         decisionState: "notified",
+        payloadJson: JSON.stringify({ bodyText: "Ship it" }),
         occurredAt: "2026-04-10T12:01:00.000Z",
       });
 
@@ -139,8 +141,8 @@ describe("preparePullRequestNotifications", () => {
         expect.objectContaining({
           normalizedEventId: null,
           eventBundleId: expect.any(Number),
-          title: "acme/octopulse PR #7",
-          body: "alice commented\nAdd notifications",
+          title: "acme/octopulse #7 Add notifications",
+          body: "alice: 💬 Ship it",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
           deliveryStatus: "pending",
         }),

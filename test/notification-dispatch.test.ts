@@ -73,13 +73,13 @@ describe("dispatchPullRequestNotifications", () => {
 
       expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(2);
       expect(notificationDispatcher.dispatchNotification).toHaveBeenNthCalledWith(1, {
-        title: "acme/octopulse PR #7",
-        body: "alice approved review\nAdd notifications",
+        title: "acme/octopulse #7 Add notifications",
+        body: "alice: ✅ approved",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
       });
       expect(notificationDispatcher.dispatchNotification).toHaveBeenNthCalledWith(2, {
-        title: "acme/octopulse PR #7",
-        body: "bob commented\nAdd notifications",
+        title: "acme/octopulse #7 Add notifications",
+        body: "bob: 💬 commented",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
       });
       expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest.id)).toEqual([

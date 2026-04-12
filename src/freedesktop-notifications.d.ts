@@ -15,6 +15,7 @@ declare module "freedesktop-notifications" {
 
   const freedesktopNotifications: {
     Notification: typeof Notification;
+    getCapabilities(): Promise<string[]>;
   };
 
   export default freedesktopNotifications;

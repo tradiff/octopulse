@@ -28,6 +28,7 @@ export class LinuxNotificationAdapter {
   private readonly dispatchNotificationImpl: (
     notification: LinuxNotification,
   ) => Promise<LinuxNotificationDispatchResult>;
+  private capabilitiesPromise: Promise<readonly string[]> | null = null;
 
   constructor(options: LinuxNotificationAdapterOptions = {}) {
     this.dispatchNotificationImpl =
@@ -47,10 +48,11 @@ export class LinuxNotificationAdapter {
   private async defaultDispatch(
     notification: LinuxNotification,
   ): Promise<LinuxNotificationDispatchResult> {
+    const renderedNotification = await this.renderForServer(notification);
     const notif = new freedesktopNotifications.Notification({
       appName: "Octopulse",
-      summary: notification.title,
-      body: notification.body,
+      summary: renderedNotification.summary,
+      body: renderedNotification.body,
       actions: notification.clickUrl
         ? { default: "Open" }
         : {},
@@ -105,6 +107,66 @@ export class LinuxNotificationAdapter {
 
     return { openedClickUrl: false };
   }
+
+  private async renderForServer(notification: LinuxNotification): Promise<{
+    summary: string;
+    body: string;
+  }> {
+    if (!(await this.serverSupportsBodyMarkup())) {
+      return {
+        summary: notification.title,
+        body: notification.body,
+      };
+    }
+
+    return {
+      summary: "",
+      body: buildLegacyMarkupBody(notification),
+    };
+  }
+
+  private async serverSupportsBodyMarkup(): Promise<boolean> {
+    if (this.capabilitiesPromise === null) {
+      this.capabilitiesPromise = freedesktopNotifications.getCapabilities().catch(() => []);
+    }
+
+    return (await this.capabilitiesPromise).includes("body-markup");
+  }
+}
+
+function buildLegacyMarkupBody(notification: LinuxNotification): string {
+  const bodyParagraphs = notification.body
+    .split(/\n\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0)
+    .map((paragraph) => formatLegacyParagraph(paragraph));
+  const titleParagraph = notification.title.trim().length > 0
+    ? [`<b>${escapeMarkup(notification.title)}</b>`]
+    : [];
+
+  return [...titleParagraph, ...bodyParagraphs].join("\n\n");
+}
+
+function formatLegacyParagraph(paragraph: string): string {
+  const actorMatch = /^(.*?):\s(.+)$/.exec(paragraph);
+
+  if (actorMatch === null) {
+    return escapeMarkup(paragraph);
+  }
+
+  const actor = actorMatch[1]!;
+  const rest = actorMatch[2]!;
+
+  return `<b>${escapeMarkup(actor)}</b> ${escapeMarkup(rest)}`;
+}
+
+function escapeMarkup(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 async function openUrl(url: string): Promise<void> {

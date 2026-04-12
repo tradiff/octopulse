@@ -1018,12 +1018,12 @@ describe("pollTrackedPullRequests", () => {
       const pullRequest = repository.listTrackedPullRequests()[0];
 
       expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(2);
-      expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest?.id ?? -1)).toEqual([
+        expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest?.id ?? -1)).toEqual([
         expect.objectContaining({
           normalizedEventId: expect.any(Number),
           eventBundleId: null,
-          title: "acme/octopulse PR #7",
-          body: "bob approved review\nAdd pull request polling",
+          title: "acme/octopulse #7 Add pull request polling",
+          body: "bob: ✅ LGTM",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
           deliveryStatus: "sent",
           deliveredAt: "2026-04-10T12:00:30.000Z",
@@ -1031,8 +1031,8 @@ describe("pollTrackedPullRequests", () => {
         expect.objectContaining({
           normalizedEventId: null,
           eventBundleId: expect.any(Number),
-          title: "acme/octopulse PR #7",
-          body: "2 comments\nAdd pull request polling",
+          title: "acme/octopulse #7 Add pull request polling",
+          body: "alice: 💬 Please fix lint\n\ncarol: 💬 Inline follow-up",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
           deliveryStatus: "sent",
           deliveredAt: "2026-04-10T12:00:30.000Z",
