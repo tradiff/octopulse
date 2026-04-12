@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
@@ -44,15 +45,7 @@ type PageFilterField = keyof UiFilterValues;
 
 const ROOT = document.querySelector("#root");
 const PULL_REQUEST_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestState", "repository"];
-const ACTIVITY_FILTER_FIELDS: readonly PageFilterField[] = [
-  "pullRequestState",
-  "repository",
-  "eventType",
-  "decisionState",
-  "actorClass",
-  "startDate",
-  "endDate",
-];
+const ACTIVITY_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestState", "repository", "actorClass"];
 const APP_PAGES: readonly AppPage[] = [
   "pull-requests",
   "notification-history",
@@ -98,7 +91,10 @@ function App() {
   const [notificationHistory, setNotificationHistory] = useState<NotificationHistoryEntry[]>([]);
   const [rawEvents, setRawEvents] = useState<RawEventsEntry[]>([]);
   const [recentLogs, setRecentLogs] = useState<RecentLogEntry[]>([]);
+  const manualTrackDialogRef = useRef<HTMLDialogElement | null>(null);
   const [trackFormUrl, setTrackFormUrl] = useState("");
+  const [isManualTrackDialogOpen, setIsManualTrackDialogOpen] = useState(false);
+  const [trackFormMessage, setTrackFormMessage] = useState<AppFlashMessage | undefined>(undefined);
   const [flashMessage, setFlashMessage] = useState<AppFlashMessage | undefined>(undefined);
 
   useEffect(() => {
@@ -122,6 +118,36 @@ function App() {
 
     void loadBaseData();
   }, [route.currentPage, route.logLevelFilter]);
+
+  useEffect(() => {
+    if (route.currentPage === "pull-requests") {
+      return;
+    }
+
+    setIsManualTrackDialogOpen(false);
+    setTrackFormMessage(undefined);
+    setTrackFormUrl("");
+  }, [route.currentPage]);
+
+  useEffect(() => {
+    const dialog = manualTrackDialogRef.current;
+
+    if (dialog === null) {
+      return;
+    }
+
+    if (isManualTrackDialogOpen) {
+      if (!dialog.open) {
+        dialog.showModal();
+      }
+
+      return;
+    }
+
+    if (dialog.open) {
+      dialog.close();
+    }
+  }, [isManualTrackDialogOpen]);
 
   const uiFilterOptions = useMemo(
     () =>
@@ -152,7 +178,22 @@ function App() {
   );
 
   const hasActiveFilters = countActivePageFilters(route.uiFilters, route.currentPage, route.logLevelFilter) > 0;
-  const showTopFlashMessage = flashMessage && route.currentPage !== "pull-requests";
+  const showTopFlashMessage = flashMessage !== undefined;
+
+  function openManualTrackDialog(): void {
+    setTrackFormMessage(undefined);
+    setIsManualTrackDialogOpen(true);
+  }
+
+  function closeManualTrackDialog(): void {
+    setIsManualTrackDialogOpen(false);
+  }
+
+  function handleManualTrackDialogClose(): void {
+    setIsManualTrackDialogOpen(false);
+    setTrackFormMessage(undefined);
+    setTrackFormUrl("");
+  }
 
   async function loadBaseData(): Promise<void> {
     try {
@@ -217,10 +258,12 @@ function App() {
       );
 
       setTrackFormUrl("");
+      setTrackFormMessage(undefined);
       setFlashMessage(createTrackFlashMessage(result));
       await loadBaseData();
+      setIsManualTrackDialogOpen(false);
     } catch (error) {
-      setFlashMessage({
+      setTrackFormMessage({
         kind: "error",
         text: getErrorMessage(error),
       });
@@ -288,9 +331,7 @@ function App() {
     }
   }
 
-  function handleFilterSubmit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-
+  function handleFilterChange(event: FormEvent<HTMLFormElement>): void {
     const formData = new FormData(event.currentTarget);
     const searchParams = new URLSearchParams();
 
@@ -306,9 +347,7 @@ function App() {
     navigateToHref(buildPageHref(route.currentPage, nextFilters, route.logLevelFilter));
   }
 
-  function handleLogsSubmit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-
+  function handleLogsFilterChange(event: FormEvent<HTMLFormElement>): void {
     const formData = new FormData(event.currentTarget);
     const nextValue = formData.get("level");
     const nextLogLevelFilter =
@@ -336,7 +375,7 @@ function App() {
     <div id="app">
       <style>{APP_STYLES}</style>
       <main>
-        <h1>Octopulse</h1>
+        <h1 className="app-title">OCTO.PULSE</h1>
         <PageNavigation
           currentPage={route.currentPage}
           uiFilters={route.uiFilters}
@@ -344,49 +383,13 @@ function App() {
           onNavigate={navigateToHref}
         />
         {showTopFlashMessage ? <FlashMessage message={flashMessage} /> : null}
-        {route.currentPage === "pull-requests" ? (
-          <section className="manual-track-panel">
-            <details className="manual-track-details">
-              <summary className="manual-track-summary">Manually track PR</summary>
-              <p className="manual-track-description">
-                Paste GitHub pull request URL to start tracking it locally.
-              </p>
-              <form
-                method="post"
-                action="/tracked-pull-requests/manual-track"
-                className="track-form"
-                onSubmit={(event) => void handleTrackSubmit(event)}
-              >
-                <label className="input-label" htmlFor="pull-request-url">
-                  Pull request URL
-                </label>
-                <div className="track-form-row">
-                  <input
-                    id="pull-request-url"
-                    name="url"
-                    type="url"
-                    required
-                    placeholder="https://github.com/octo-org/octo-repo/pull/123"
-                    className="text-input"
-                    value={trackFormUrl}
-                    onChange={(event) => setTrackFormUrl(event.target.value)}
-                  />
-                  <button type="submit" className="action-button">
-                    Track PR
-                  </button>
-                </div>
-              </form>
-            </details>
-            {flashMessage ? <FlashMessage message={flashMessage} /> : null}
-          </section>
-        ) : null}
         <FilterPanel
           currentPage={route.currentPage}
           uiFilters={route.uiFilters}
           uiFilterOptions={uiFilterOptions}
           logLevelFilter={route.logLevelFilter}
           formKey={buildPageHref(route.currentPage, route.uiFilters, route.logLevelFilter)}
-          onSubmit={route.currentPage === "logs" ? handleLogsSubmit : handleFilterSubmit}
+          onFormChange={route.currentPage === "logs" ? handleLogsFilterChange : handleFilterChange}
           onNavigate={navigateToHref}
         />
         <div className="page-content">
@@ -396,6 +399,15 @@ function App() {
               emptyMessage={formatPullRequestEmptyMessage(route.uiFilters, hasActiveFilters)}
               pullRequests={[...filteredTrackedPullRequests, ...filteredInactivePullRequests]}
               onRefresh={handleBaseDataRefresh}
+              headerAction={
+                <button
+                  type="button"
+                  className="action-button primary-button"
+                  onClick={openManualTrackDialog}
+                >
+                  Add
+                </button>
+              }
               renderAction={(pullRequest) =>
                 renderPullRequestAction(pullRequest, {
                   onUntrack: handleUntrack,
@@ -423,6 +435,57 @@ function App() {
             <LogsPanel recentLogs={recentLogs} logLevelFilter={route.logLevelFilter} onRefresh={handleLogsRefresh} />
           ) : null}
         </div>
+        {route.currentPage === "pull-requests" ? (
+          <dialog
+            ref={manualTrackDialogRef}
+            className="manual-track-dialog"
+            onCancel={handleManualTrackDialogClose}
+            onClose={handleManualTrackDialogClose}
+          >
+            <div className="manual-track-dialog-header">
+              <div>
+                <h2 className="manual-track-dialog-title">Add pull request</h2>
+                <p className="manual-track-description">
+                  Paste GitHub pull request URL to start tracking it locally.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="action-button clear-filters-link manual-track-dialog-close-button"
+                onClick={closeManualTrackDialog}
+              >
+                Close
+              </button>
+            </div>
+            {trackFormMessage ? <FlashMessage message={trackFormMessage} /> : null}
+            <form
+              method="post"
+              action="/tracked-pull-requests/manual-track"
+              className="track-form"
+              onSubmit={(event) => void handleTrackSubmit(event)}
+            >
+              <label className="input-label" htmlFor="pull-request-url">
+                Pull request URL
+              </label>
+              <div className="track-form-row">
+                <input
+                  id="pull-request-url"
+                  name="url"
+                  type="url"
+                  required
+                  autoFocus
+                  placeholder="https://github.com/octo-org/octo-repo/pull/123"
+                  className="text-input"
+                  value={trackFormUrl}
+                  onChange={(event) => setTrackFormUrl(event.target.value)}
+                />
+                <button type="submit" className="action-button primary-button">
+                  Track PR
+                </button>
+              </div>
+            </form>
+          </dialog>
+        ) : null}
       </main>
     </div>
   );
@@ -434,7 +497,7 @@ function FilterPanel({
   uiFilterOptions,
   logLevelFilter,
   formKey,
-  onSubmit,
+  onFormChange,
   onNavigate,
 }: {
   currentPage: AppPage;
@@ -442,7 +505,7 @@ function FilterPanel({
   uiFilterOptions: UiFilterOptions;
   logLevelFilter: LogLevelFilter;
   formKey: string;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onFormChange: (event: FormEvent<HTMLFormElement>) => void;
   onNavigate: (href: string) => void;
 }) {
   const activeFilterCount = countActivePageFilters(uiFilters, currentPage, logLevelFilter);
@@ -456,14 +519,25 @@ function FilterPanel({
         <div>
           <h2>Filters</h2>
         </div>
-        <span className="count">{activeFilterCount}</span>
+        <div className="panel-header-actions">
+          {activeFilterCount > 0 ? (
+            <a
+              href={pagePath}
+              className="action-button clear-filters-link"
+              onClick={(event) => handleClientNavigation(event, pagePath, onNavigate)}
+            >
+              Clear
+            </a>
+          ) : null}
+          <span className="count">{activeFilterCount}</span>
+        </div>
       </div>
       <form
         key={formKey}
         method="get"
         action={pagePath}
         className="filters-form"
-        onSubmit={onSubmit}
+        onChange={onFormChange}
       >
         <div className="filters-grid">
           {showsLogFilters ? (
@@ -503,32 +577,6 @@ function FilterPanel({
           {showsActivityFilters && !showsLogFilters ? (
             <>
               <label className="filter-field">
-                <span className="input-label">Event type</span>
-                <select name="event-type" defaultValue={uiFilters.eventType} className="text-input">
-                  <option value="">All event types</option>
-                  {uiFilterOptions.eventTypes.map((eventType) => (
-                    <option key={eventType} value={eventType}>
-                      {formatEventTypeLabel(eventType)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="filter-field">
-                <span className="input-label">Decision state</span>
-                <select
-                  name="decision-state"
-                  defaultValue={uiFilters.decisionState}
-                  className="text-input"
-                >
-                  <option value="">All decision states</option>
-                  {uiFilterOptions.decisionStates.map((decisionState) => (
-                    <option key={decisionState} value={decisionState}>
-                      {formatDecisionStateLabel(decisionState)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="filter-field">
                 <span className="input-label">Actor type</span>
                 <select name="actor-type" defaultValue={uiFilters.actorClass} className="text-input">
                   <option value="">All actors</option>
@@ -539,38 +587,8 @@ function FilterPanel({
                   ))}
                 </select>
               </label>
-              <label className="filter-field">
-                <span className="input-label">Start date</span>
-                <input
-                  name="start-date"
-                  type="date"
-                  defaultValue={uiFilters.startDate}
-                  className="text-input"
-                />
-              </label>
-              <label className="filter-field">
-                <span className="input-label">End date</span>
-                <input
-                  name="end-date"
-                  type="date"
-                  defaultValue={uiFilters.endDate}
-                  className="text-input"
-                />
-              </label>
             </>
           ) : null}
-        </div>
-        <div className="filters-actions">
-          <button type="submit" className="action-button primary-button">
-            Apply Filters
-          </button>
-          <a
-            href={pagePath}
-            className="action-button clear-filters-link"
-            onClick={(event) => handleClientNavigation(event, pagePath, onNavigate)}
-          >
-            Clear
-          </a>
         </div>
       </form>
     </section>
@@ -952,12 +970,14 @@ function PullRequestList({
   emptyMessage,
   pullRequests,
   onRefresh,
+  headerAction,
   renderAction,
 }: {
   title: string;
   emptyMessage: string;
   pullRequests: PullRequestRecord[];
   onRefresh: () => void;
+  headerAction?: ReactNode;
   renderAction?: (pullRequest: PullRequestRecord) => ReactNode;
 }) {
   return (
@@ -965,6 +985,7 @@ function PullRequestList({
       <div className="panel-header">
         <h2>{title}</h2>
         <div className="panel-header-actions">
+          {headerAction}
           <RefreshButton label="Refresh pull requests" onClick={onRefresh} />
           <span className="count">{pullRequests.length}</span>
         </div>
@@ -1224,16 +1245,8 @@ function formatFilterSearchParamKey(field: PageFilterField): string {
       return "pr-state";
     case "repository":
       return "repo";
-    case "eventType":
-      return "event-type";
-    case "decisionState":
-      return "decision-state";
     case "actorClass":
       return "actor-type";
-    case "startDate":
-      return "start-date";
-    case "endDate":
-      return "end-date";
   }
 }
 
@@ -1462,6 +1475,8 @@ function handleClientNavigation(
 }
 
 const APP_STYLES = `
+  @import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&display=swap");
+
   :root {
     color-scheme: dark;
     font-family: Inter, system-ui, sans-serif;
@@ -1469,7 +1484,9 @@ const APP_STYLES = `
 
   body {
     margin: 0;
-    background: #0f172a;
+    background:
+      radial-gradient(circle at top, rgba(56, 189, 248, 0.08), transparent 32%),
+      linear-gradient(180deg, #222a33 0%, #141a20 100%);
     color: #e2e8f0;
   }
 
@@ -1480,7 +1497,7 @@ const APP_STYLES = `
   main {
     max-width: 960px;
     margin: 0 auto;
-    padding: 48px 24px 64px;
+    padding: 0 24px 64px;
   }
 
   .eyebrow {
@@ -1498,6 +1515,24 @@ const APP_STYLES = `
     font-size: clamp(2rem, 5vw, 3rem);
   }
 
+  .app-title {
+    display: inline-block;
+    margin-bottom: 16px;
+    font-family: "Orbitron", "Segoe UI", sans-serif;
+    font-size: clamp(2.75rem, 6vw, 3.5rem);
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    background: linear-gradient(90deg, #2af5c8 0%, #22d3ee 54%, #38bdf8 100%);
+    color: transparent;
+    -webkit-background-clip: text;
+    background-clip: text;
+    text-shadow: none;
+    filter:
+      drop-shadow(0 0 2px rgba(42, 245, 200, 0.18))
+      drop-shadow(0 0 6px rgba(34, 211, 238, 0.1));
+  }
+
   p {
     margin: 0;
     line-height: 1.6;
@@ -1505,8 +1540,8 @@ const APP_STYLES = `
   }
 
   .page-nav {
-    margin-top: 32px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    margin-top: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   }
 
   .page-nav-list {
@@ -1543,44 +1578,42 @@ const APP_STYLES = `
     margin-top: 32px;
   }
 
-  .manual-track-panel {
-    margin-top: 24px;
-  }
-
-  .manual-track-details {
-    padding: 12px 14px;
-    border: 1px solid rgba(148, 163, 184, 0.18);
-    border-radius: 12px;
-    background: rgba(15, 23, 42, 0.42);
-  }
-
-  .manual-track-summary {
-    color: #cbd5e1;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    list-style: none;
-  }
-
-  .manual-track-summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .manual-track-summary::before {
-    content: "+";
-    display: inline-block;
-    width: 16px;
-    color: #94a3b8;
-  }
-
-  .manual-track-details[open] .manual-track-summary::before {
-    content: "-";
-  }
-
   .manual-track-description {
-    margin: 12px 0 0;
+    margin: 8px 0 0;
     font-size: 0.875rem;
     color: #94a3b8;
+  }
+
+  .manual-track-dialog {
+    width: min(560px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 18px;
+    background: rgba(28, 34, 42, 0.98);
+    color: #e2e8f0;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  }
+
+  .manual-track-dialog::backdrop {
+    background: rgba(9, 12, 16, 0.7);
+    backdrop-filter: blur(4px);
+  }
+
+  .manual-track-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 20px 0;
+  }
+
+  .manual-track-dialog-title {
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .manual-track-dialog-close-button {
+    flex-shrink: 0;
   }
 
   .filters-panel {
@@ -1589,10 +1622,10 @@ const APP_STYLES = `
 
   .panel {
     padding: 18px;
-    border: 1px solid rgba(148, 163, 184, 0.24);
+    border: 1px solid rgba(148, 163, 184, 0.2);
     border-radius: 16px;
-    background: rgba(15, 23, 42, 0.88);
-    box-shadow: 0 16px 48px rgba(15, 23, 42, 0.2);
+    background: rgba(28, 34, 42, 0.92);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
   }
 
   h2 {
@@ -1673,22 +1706,22 @@ const APP_STYLES = `
   .pull-request-item {
     padding: 14px;
     border-radius: 12px;
-    background: rgba(30, 41, 59, 0.72);
-    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(39, 46, 56, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.16);
   }
 
   .notification-history-item {
     padding: 14px;
     border-radius: 12px;
-    background: rgba(30, 41, 59, 0.72);
-    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(39, 46, 56, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.16);
   }
 
   .raw-events-item {
     padding: 14px;
     border-radius: 12px;
-    background: rgba(30, 41, 59, 0.72);
-    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(39, 46, 56, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.16);
   }
 
   .logs-item {
@@ -1700,7 +1733,7 @@ const APP_STYLES = `
   }
 
   .logs-item + .logs-item {
-    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
   }
 
   .notification-history-panel {
@@ -1721,6 +1754,7 @@ const APP_STYLES = `
 
   .track-form {
     margin-top: 16px;
+    padding: 0 20px 20px;
   }
 
   .filters-form {
@@ -1736,13 +1770,6 @@ const APP_STYLES = `
   .filter-field {
     display: grid;
     gap: 8px;
-  }
-
-  .filters-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 16px;
   }
 
   .panel-description {
@@ -1767,15 +1794,15 @@ const APP_STYLES = `
     flex: 1;
     min-width: 0;
     padding: 12px 14px;
-    border: 1px solid rgba(148, 163, 184, 0.24);
+    border: 1px solid rgba(148, 163, 184, 0.22);
     border-radius: 12px;
-    background: rgba(15, 23, 42, 0.92);
+    background: rgba(23, 28, 35, 0.96);
     color: #e2e8f0;
     font: inherit;
   }
 
   .text-input::placeholder {
-    color: #64748b;
+    color: #7b8797;
   }
 
   .text-input:focus {
@@ -1947,8 +1974,8 @@ const APP_STYLES = `
     margin: 12px 0 0;
     padding: 12px;
     border-radius: 12px;
-    background: rgba(15, 23, 42, 0.92);
-    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(23, 28, 35, 0.96);
+    border: 1px solid rgba(148, 163, 184, 0.16);
     color: #cbd5e1;
     font-size: 0.8rem;
     line-height: 1.5;
@@ -2105,9 +2132,9 @@ const APP_STYLES = `
     align-items: center;
     justify-content: center;
     padding: 8px 12px;
-    border: 1px solid rgba(148, 163, 184, 0.24);
+    border: 1px solid rgba(148, 163, 184, 0.22);
     border-radius: 999px;
-    background: rgba(15, 23, 42, 0.96);
+    background: rgba(25, 30, 38, 0.98);
     color: #e2e8f0;
     font: inherit;
     font-size: 0.875rem;
@@ -2129,11 +2156,14 @@ const APP_STYLES = `
 
   .primary-button {
     border-color: rgba(56, 189, 248, 0.4);
-    background: rgba(8, 47, 73, 0.92);
+    background: rgba(20, 40, 54, 0.94);
     color: #7dd3fc;
   }
 
   .clear-filters-link {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
     color: #cbd5e1;
   }
 
@@ -2162,9 +2192,13 @@ const APP_STYLES = `
       flex-direction: column;
     }
 
-    .filters-actions {
-      align-items: stretch;
+    .manual-track-dialog {
+      width: calc(100vw - 24px);
+    }
+
+    .manual-track-dialog-header {
       flex-direction: column;
+      align-items: stretch;
     }
 
     .pull-request-meta {
