@@ -92,6 +92,20 @@ describe("loadConfig", () => {
     });
   });
 
+  it("accepts an optional GitHub login override", () => {
+    const homeDir = createTempHome();
+
+    writeConfig(
+      homeDir,
+      ["[github]", 'token = "ghp_override_123"', 'login = "octocat"', ""].join("\n"),
+    );
+
+    const config = loadConfig({ homeDir });
+
+    expect(config.githubToken).toBe("ghp_override_123");
+    expect(config.githubLogin).toBe("octocat");
+  });
+
   it("rejects invalid config without echoing secret values", () => {
     const homeDir = createTempHome();
 
@@ -118,6 +132,19 @@ describe("loadConfig", () => {
     expect(thrownError).toBeInstanceOf(ConfigError);
     expect((thrownError as Error).message).toContain("github.token must be a non-empty string");
     expect((thrownError as Error).message).not.toContain("sk-live-secret");
+  });
+
+  it("rejects an empty GitHub login override", () => {
+    const homeDir = createTempHome();
+
+    writeConfig(
+      homeDir,
+      ["[github]", 'token = "ghp_test_123"', 'login = "   "', ""].join("\n"),
+    );
+
+    expect(() => loadConfig({ homeDir })).toThrowError(
+      new ConfigError("github.login must be a non-empty string when provided"),
+    );
   });
 
 });

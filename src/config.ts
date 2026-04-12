@@ -30,6 +30,7 @@ export interface AppPaths {
 export interface AppConfig {
   paths: AppPaths;
   githubToken: string;
+  githubLogin?: string;
   openAiApiKey?: string;
   logging: {
     level: LogLevel;
@@ -99,7 +100,7 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
   assertAllowedKeys(root, ["github", "openai", "timings", "logging"]);
 
   const github = requireNestedTable(root, "github");
-  assertAllowedKeys(github, ["token"], "github");
+  assertAllowedKeys(github, ["token", "login"], "github");
 
   const openai = optionalNestedTable(root, "openai");
   if (openai) {
@@ -123,10 +124,12 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
   const openAiApiKey = openai
     ? optionalNonEmptyString(openai, "api_key", "openai.api_key")
     : undefined;
+  const githubLogin = optionalNonEmptyString(github, "login", "github.login");
 
   return {
     paths,
     githubToken: requireNonEmptyString(github, "token", "github.token"),
+    ...(githubLogin ? { githubLogin } : {}),
     ...(openAiApiKey ? { openAiApiKey } : {}),
     logging: {
       level: optionalLogLevel(logging, "level", "logging.level", "info"),

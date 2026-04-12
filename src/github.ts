@@ -24,7 +24,7 @@ export function createGitHubClient(token: string): Octokit {
 }
 
 export async function initializeGitHubAuth<TClient = Octokit>(
-  config: Pick<AppConfig, "githubToken">,
+  config: Pick<AppConfig, "githubToken" | "githubLogin">,
   options: InitializeGitHubAuthOptions<TClient> = {},
 ): Promise<GitHubAuthContext<TClient>> {
   const clientFactory =
@@ -32,6 +32,13 @@ export async function initializeGitHubAuth<TClient = Octokit>(
   const currentUserResolver =
     options.currentUserResolver ?? ((client: TClient) => resolveCurrentUser(client as Octokit));
   const client = clientFactory(config.githubToken);
+
+  if (config.githubLogin !== undefined) {
+    return {
+      client,
+      currentUserLogin: readCurrentUserLogin({ login: config.githubLogin }),
+    };
+  }
 
   try {
     const currentUser = await currentUserResolver(client);

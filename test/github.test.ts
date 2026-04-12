@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/config.js";
 import { GitHubAuthError, initializeGitHubAuth } from "../src/github.js";
 
-const TEST_CONFIG: Pick<AppConfig, "githubToken"> = {
+const TEST_CONFIG: Pick<AppConfig, "githubToken" | "githubLogin"> = {
   githubToken: "ghp_test_secret_123",
 };
 
@@ -48,5 +48,27 @@ describe("initializeGitHubAuth", () => {
       "GitHub authentication failed: invalid token or insufficient github.com access",
     );
     expect((thrownError as Error).message).not.toContain(TEST_CONFIG.githubToken);
+  });
+
+  it("uses the configured GitHub login without calling GET /user", async () => {
+    const client = { kind: "fake-client" };
+    const clientFactory = vi.fn(() => client);
+    const currentUserResolver = vi.fn(async () => ({ login: "should-not-be-used" }));
+
+    await expect(
+      initializeGitHubAuth(
+        {
+          githubToken: TEST_CONFIG.githubToken,
+          githubLogin: "octocat",
+        },
+        { clientFactory, currentUserResolver },
+      ),
+    ).resolves.toEqual({
+      client,
+      currentUserLogin: "octocat",
+    });
+
+    expect(clientFactory).toHaveBeenCalledWith(TEST_CONFIG.githubToken);
+    expect(currentUserResolver).not.toHaveBeenCalled();
   });
 });
