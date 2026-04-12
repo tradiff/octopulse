@@ -654,8 +654,31 @@ function NotificationHistoryPanel({
                   {formatDeliveryStatusLabel(entry.deliveryStatus)}
                 </span>
               </div>
-              <p className="notification-history-body">{entry.body}</p>
+              {entry.summaryParagraphs.length > 0 ? (
+                <div className="notification-history-summary-list">
+                  {entry.summaryParagraphs.map((paragraph, index) => (
+                    <p key={`${entry.id}-summary-${index}`} className="notification-history-summary-line">
+                      {paragraph.actorLogin ? (
+                        <>
+                          <GitHubAvatar login={paragraph.actorLogin} avatarUrl={paragraph.actorAvatarUrl} />
+                          <span className="notification-history-summary-actor">{paragraph.actorLogin}</span>
+                        </>
+                      ) : null}
+                      <span className="notification-history-summary-text">{paragraph.text}</span>
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className="notification-history-body">{entry.body}</p>
+              )}
               <div className="notification-history-meta-row">
+                {entry.author ? (
+                  <GitHubIdentityPill
+                    label="Author"
+                    login={entry.author.login}
+                    avatarUrl={entry.author.avatarUrl}
+                  />
+                ) : null}
                 <span className="history-pill">{formatSourceKindLabel(entry.sourceKind)}</span>
                 {entry.decisionStates.map((decisionState) => (
                   <span key={`${entry.id}-${decisionState}`} className="history-pill">
@@ -730,7 +753,13 @@ function RawEventsPanel({
               <strong>{formatEventTypeLabel(entry.eventType)}</strong>
               <span className="pull-request-subtle">{entry.pullRequestTitle}</span>
               <div className="notification-history-meta-row raw-events-meta-row">
-                {entry.actorLogin ? <span className="history-pill">Actor {entry.actorLogin}</span> : null}
+                {entry.actorLogin ? (
+                  <GitHubIdentityPill
+                    label="Actor"
+                    login={entry.actorLogin}
+                    avatarUrl={readRawEventActorAvatarUrl(entry.rawPayloadJson)}
+                  />
+                ) : null}
                 {entry.actorClass ? (
                   <span className="history-pill">{formatActorClassLabel(entry.actorClass)}</span>
                 ) : null}
@@ -822,6 +851,26 @@ function HighlightedJsonBlock({
 function formatJsonForDisplay(rawJson: string): string | null {
   try {
     return JSON.stringify(JSON.parse(rawJson), null, 2);
+  } catch {
+    return null;
+  }
+}
+
+function readRawEventActorAvatarUrl(rawPayloadJson: string | null): string | null {
+  if (rawPayloadJson === null) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(rawPayloadJson) as unknown;
+
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+      return null;
+    }
+
+    const actorAvatarUrl = (payload as Record<string, unknown>).actorAvatarUrl;
+
+    return typeof actorAvatarUrl === "string" && actorAvatarUrl.length > 0 ? actorAvatarUrl : null;
   } catch {
     return null;
   }
@@ -941,7 +990,13 @@ function PullRequestList({
                 </div>
               </div>
               <strong>{pullRequest.title}</strong>
-              <span className="pull-request-subtle">Author: {pullRequest.authorLogin}</span>
+              <div className="pull-request-meta-row">
+                <GitHubIdentityPill
+                  label="Author"
+                  login={pullRequest.authorLogin}
+                  avatarUrl={pullRequest.authorAvatarUrl}
+                />
+              </div>
             </li>
           ))}
         </ul>
@@ -969,6 +1024,46 @@ function RefreshButton({ label, onClick }: { label: string; onClick: () => void 
 
 function FlashMessage({ message }: { message: AppFlashMessage }) {
   return <p className={`flash-message flash-${message.kind}`}>{message.text}</p>;
+}
+
+function GitHubIdentityPill({
+  label,
+  login,
+  avatarUrl,
+}: {
+  label: string;
+  login: string;
+  avatarUrl: string | null;
+}) {
+  return (
+    <span className="github-identity-pill" title={`${label} ${login}`}>
+      <GitHubAvatar login={login} avatarUrl={avatarUrl} />
+      <span className="github-identity-label">{label}</span>
+      <span className="github-identity-login">{login}</span>
+    </span>
+  );
+}
+
+function GitHubAvatar({ login, avatarUrl }: { login: string; avatarUrl: string | null }) {
+  const [hasImageError, setHasImageError] = useState(false);
+  const fallback = login.slice(0, 1).toUpperCase() || "?";
+  const showImage = avatarUrl !== null && avatarUrl.length > 0 && !hasImageError;
+
+  return (
+    <span className="github-avatar" aria-hidden="true">
+      {showImage ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setHasImageError(true)}
+        />
+      ) : (
+        <span className="github-avatar-fallback">{fallback}</span>
+      )}
+    </span>
+  );
 }
 
 function renderPullRequestAction(
@@ -1735,6 +1830,28 @@ const APP_STYLES = `
     white-space: pre-line;
   }
 
+  .notification-history-summary-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .notification-history-summary-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+  }
+
+  .notification-history-summary-actor {
+    color: #e2e8f0;
+    font-weight: 600;
+  }
+
+  .notification-history-summary-text {
+    color: #cbd5e1;
+  }
+
   .notification-history-meta-row {
     display: flex;
     flex-wrap: wrap;
@@ -1873,6 +1990,7 @@ const APP_STYLES = `
   }
 
   .history-pill,
+  .github-identity-pill,
   .delivery-pill,
   .log-level-pill {
     display: inline-flex;
@@ -1887,6 +2005,52 @@ const APP_STYLES = `
   .history-pill {
     background: rgba(148, 163, 184, 0.14);
     color: #cbd5e1;
+  }
+
+  .github-identity-pill {
+    gap: 6px;
+    background: rgba(148, 163, 184, 0.14);
+    color: #cbd5e1;
+  }
+
+  .github-identity-label {
+    color: #94a3b8;
+  }
+
+  .github-identity-login {
+    color: #e2e8f0;
+  }
+
+  .github-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.14);
+    flex-shrink: 0;
+  }
+
+  .github-avatar img,
+  .github-avatar-fallback {
+    width: 100%;
+    height: 100%;
+  }
+
+  .github-avatar img {
+    display: block;
+    object-fit: cover;
+  }
+
+  .github-avatar-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #7dd3fc;
+    font-size: 0.65rem;
+    line-height: 1;
   }
 
   .log-level-debug {

@@ -112,6 +112,24 @@ describe("startServer", () => {
           sourceKind: "immediate" as const,
           repositoryKey: "acme/octopulse",
           isTracked: true,
+          author: {
+            login: "octocat",
+            avatarUrl: "https://avatars.example.test/octocat.png",
+          },
+          actors: [
+            {
+              login: "alice",
+              avatarUrl: "https://avatars.example.test/alice.png",
+            },
+          ],
+          summaryParagraphs: [
+            {
+              actorLogin: "alice",
+              actorAvatarKey: "alice",
+              actorAvatarUrl: "https://avatars.example.test/alice.png",
+              text: "✅ approved",
+            },
+          ],
         },
       ],
       listRawEvents: async () => [
@@ -178,6 +196,24 @@ describe("startServer", () => {
           sourceKind: "immediate",
           repositoryKey: "acme/octopulse",
           isTracked: true,
+          author: {
+            login: "octocat",
+            avatarUrl: "https://avatars.example.test/octocat.png",
+          },
+          actors: [
+            {
+              login: "alice",
+              avatarUrl: "https://avatars.example.test/alice.png",
+            },
+          ],
+          summaryParagraphs: [
+            {
+              actorLogin: "alice",
+              actorAvatarKey: "alice",
+              actorAvatarUrl: "https://avatars.example.test/alice.png",
+              text: "✅ approved",
+            },
+          ],
         },
       ],
     });

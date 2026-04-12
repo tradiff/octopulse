@@ -39,6 +39,7 @@ describe("listNotificationHistory", () => {
         actorClass: "human_other",
         decisionState: "notified",
         notificationTiming: "immediate",
+        payloadJson: JSON.stringify({ actorAvatarUrl: "https://avatars.example.test/alice.png" }),
         occurredAt: "2026-04-10T12:00:00.000Z",
       });
       const bundledComment = normalizedEventRepository.insertNormalizedEvent({
@@ -47,6 +48,7 @@ describe("listNotificationHistory", () => {
         actorLogin: "ci-bot[bot]",
         actorClass: "bot",
         decisionState: "notified_ai_fallback",
+        payloadJson: JSON.stringify({ actorAvatarUrl: "https://avatars.example.test/ci-bot.png" }),
         occurredAt: "2026-04-10T12:01:00.000Z",
       });
       const bundledCi = normalizedEventRepository.insertNormalizedEvent({
@@ -55,6 +57,7 @@ describe("listNotificationHistory", () => {
         actorLogin: "github-actions[bot]",
         actorClass: "bot",
         decisionState: "notified",
+        payloadJson: JSON.stringify({ actorAvatarUrl: "https://avatars.example.test/github-actions.png" }),
         occurredAt: "2026-04-10T12:01:20.000Z",
       });
       const bundle = eventBundleRepository.createEventBundle({
@@ -93,6 +96,34 @@ describe("listNotificationHistory", () => {
             sourceKind: "bundle",
             repositoryKey: "acme/octopulse",
             isTracked: true,
+            author: {
+              login: "octocat",
+              avatarUrl: null,
+            },
+            actors: [
+              {
+                login: "ci-bot[bot]",
+                avatarUrl: "https://avatars.example.test/ci-bot.png",
+              },
+              {
+                login: "github-actions[bot]",
+                avatarUrl: "https://avatars.example.test/github-actions.png",
+              },
+            ],
+            summaryParagraphs: [
+              {
+                actorLogin: "ci-bot[bot]",
+                actorAvatarKey: "ci-bot[bot]",
+                actorAvatarUrl: "https://avatars.example.test/ci-bot.png",
+                text: "💬 commented",
+              },
+              {
+                actorLogin: "github-actions[bot]",
+                actorAvatarKey: "github-actions[bot]",
+                actorAvatarUrl: "https://avatars.example.test/github-actions.png",
+                text: "CI failed",
+              },
+            ],
             deliveredAt: "2026-04-10T12:02:45.000Z",
           }),
           expect.objectContaining({
@@ -104,6 +135,24 @@ describe("listNotificationHistory", () => {
             sourceKind: "immediate",
             repositoryKey: "acme/octopulse",
             isTracked: true,
+            author: {
+              login: "octocat",
+              avatarUrl: null,
+            },
+            actors: [
+              {
+                login: "alice",
+                avatarUrl: "https://avatars.example.test/alice.png",
+              },
+            ],
+            summaryParagraphs: [
+              {
+                actorLogin: "alice",
+                actorAvatarKey: "alice",
+                actorAvatarUrl: "https://avatars.example.test/alice.png",
+                text: "✅ approved",
+              },
+            ],
             deliveredAt: null,
           }),
         ]);

@@ -86,6 +86,17 @@ export function renderNotificationMarkup(
   };
 }
 
+export function buildNotificationParagraph(
+  event: Pick<NormalizedEventRecord, "actorLogin" | "eventType" | "payloadJson" | "id" | "occurredAt">,
+): NotificationMarkupParagraph {
+  return {
+    actorLogin: event.actorLogin,
+    actorAvatarKey: event.actorLogin,
+    actorAvatarUrl: readEventActorAvatarUrl(event),
+    text: renderEventText(event),
+  };
+}
+
 function renderSingleEventSummary(event: NotificationEvent | undefined): string {
   if (event === undefined) {
     throw new Error("Missing notification event");
@@ -190,9 +201,10 @@ function renderNotificationBody(events: readonly NotificationEvent[]): string {
 }
 
 function renderPlainEventLine(event: NotificationEvent): string {
-  const actorPrefix = event.actorLogin === null ? "" : `${event.actorLogin}: `;
+  const paragraph = buildNotificationParagraph(event);
+  const actorPrefix = paragraph.actorLogin === null ? "" : `${paragraph.actorLogin}: `;
 
-  return `${actorPrefix}${renderEventText(event)}`.trim();
+  return `${actorPrefix}${paragraph.text}`.trim();
 }
 
 function renderEventText(event: NotificationEvent): string {

@@ -10,7 +10,16 @@ import {
   NotificationRecordRepository,
   type NotificationDeliveryStatus,
 } from "./notification-record-repository.js";
+import {
+  buildNotificationParagraph,
+  type NotificationMarkupParagraph,
+} from "./notification-rendering.js";
 import { PullRequestRepository, type PullRequestRecord } from "./pull-request-repository.js";
+
+export interface NotificationHistoryActor {
+  login: string;
+  avatarUrl: string | null;
+}
 
 export interface NotificationHistoryEntry {
   id: number;
@@ -26,6 +35,9 @@ export interface NotificationHistoryEntry {
   sourceKind: "immediate" | "bundle";
   repositoryKey: string | null;
   isTracked: boolean | null;
+  author: NotificationHistoryActor | null;
+  actors: NotificationHistoryActor[];
+  summaryParagraphs: NotificationMarkupParagraph[];
 }
 
 export interface ListNotificationHistoryOptions {
@@ -65,6 +77,14 @@ export function listNotificationHistory(
       sourceKind: record.normalizedEventId === null ? "bundle" : "immediate",
       repositoryKey: pullRequest ? formatRepositoryKey(pullRequest) : readRepositoryKeyFromUrl(record.clickUrl),
       isTracked: pullRequest?.isTracked ?? null,
+      author: pullRequest
+        ? {
+            login: pullRequest.authorLogin,
+            avatarUrl: pullRequest.authorAvatarUrl,
+          }
+        : null,
+      actors: collectActors(events),
+      summaryParagraphs: events.map((event) => buildNotificationParagraph(event)),
     };
   });
 }
@@ -124,8 +144,54 @@ function collectActorClasses(events: NormalizedEventRecord[]): ActorClass[] {
   ) as ActorClass[];
 }
 
+function collectActors(events: NormalizedEventRecord[]): NotificationHistoryActor[] {
+  const actors = new Map<string, NotificationHistoryActor>();
+
+  for (const event of events) {
+    if (event.actorLogin === null) {
+      continue;
+    }
+
+    const existing = actors.get(event.actorLogin);
+    const actorAvatarUrl = readEventActorAvatarUrl(event);
+
+    if (existing === undefined) {
+      actors.set(event.actorLogin, {
+        login: event.actorLogin,
+        avatarUrl: actorAvatarUrl,
+      });
+      continue;
+    }
+
+    if (existing.avatarUrl === null && actorAvatarUrl !== null) {
+      actors.set(event.actorLogin, {
+        login: existing.login,
+        avatarUrl: actorAvatarUrl,
+      });
+    }
+  }
+
+  return [...actors.values()];
+}
+
 function collectUniqueStrings(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function readEventActorAvatarUrl(event: Pick<NormalizedEventRecord, "payloadJson">): string | null {
+  try {
+    const payload = JSON.parse(event.payloadJson) as unknown;
+
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+      return null;
+    }
+
+    const actorAvatarUrl = (payload as Record<string, unknown>).actorAvatarUrl;
+
+    return typeof actorAvatarUrl === "string" && actorAvatarUrl.length > 0 ? actorAvatarUrl : null;
+  } catch {
+    return null;
+  }
 }
 
 function formatRepositoryKey(
