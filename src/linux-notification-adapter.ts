@@ -75,47 +75,15 @@ export class LinuxNotificationAdapter {
       return { openedClickUrl: false };
     }
 
-    const clicked = await new Promise<boolean>((resolve, reject) => {
-      let settled = false;
-      const finish = (value: boolean): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(timeout);
-        resolve(value);
-      };
+    notif.on("action", (action: string) => {
+      if (action !== "default") {
+        return;
+      }
 
-      const fail = (error: unknown): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(timeout);
-        reject(error);
-      };
-
-      const timeout = setTimeout(() => finish(false), 30000);
-
-      notif.on("action", (action: string) => {
-        if (action === "default") {
-          finish(true);
-        }
-      });
-
-      notif.on("close", () => {
-        finish(false);
-      });
-
-      notif.push().catch((err: unknown) => {
-        fail(err);
-      });
+      void openUrl(notification.clickUrl!).catch(() => undefined);
     });
 
-    if (clicked && notification.clickUrl) {
-      await openUrl(notification.clickUrl);
-      return { openedClickUrl: true };
-    }
+    await notif.push();
 
     return { openedClickUrl: false };
   }

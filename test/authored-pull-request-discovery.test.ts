@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveAppPaths } from "../src/config.js";
 import { initializeDatabase } from "../src/database.js";
+import { NormalizedEventRepository } from "../src/normalized-event-repository.js";
+import { NotificationRecordRepository } from "../src/notification-record-repository.js";
 import {
   runFirstRunAuthoredPullRequestDiscovery,
   startRecurringAuthoredPullRequestDiscovery,
@@ -17,7 +19,7 @@ import {
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
 
-const FIRST_RUN_DISCOVERY_COMPLETED_KEY = "first_run_authored_pull_request_discovery_completed";
+const FIRST_RUN_DISCOVERY_COMPLETED_KEY = "first_run_pull_request_discovery_completed";
 const DISCOVERY_INTERVAL_MS = 5 * 60_000;
 const OBSERVED_AT = "2026-04-10T12:00:00.000Z";
 const tempDirs: string[] = [];
@@ -46,6 +48,7 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
         number: 42,
       },
     ] satisfies PullRequestCoordinates[]);
+    const searchOpenReviewRequestedPullRequests = vi.fn(async () => [] as PullRequestCoordinates[]);
     const fetchPullRequestDetail = vi.fn(
       async (_client: typeof client, coordinates: PullRequestCoordinates) =>
         createDiscoveredPullRequest(coordinates),
@@ -62,6 +65,7 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
           {
             pullRequestRepository: repository,
             searchOpenAuthoredPullRequests,
+            searchOpenReviewRequestedPullRequests,
             fetchPullRequestDetail,
             observedAt: OBSERVED_AT,
           },
@@ -99,6 +103,110 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
     }
   });
 
+  it("tracks review-requested pull requests and sends immediate notifications", async () => {
+    const { database, repository } = createRepository();
+    const client = { kind: "fake-client" };
+    const notificationDispatcher = {
+      dispatchNotification: vi.fn(async () => ({ openedClickUrl: false })),
+    };
+    const fetchPullRequestDetail = vi.fn(
+      async (_client: typeof client, coordinates: PullRequestCoordinates) =>
+        createDiscoveredPullRequest(coordinates),
+    );
+
+    try {
+      await expect(
+        runFirstRunAuthoredPullRequestDiscovery(
+          database,
+          {
+            client,
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            searchOpenAuthoredPullRequests: async () => [
+              {
+                repositoryOwner: "acme",
+                repositoryName: "octopulse",
+                number: 7,
+              },
+            ],
+            searchOpenReviewRequestedPullRequests: async () => [
+              {
+                repositoryOwner: "acme",
+                repositoryName: "octopulse",
+                number: 7,
+              },
+              {
+                repositoryOwner: "widgets",
+                repositoryName: "dashboard",
+                number: 42,
+              },
+            ],
+            fetchPullRequestDetail,
+            observedAt: OBSERVED_AT,
+            notificationDispatcher,
+            notificationDispatchedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        didRun: true,
+        discoveredCount: 2,
+      });
+
+      expect(fetchPullRequestDetail).toHaveBeenCalledTimes(2);
+      expect(repository.listTrackedPullRequests()).toHaveLength(2);
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(1);
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "widgets/dashboard #42 Pull request 42",
+          body: "👀 review requested",
+          clickUrl: "https://github.com/widgets/dashboard/pull/42",
+          markup: expect.objectContaining({
+            headerText: "[dashboard] Pull request 42 (open)",
+            paragraphs: [
+              expect.objectContaining({
+                actorLogin: null,
+                text: "👀 review requested",
+              }),
+            ],
+          }),
+        }),
+      );
+
+      const reviewRequestedPullRequest = repository.getPullRequestByGitHubPullRequestId(4201);
+      expect(reviewRequestedPullRequest).toBeDefined();
+
+      const normalizedEvents = new NormalizedEventRepository(database).listNormalizedEventsForPullRequest(
+        reviewRequestedPullRequest?.id ?? -1,
+      );
+      expect(normalizedEvents).toEqual([
+        expect.objectContaining({
+          eventType: "review_requested",
+          decisionState: "notified",
+          notificationTiming: "immediate",
+          actorLogin: null,
+          occurredAt: OBSERVED_AT,
+        }),
+      ]);
+
+      expect(
+        new NotificationRecordRepository(database).listNotificationRecordsForPullRequest(
+          reviewRequestedPullRequest?.id ?? -1,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          normalizedEventId: normalizedEvents[0]?.id,
+          deliveryStatus: "sent",
+          deliveredAt: OBSERVED_AT,
+          body: "👀 review requested",
+        }),
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("keeps sticky manual untrack state when discovery sees an existing pull request", async () => {
     const { database, repository } = createRepository();
 
@@ -125,6 +233,7 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
               number: 7,
             },
           ],
+          searchOpenReviewRequestedPullRequests: async () => [],
           fetchPullRequestDetail: async (_client, coordinates) =>
             createDiscoveredPullRequest(coordinates, {
               title: "Refresh authored PR discovery",
@@ -153,6 +262,7 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
   it("skips discovery after first-run completion is already persisted", async () => {
     const { database, repository } = createRepository();
     const searchOpenAuthoredPullRequests = vi.fn(async () => [] as PullRequestCoordinates[]);
+    const searchOpenReviewRequestedPullRequests = vi.fn(async () => [] as PullRequestCoordinates[]);
     const fetchPullRequestDetail = vi.fn();
 
     try {
@@ -168,6 +278,7 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
           {
             pullRequestRepository: repository,
             searchOpenAuthoredPullRequests,
+            searchOpenReviewRequestedPullRequests,
             fetchPullRequestDetail,
             observedAt: OBSERVED_AT,
           },
@@ -217,6 +328,7 @@ describe("startRecurringAuthoredPullRequestDiscovery", () => {
         intervalMs: DISCOVERY_INTERVAL_MS,
         pullRequestRepository: repository,
         searchOpenAuthoredPullRequests,
+        searchOpenReviewRequestedPullRequests: async () => [],
         fetchPullRequestDetail,
       },
     );
@@ -293,6 +405,7 @@ describe("startRecurringAuthoredPullRequestDiscovery", () => {
             number: 7,
           },
         ],
+        searchOpenReviewRequestedPullRequests: async () => [],
         fetchPullRequestDetail: async (_client, coordinates) =>
           createDiscoveredPullRequest(coordinates, {
             title: "Refresh recurring authored PR discovery",
@@ -352,6 +465,7 @@ describe("startRecurringAuthoredPullRequestDiscovery", () => {
             },
           ];
         },
+        searchOpenReviewRequestedPullRequests: async () => [],
         fetchPullRequestDetail: async (_client, coordinates) => createDiscoveredPullRequest(coordinates),
         onError,
       },
@@ -362,7 +476,7 @@ describe("startRecurringAuthoredPullRequestDiscovery", () => {
 
       expect(onError).toHaveBeenCalledTimes(1);
       expect(onError.mock.calls[0]?.[0]).toMatchObject({
-        message: "Failed to discover open authored pull requests: temporary GitHub outage",
+        message: "Failed to discover pull requests: temporary GitHub outage",
       });
       expect(repository.listTrackedPullRequests()).toHaveLength(0);
 
@@ -371,6 +485,64 @@ describe("startRecurringAuthoredPullRequestDiscovery", () => {
       expect(onError).toHaveBeenCalledTimes(1);
       expect(repository.listTrackedPullRequests()).toHaveLength(1);
       expect(repository.listTrackedPullRequests()[0]?.githubPullRequestId).toBe(101);
+    } finally {
+      handle.stop();
+      database.close();
+    }
+  });
+
+  it("dispatches review-requested notifications during recurring discovery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    const { database, repository } = createRepository();
+    const notificationDispatcher = {
+      dispatchNotification: vi.fn(async () => ({ openedClickUrl: false })),
+    };
+    let reviewRequestedCoordinates: PullRequestCoordinates[] = [];
+
+    const handle = startRecurringAuthoredPullRequestDiscovery(
+      database,
+      {
+        client: { kind: "fake-client" },
+        currentUserLogin: "octocat",
+      },
+      {
+        intervalMs: DISCOVERY_INTERVAL_MS,
+        pullRequestRepository: repository,
+        searchOpenAuthoredPullRequests: async () => [],
+        searchOpenReviewRequestedPullRequests: async () =>
+          reviewRequestedCoordinates.map((coordinates) => ({ ...coordinates })),
+        fetchPullRequestDetail: async (_client, coordinates) => createDiscoveredPullRequest(coordinates),
+        notificationDispatcher,
+      },
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(DISCOVERY_INTERVAL_MS);
+
+      expect(repository.listTrackedPullRequests()).toHaveLength(0);
+      expect(notificationDispatcher.dispatchNotification).not.toHaveBeenCalled();
+
+      reviewRequestedCoordinates = [
+        {
+          repositoryOwner: "widgets",
+          repositoryName: "dashboard",
+          number: 42,
+        },
+      ];
+
+      await vi.advanceTimersByTimeAsync(DISCOVERY_INTERVAL_MS);
+
+      expect(repository.listTrackedPullRequests()).toHaveLength(1);
+      expect(repository.listTrackedPullRequests()[0]?.githubPullRequestId).toBe(4201);
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(1);
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "widgets/dashboard #42 Pull request 42",
+          body: "👀 review requested",
+        }),
+      );
     } finally {
       handle.stop();
       database.close();

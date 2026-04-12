@@ -2,15 +2,38 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const freedesktopMocks = vi.hoisted(() => {
   const push = vi.fn().mockResolvedValue(undefined);
-  const on = vi.fn().mockReturnThis();
-  const Notification = vi.fn().mockImplementation(() => ({ push, on }));
   const getCapabilities = vi.fn().mockResolvedValue([]);
+  const instances: Array<{
+    push: typeof push;
+    on: ReturnType<typeof vi.fn>;
+    emit: (event: string, ...args: unknown[]) => void;
+  }> = [];
+  const Notification = vi.fn().mockImplementation(() => {
+    const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    const instance = {
+      push,
+      on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+        const eventListeners = listeners.get(event) ?? [];
+        eventListeners.push(listener);
+        listeners.set(event, eventListeners);
+        return instance;
+      }),
+      emit: (event: string, ...args: unknown[]) => {
+        for (const listener of listeners.get(event) ?? []) {
+          listener(...args);
+        }
+      },
+    };
+
+    instances.push(instance);
+    return instance;
+  });
 
   return {
     push,
-    on,
     Notification,
     getCapabilities,
+    instances,
   };
 });
 
@@ -27,6 +50,7 @@ import {
   type LinuxNotificationDispatchResult,
   type LinuxNotification,
 } from "../src/linux-notification-adapter.js";
+import { spawn } from "node:child_process";
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn().mockReturnValue({
@@ -38,6 +62,7 @@ describe("LinuxNotificationAdapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     freedesktopMocks.getCapabilities.mockResolvedValue([]);
+    freedesktopMocks.instances.length = 0;
   });
 
   it("dispatches a notification via custom dispatch function", async () => {
@@ -83,6 +108,35 @@ describe("LinuxNotificationAdapter", () => {
       title: "acme/octopulse PR #7",
       body: "alice approved review\nShip notifications",
       clickUrl: "https://github.com/acme/octopulse/pull/7",
+    });
+  });
+
+  it("does not wait for clickable notifications to close before resolving", async () => {
+    const adapter = new LinuxNotificationAdapter();
+    const clickUrl = "https://github.com/acme/octopulse/pull/7";
+
+    await expect(
+      adapter.dispatchNotification({
+        title: "acme/octopulse PR #7",
+        body: "alice approved review\nShip notifications",
+        clickUrl,
+      }),
+    ).resolves.toEqual({
+      openedClickUrl: false,
+    });
+
+    expect(freedesktopMocks.Notification).toHaveBeenCalledWith({
+      appName: "Octopulse",
+      summary: "acme/octopulse PR #7",
+      body: "alice approved review\nShip notifications",
+      actions: { default: "Open" },
+    });
+    expect(spawn).not.toHaveBeenCalled();
+
+    freedesktopMocks.instances[0]?.emit("action", "default");
+
+    expect(spawn).toHaveBeenCalledWith("xdg-open", [clickUrl], {
+      stdio: ["ignore", "pipe", "pipe"],
     });
   });
 

@@ -70,8 +70,11 @@ async function main(): Promise<void> {
     const firstRunDiscoveryResult = await runFirstRunAuthoredPullRequestDiscovery(
       currentDatabase,
       githubAuth,
+      {
+        notificationDispatcher,
+      },
     );
-    logger.info("Authored pull request discovery completed", firstRunDiscoveryResult);
+    logger.info("Pull request discovery completed", firstRunDiscoveryResult);
     server = await startServer({
       listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
       listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
@@ -96,9 +99,11 @@ async function main(): Promise<void> {
     });
     recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(currentDatabase, githubAuth, {
       intervalMs: config.timings.discoveryPollMs,
+      notificationDispatcher,
     });
-    logger.info("Started recurring authored pull request discovery", {
+    logger.info("Started recurring pull request discovery", {
       intervalMs: config.timings.discoveryPollMs,
+      notificationsEnabled: true,
     });
     recurringTrackedPullRequestPolling = startRecurringTrackedPullRequestPolling(
       currentDatabase,

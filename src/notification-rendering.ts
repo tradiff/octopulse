@@ -108,6 +108,8 @@ function renderEventFallbackText(event: NotificationEvent): string {
       return "approved review";
     case "review_changes_requested":
       return "requested changes";
+    case "review_requested":
+      return "review requested";
     case "ci_failed":
       return "CI failed";
     case "ci_succeeded":
@@ -203,6 +205,8 @@ function renderEventText(event: NotificationEvent): string {
       return renderEmojiText("✅", readEventText(event) ?? "approved");
     case "review_changes_requested":
       return renderEmojiText("❗", readEventText(event) ?? "changes requested");
+    case "review_requested":
+      return renderEmojiText("👀", "review requested");
     case "pr_merged":
     case "pr_closed":
     case "pr_reopened":

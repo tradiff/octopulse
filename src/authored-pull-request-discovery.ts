@@ -4,14 +4,27 @@ import { Octokit } from "octokit";
 
 import type { GitHubAuthContext } from "./github.js";
 import { getLogger } from "./logger.js";
+import type { NotificationDispatcher } from "./notification-dispatch.js";
+import { dispatchPullRequestNotifications } from "./notification-dispatch.js";
+import { NormalizedEventRepository } from "./normalized-event-repository.js";
+import { preparePullRequestNotifications } from "./notification-preparation.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
+import type { PullRequestRecord } from "./pull-request-repository.js";
 
-const FIRST_RUN_DISCOVERY_COMPLETED_KEY = "first_run_authored_pull_request_discovery_completed";
+const FIRST_RUN_DISCOVERY_COMPLETED_KEY = "first_run_pull_request_discovery_completed";
 const GITHUB_API_HEADERS = {
   "X-GitHub-Api-Version": "2022-11-28",
 };
 const SEARCH_PAGE_SIZE = 100;
 const COMPLETED_STATE_VALUE = "true";
+const REVIEW_REQUESTED_NOTIFICATION_EVENT_TYPE = "review_requested";
+
+type PullRequestDiscoverySource = "authored" | "review_requested";
+
+interface DiscoveryCandidate {
+  coordinates: PullRequestCoordinates;
+  sources: PullRequestDiscoverySource[];
+}
 
 export interface PullRequestCoordinates {
   repositoryOwner: string;
@@ -33,16 +46,26 @@ export interface DiscoveredPullRequest extends PullRequestCoordinates {
 }
 
 export interface DiscoverOpenAuthoredPullRequestsOptions<TClient = Octokit> {
-  pullRequestRepository?: Pick<PullRequestRepository, "upsertPullRequest">;
+  pullRequestRepository?: Pick<
+    PullRequestRepository,
+    | "getPullRequestByRepositoryCoordinates"
+    | "upsertPullRequest"
+  >;
   searchOpenAuthoredPullRequests?: (
     client: TClient,
     authorLogin: string,
+  ) => Promise<PullRequestCoordinates[]>;
+  searchOpenReviewRequestedPullRequests?: (
+    client: TClient,
+    reviewerLogin: string,
   ) => Promise<PullRequestCoordinates[]>;
   fetchPullRequestDetail?: (
     client: TClient,
     coordinates: PullRequestCoordinates,
   ) => Promise<DiscoveredPullRequest>;
   observedAt?: string;
+  notificationDispatcher?: NotificationDispatcher;
+  notificationDispatchedAt?: string;
 }
 
 export interface DiscoverOpenAuthoredPullRequestsResult {
@@ -101,7 +124,7 @@ export function startRecurringAuthoredPullRequestDiscovery<TClient>(
 
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
     throw new PullRequestDiscoveryError(
-      "Recurring authored pull request discovery interval must be greater than zero",
+      "Recurring pull request discovery interval must be greater than zero",
     );
   }
 
@@ -135,16 +158,16 @@ export function startRecurringAuthoredPullRequestDiscovery<TClient>(
       const result = await discoverOpenAuthoredPullRequests(database, githubAuth, discoveryOptions);
 
       if (result.discoveredCount > 0) {
-        getLogger().info("Completed authored pull request discovery cycle", result);
+        getLogger().info("Completed pull request discovery cycle", result);
       } else {
-        getLogger().debug("Authored pull request discovery cycle found no new pull requests", result);
+        getLogger().debug("Pull request discovery cycle found no new pull requests", result);
       }
     } catch (error) {
       const discoveryError =
         error instanceof PullRequestDiscoveryError
           ? error
           : new PullRequestDiscoveryError(
-              `Failed to discover open authored pull requests: ${getErrorMessage(error)}`,
+              `Failed to discover pull requests: ${getErrorMessage(error)}`,
             );
 
       (onError ?? logRecurringDiscoveryError)(discoveryError);
@@ -167,6 +190,13 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
         client as unknown as Octokit,
         authorLogin,
       ) as Promise<PullRequestCoordinates[]>);
+  const searchOpenReviewRequestedPullRequests =
+    options.searchOpenReviewRequestedPullRequests ??
+    ((client: TClient, reviewerLogin: string) =>
+      searchOpenReviewRequestedPullRequestsViaGitHub(
+        client as unknown as Octokit,
+        reviewerLogin,
+      ) as Promise<PullRequestCoordinates[]>);
   const fetchPullRequestDetail =
     options.fetchPullRequestDetail ??
     ((client: TClient, coordinates: PullRequestCoordinates) =>
@@ -175,27 +205,46 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
         coordinates,
       ) as Promise<DiscoveredPullRequest>);
   const observedAt = options.observedAt ?? new Date().toISOString();
+  const notificationDispatchedAt = options.notificationDispatchedAt ?? observedAt;
 
-  let coordinatesList: PullRequestCoordinates[];
+  let discoveryCandidates: DiscoveryCandidate[];
 
   try {
-    coordinatesList = await searchOpenAuthoredPullRequests(githubAuth.client, githubAuth.currentUserLogin);
+    const [authoredCoordinates, reviewRequestedCoordinates] = await Promise.all([
+      searchOpenAuthoredPullRequests(githubAuth.client, githubAuth.currentUserLogin),
+      searchOpenReviewRequestedPullRequests(githubAuth.client, githubAuth.currentUserLogin),
+    ]);
+
+    discoveryCandidates = mergeDiscoveryCandidates({
+      authoredCoordinates,
+      reviewRequestedCoordinates,
+    });
   } catch (error) {
     if (error instanceof PullRequestDiscoveryError) {
       throw error;
     }
 
     throw new PullRequestDiscoveryError(
-      `Failed to discover open authored pull requests: ${getErrorMessage(error)}`,
+      `Failed to discover pull requests: ${getErrorMessage(error)}`,
     );
   }
 
-  getLogger().debug("Loaded authored pull requests from GitHub search", {
-    authorLogin: githubAuth.currentUserLogin,
-    discoveredCount: coordinatesList.length,
+  getLogger().debug("Loaded pull requests from GitHub search", {
+    currentUserLogin: githubAuth.currentUserLogin,
+    discoveredCount: discoveryCandidates.length,
+    authoredCount: discoveryCandidates.filter((candidate) => candidate.sources.includes("authored")).length,
+    reviewRequestedCount: discoveryCandidates.filter((candidate) =>
+      candidate.sources.includes("review_requested"),
+    ).length,
   });
 
-  for (const coordinates of coordinatesList) {
+  for (const candidate of discoveryCandidates) {
+    const { coordinates } = candidate;
+    const existingPullRequest = pullRequestRepository.getPullRequestByRepositoryCoordinates(
+      coordinates.repositoryOwner,
+      coordinates.repositoryName,
+      coordinates.number,
+    );
     let pullRequest: DiscoveredPullRequest;
 
     try {
@@ -211,7 +260,7 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
     }
 
     try {
-      pullRequestRepository.upsertPullRequest({
+      const persistedPullRequest = pullRequestRepository.upsertPullRequest({
         githubPullRequestId: pullRequest.githubPullRequestId,
         repositoryOwner: pullRequest.repositoryOwner,
         repositoryName: pullRequest.repositoryName,
@@ -228,7 +277,22 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
         graceUntil: null,
         lastSeenHeadSha: pullRequest.lastSeenHeadSha,
       });
-      getLogger().debug("Persisted discovered authored pull request", {
+
+      if (
+        existingPullRequest === undefined &&
+        candidate.sources.includes("review_requested") &&
+        !candidate.sources.includes("authored")
+      ) {
+        await createReviewRequestedNotification(database, persistedPullRequest, {
+          occurredAt: observedAt,
+          dispatchedAt: notificationDispatchedAt,
+          ...(options.notificationDispatcher
+            ? { notificationDispatcher: options.notificationDispatcher }
+            : {}),
+        });
+      }
+
+      getLogger().debug("Persisted discovered pull request", {
         pullRequest: formatPullRequestLabel(coordinates),
       });
     } catch (error) {
@@ -243,7 +307,7 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
   }
 
   return {
-    discoveredCount: coordinatesList.length,
+    discoveredCount: discoveryCandidates.length,
   };
 }
 
@@ -256,6 +320,31 @@ async function searchOpenAuthoredPullRequestsViaGitHub(
   for (let page = 1; ; page += 1) {
     const response = await client.request("GET /search/issues", {
       q: `is:pr state:open author:${authorLogin}`,
+      per_page: SEARCH_PAGE_SIZE,
+      page,
+      headers: GITHUB_API_HEADERS,
+    });
+    const items = readSearchItems(response.data as unknown);
+
+    for (const item of items) {
+      coordinatesList.push(readSearchItemCoordinates(item));
+    }
+
+    if (items.length < SEARCH_PAGE_SIZE) {
+      return coordinatesList;
+    }
+  }
+}
+
+async function searchOpenReviewRequestedPullRequestsViaGitHub(
+  client: Octokit,
+  reviewerLogin: string,
+): Promise<PullRequestCoordinates[]> {
+  const coordinatesList: PullRequestCoordinates[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const response = await client.request("GET /search/issues", {
+      q: `is:pr state:open review-requested:${reviewerLogin}`,
       per_page: SEARCH_PAGE_SIZE,
       page,
       headers: GITHUB_API_HEADERS,
@@ -331,6 +420,70 @@ function parseRepositoryApiUrl(
     repositoryOwner,
     repositoryName,
   };
+}
+
+function mergeDiscoveryCandidates(input: {
+  authoredCoordinates: PullRequestCoordinates[];
+  reviewRequestedCoordinates: PullRequestCoordinates[];
+}): DiscoveryCandidate[] {
+  const candidates = new Map<string, DiscoveryCandidate>();
+
+  appendDiscoveryCandidates(candidates, input.authoredCoordinates, "authored");
+  appendDiscoveryCandidates(candidates, input.reviewRequestedCoordinates, "review_requested");
+
+  return [...candidates.values()];
+}
+
+function appendDiscoveryCandidates(
+  candidates: Map<string, DiscoveryCandidate>,
+  coordinatesList: PullRequestCoordinates[],
+  source: PullRequestDiscoverySource,
+): void {
+  for (const coordinates of coordinatesList) {
+    const key = formatPullRequestLabel(coordinates);
+    const existing = candidates.get(key);
+
+    if (existing) {
+      if (!existing.sources.includes(source)) {
+        existing.sources.push(source);
+      }
+
+      continue;
+    }
+
+    candidates.set(key, {
+      coordinates,
+      sources: [source],
+    });
+  }
+}
+
+async function createReviewRequestedNotification(
+  database: DatabaseSync,
+  pullRequest: PullRequestRecord,
+  options: {
+    occurredAt: string;
+    dispatchedAt: string;
+    notificationDispatcher?: NotificationDispatcher;
+  },
+): Promise<void> {
+  new NormalizedEventRepository(database).insertNormalizedEvent({
+    pullRequestId: pullRequest.id,
+    eventType: REVIEW_REQUESTED_NOTIFICATION_EVENT_TYPE,
+    decisionState: "notified",
+    notificationTiming: "immediate",
+    occurredAt: options.occurredAt,
+  });
+
+  if (options.notificationDispatcher) {
+    await dispatchPullRequestNotifications(database, pullRequest, {
+      dispatchedAt: options.dispatchedAt,
+      notificationDispatcher: options.notificationDispatcher,
+    });
+    return;
+  }
+
+  preparePullRequestNotifications(database, pullRequest);
 }
 
 function mapPullRequestDetail(
@@ -443,7 +596,7 @@ function formatPullRequestLabel(coordinates: PullRequestCoordinates): string {
 }
 
 function logRecurringDiscoveryError(error: PullRequestDiscoveryError): void {
-  getLogger().error("Octopulse recurring authored pull request discovery failed", {
+  getLogger().error("Octopulse recurring pull request discovery failed", {
     error,
   });
 }

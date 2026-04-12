@@ -118,7 +118,7 @@ The service runs a single local process that:
 
 - starts a localhost-only web UI at `http://127.0.0.1:3000`
 - exposes a health endpoint at `http://127.0.0.1:3000/health`
-- performs first-run authored pull request discovery
-- continues recurring authored-PR discovery every 5 minutes by default
+- performs first-run authored and review-requested pull request discovery
+- continues recurring authored/review-requested PR discovery every 5 minutes by default
 - polls tracked pull requests every minute by default
 - stores data indefinitely unless you remove the state directory manually

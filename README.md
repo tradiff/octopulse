@@ -5,11 +5,13 @@ Octopulse is a local Linux app that tracks GitHub pull request activity, stores 
 ## What It Does
 
 - auto-discovers open pull requests authored by the configured GitHub user
-- keeps discovering newly opened authored pull requests on a recurring interval
+- auto-discovers open pull requests where the configured GitHub user is requested as a reviewer
+- keeps discovering newly opened authored and review-requested pull requests on a recurring interval
 - lets you manually track any `github.com` pull request by URL
 - keeps inactive pull requests and notification history visible in the local UI
 - polls GitHub for comments, reviews, PR state changes, commits, and GitHub Actions workflow outcomes
 - bundles most notifications per pull request while sending review approvals and change requests immediately
+- sends immediate desktop notifications when newly discovered pull requests request your review
 - optionally uses OpenAI to classify bot-authored comments and reviews before notifying
 
 ## Requirements
@@ -74,7 +76,7 @@ The app:
 - initializes the SQLite database and applies migrations
 - starts a localhost-only UI at `http://127.0.0.1:3000`
 - exposes a health endpoint at `http://127.0.0.1:3000/health`
-- runs recurring authored-PR discovery and tracked-PR polling in the same process
+- runs recurring authored/review-requested PR discovery and tracked-PR polling in the same process
 
 For active development:
 

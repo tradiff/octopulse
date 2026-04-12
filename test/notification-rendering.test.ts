@@ -34,6 +34,34 @@ describe("renderNotification", () => {
     });
   });
 
+  it("renders review-requested notifications without actor metadata", () => {
+    expect(
+      renderNotification(
+        {
+          repositoryOwner: "acme",
+          repositoryName: "octopulse",
+          number: 7,
+          title: "Ship notifications",
+          url: "https://github.com/acme/octopulse/pull/7",
+        },
+        [
+          {
+            id: 111,
+            eventType: "review_requested",
+            actorLogin: null,
+            occurredAt: "2026-04-10T12:00:00.000Z",
+            payloadJson: "{}",
+          },
+        ],
+      ),
+    ).toEqual({
+      title: "acme/octopulse #7 Ship notifications",
+      body: "👀 review requested",
+      clickUrl: "https://github.com/acme/octopulse/pull/7",
+      summary: "review requested",
+    });
+  });
+
   it("renders bundled summaries with primary events before comments and quoted snippets", () => {
     expect(
       renderNotification(
