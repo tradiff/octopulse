@@ -151,7 +151,7 @@ function App() {
     [rawEvents, route.uiFilters],
   );
 
-  const hasActiveFilters = countActivePageFilters(route.uiFilters, route.currentPage) > 0;
+  const hasActiveFilters = countActivePageFilters(route.uiFilters, route.currentPage, route.logLevelFilter) > 0;
   const showTopFlashMessage = flashMessage && route.currentPage !== "pull-requests";
 
   async function loadBaseData(): Promise<void> {
@@ -324,8 +324,11 @@ function App() {
     navigateToHref(nextHref);
   }
 
-  function handleLogsRefresh(event: ReactMouseEvent<HTMLAnchorElement>): void {
-    event.preventDefault();
+  function handleBaseDataRefresh(): void {
+    void loadBaseData();
+  }
+
+  function handleLogsRefresh(): void {
     void loadLogs(route.logLevelFilter);
   }
 
@@ -377,22 +380,22 @@ function App() {
             {flashMessage ? <FlashMessage message={flashMessage} /> : null}
           </section>
         ) : null}
-        {route.currentPage !== "logs" ? (
-          <FilterPanel
-            currentPage={route.currentPage}
-            uiFilters={route.uiFilters}
-            uiFilterOptions={uiFilterOptions}
-            formKey={buildPageHref(route.currentPage, route.uiFilters, route.logLevelFilter)}
-            onSubmit={handleFilterSubmit}
-            onNavigate={navigateToHref}
-          />
-        ) : null}
+        <FilterPanel
+          currentPage={route.currentPage}
+          uiFilters={route.uiFilters}
+          uiFilterOptions={uiFilterOptions}
+          logLevelFilter={route.logLevelFilter}
+          formKey={buildPageHref(route.currentPage, route.uiFilters, route.logLevelFilter)}
+          onSubmit={route.currentPage === "logs" ? handleLogsSubmit : handleFilterSubmit}
+          onNavigate={navigateToHref}
+        />
         <div className="page-content">
           {route.currentPage === "pull-requests" ? (
             <PullRequestList
               title="Pull Requests"
               emptyMessage={formatPullRequestEmptyMessage(route.uiFilters, hasActiveFilters)}
               pullRequests={[...filteredTrackedPullRequests, ...filteredInactivePullRequests]}
+              onRefresh={handleBaseDataRefresh}
               renderAction={(pullRequest) =>
                 renderPullRequestAction(pullRequest, {
                   onUntrack: handleUntrack,
@@ -406,19 +409,18 @@ function App() {
               notificationHistory={filteredNotificationHistory}
               hasActiveFilters={hasActiveFilters}
               onResend={handleResendNotificationRecord}
+              onRefresh={handleBaseDataRefresh}
             />
           ) : null}
           {route.currentPage === "raw-events" ? (
-            <RawEventsPanel rawEvents={filteredRawEvents} hasActiveFilters={hasActiveFilters} />
+            <RawEventsPanel
+              rawEvents={filteredRawEvents}
+              hasActiveFilters={hasActiveFilters}
+              onRefresh={handleBaseDataRefresh}
+            />
           ) : null}
           {route.currentPage === "logs" ? (
-            <LogsPanel
-              recentLogs={recentLogs}
-              logLevelFilter={route.logLevelFilter}
-              formKey={route.logLevelFilter}
-              onSubmit={handleLogsSubmit}
-              onRefresh={handleLogsRefresh}
-            />
+            <LogsPanel recentLogs={recentLogs} logLevelFilter={route.logLevelFilter} onRefresh={handleLogsRefresh} />
           ) : null}
         </div>
       </main>
@@ -430,6 +432,7 @@ function FilterPanel({
   currentPage,
   uiFilters,
   uiFilterOptions,
+  logLevelFilter,
   formKey,
   onSubmit,
   onNavigate,
@@ -437,20 +440,21 @@ function FilterPanel({
   currentPage: AppPage;
   uiFilters: UiFilterValues;
   uiFilterOptions: UiFilterOptions;
+  logLevelFilter: LogLevelFilter;
   formKey: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onNavigate: (href: string) => void;
 }) {
-  const activeFilterCount = countActivePageFilters(uiFilters, currentPage);
+  const activeFilterCount = countActivePageFilters(uiFilters, currentPage, logLevelFilter);
   const pagePath = formatPagePath(currentPage);
   const showsActivityFilters = currentPage !== "pull-requests";
+  const showsLogFilters = currentPage === "logs";
 
   return (
     <section className="panel filters-panel">
       <div className="panel-header">
         <div>
           <h2>Filters</h2>
-          <p className="panel-description">{formatFilterDescription(currentPage)}</p>
         </div>
         <span className="count">{activeFilterCount}</span>
       </div>
@@ -462,26 +466,41 @@ function FilterPanel({
         onSubmit={onSubmit}
       >
         <div className="filters-grid">
-          <label className="filter-field">
-            <span className="input-label">Tracked state</span>
-            <select name="pr-state" defaultValue={uiFilters.pullRequestState} className="text-input">
-              <option value="all">All pull requests</option>
-              <option value="tracked">Tracked only</option>
-              <option value="inactive">Untracked only</option>
-            </select>
-          </label>
-          <label className="filter-field">
-            <span className="input-label">Repository</span>
-            <select name="repo" defaultValue={uiFilters.repository} className="text-input">
-              <option value="">All repositories</option>
-              {uiFilterOptions.repositories.map((repository) => (
-                <option key={repository} value={repository}>
-                  {repository}
-                </option>
-              ))}
-            </select>
-          </label>
-          {showsActivityFilters ? (
+          {showsLogFilters ? (
+            <label className="filter-field">
+              <span className="input-label">Level</span>
+              <select name="level" defaultValue={logLevelFilter} className="text-input">
+                <option value="all">All levels</option>
+                <option value="debug">Debug</option>
+                <option value="info">Info</option>
+                <option value="warn">Warn</option>
+                <option value="error">Error</option>
+              </select>
+            </label>
+          ) : (
+            <>
+              <label className="filter-field">
+                <span className="input-label">Tracked state</span>
+                <select name="pr-state" defaultValue={uiFilters.pullRequestState} className="text-input">
+                  <option value="all">All pull requests</option>
+                  <option value="tracked">Tracked only</option>
+                  <option value="inactive">Untracked only</option>
+                </select>
+              </label>
+              <label className="filter-field">
+                <span className="input-label">Repository</span>
+                <select name="repo" defaultValue={uiFilters.repository} className="text-input">
+                  <option value="">All repositories</option>
+                  {uiFilterOptions.repositories.map((repository) => (
+                    <option key={repository} value={repository}>
+                      {repository}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          {showsActivityFilters && !showsLogFilters ? (
             <>
               <label className="filter-field">
                 <span className="input-label">Event type</span>
@@ -597,16 +616,21 @@ function NotificationHistoryPanel({
   notificationHistory,
   hasActiveFilters,
   onResend,
+  onRefresh,
 }: {
   notificationHistory: NotificationHistoryEntry[];
   hasActiveFilters: boolean;
   onResend: (notificationRecordId: number) => Promise<void>;
+  onRefresh: () => void;
 }) {
   return (
     <section className="panel notification-history-panel">
       <div className="panel-header">
         <h2>Notification History</h2>
-        <span className="count">{notificationHistory.length}</span>
+        <div className="panel-header-actions">
+          <RefreshButton label="Refresh notification history" onClick={onRefresh} />
+          <span className="count">{notificationHistory.length}</span>
+        </div>
       </div>
       {notificationHistory.length === 0 ? (
         <p>
@@ -670,15 +694,20 @@ function NotificationHistoryPanel({
 function RawEventsPanel({
   rawEvents,
   hasActiveFilters,
+  onRefresh,
 }: {
   rawEvents: RawEventsEntry[];
   hasActiveFilters: boolean;
+  onRefresh: () => void;
 }) {
   return (
     <section className="panel raw-events-panel">
       <div className="panel-header">
         <h2>Raw Events</h2>
-        <span className="count">{rawEvents.length}</span>
+        <div className="panel-header-actions">
+          <RefreshButton label="Refresh raw events" onClick={onRefresh} />
+          <span className="count">{rawEvents.length}</span>
+        </div>
       </div>
       {rawEvents.length === 0 ? (
         <p>
@@ -801,15 +830,11 @@ function formatJsonForDisplay(rawJson: string): string | null {
 function LogsPanel({
   recentLogs,
   logLevelFilter,
-  formKey,
-  onSubmit,
   onRefresh,
 }: {
   recentLogs: RecentLogEntry[];
   logLevelFilter: LogLevelFilter;
-  formKey: string;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onRefresh: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
+  onRefresh: () => void;
 }) {
   return (
     <section className="panel logs-panel">
@@ -818,28 +843,11 @@ function LogsPanel({
           <h2>Logs</h2>
           <p className="panel-description">Recent flat-file logs from local runtime.</p>
         </div>
-        <span className="count">{recentLogs.length}</span>
-      </div>
-      <form key={formKey} method="get" action="/logs" className="logs-toolbar" onSubmit={onSubmit}>
-        <label className="filter-field logs-filter-field">
-          <span className="input-label">Level</span>
-          <select name="level" defaultValue={logLevelFilter} className="text-input">
-            <option value="all">All levels</option>
-            <option value="debug">Debug</option>
-            <option value="info">Info</option>
-            <option value="warn">Warn</option>
-            <option value="error">Error</option>
-          </select>
-        </label>
-        <div className="logs-toolbar-actions">
-          <button type="submit" className="action-button primary-button">
-            Apply
-          </button>
-          <a href={buildLogViewerHref(logLevelFilter)} className="action-button clear-filters-link" onClick={onRefresh}>
-            Refresh
-          </a>
+        <div className="panel-header-actions">
+          <RefreshButton label="Refresh logs" onClick={onRefresh} />
+          <span className="count">{recentLogs.length}</span>
         </div>
-      </form>
+      </div>
       {recentLogs.length === 0 ? (
         <p>
           {logLevelFilter === "all"
@@ -894,18 +902,23 @@ function PullRequestList({
   title,
   emptyMessage,
   pullRequests,
+  onRefresh,
   renderAction,
 }: {
   title: string;
   emptyMessage: string;
   pullRequests: PullRequestRecord[];
+  onRefresh: () => void;
   renderAction?: (pullRequest: PullRequestRecord) => ReactNode;
 }) {
   return (
     <section className="panel pull-request-panel">
       <div className="panel-header">
         <h2>{title}</h2>
-        <span className="count">{pullRequests.length}</span>
+        <div className="panel-header-actions">
+          <RefreshButton label="Refresh pull requests" onClick={onRefresh} />
+          <span className="count">{pullRequests.length}</span>
+        </div>
       </div>
       {pullRequests.length === 0 ? (
         <p>{emptyMessage}</p>
@@ -934,6 +947,23 @@ function PullRequestList({
         </ul>
       )}
     </section>
+  );
+}
+
+function RefreshButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" className="action-button icon-button" aria-label={label} title={label} onClick={onClick}>
+      <svg viewBox="0 0 20 20" className="icon-button-svg" aria-hidden="true">
+        <path
+          d="M16.25 10A6.25 6.25 0 1 1 14.42 5.58M16.25 3.75v4.17h-4.17"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
   );
 }
 
@@ -1036,7 +1066,11 @@ function readLogLevelFilter(searchParams: URLSearchParams): LogLevelFilter {
   return isLogLevel(value) ? value : "all";
 }
 
-function countActivePageFilters(filters: UiFilterValues, page: AppPage): number {
+function countActivePageFilters(filters: UiFilterValues, page: AppPage, logLevelFilter: LogLevelFilter): number {
+  if (page === "logs") {
+    return logLevelFilter === "all" ? 0 : 1;
+  }
+
   let count = 0;
 
   for (const field of getPageFilterFields(page)) {
@@ -1130,22 +1164,6 @@ function formatPageLabel(page: AppPage): string {
   }
 
   return "Raw Events";
-}
-
-function formatFilterDescription(page: AppPage): string {
-  if (page === "pull-requests") {
-    return "Refine tracked and untracked pull requests.";
-  }
-
-  if (page === "logs") {
-    return "Refine recent logs.";
-  }
-
-  if (page === "notification-history") {
-    return "Refine notification history.";
-  }
-
-  return "Refine normalized raw events.";
 }
 
 function formatPullRequestEmptyMessage(uiFilters: UiFilterValues, hasActiveFilters: boolean): string {
@@ -1506,6 +1524,12 @@ const APP_STYLES = `
     margin-bottom: 12px;
   }
 
+  .panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
   .count,
   .state-pill {
     display: inline-flex;
@@ -1608,14 +1632,6 @@ const APP_STYLES = `
     margin-top: 16px;
   }
 
-  .logs-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-
   .filters-grid {
     display: grid;
     gap: 12px;
@@ -1632,16 +1648,6 @@ const APP_STYLES = `
     align-items: center;
     gap: 12px;
     margin-top: 16px;
-  }
-
-  .logs-toolbar-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .logs-filter-field {
-    min-width: 180px;
   }
 
   .panel-description {
@@ -1945,6 +1951,18 @@ const APP_STYLES = `
     text-decoration: none;
   }
 
+  .icon-button {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    color: #cbd5e1;
+  }
+
+  .icon-button-svg {
+    width: 16px;
+    height: 16px;
+  }
+
   .primary-button {
     border-color: rgba(56, 189, 248, 0.4);
     background: rgba(8, 47, 73, 0.92);
@@ -1981,16 +1999,6 @@ const APP_STYLES = `
     }
 
     .filters-actions {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .logs-toolbar {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .logs-toolbar-actions {
       align-items: stretch;
       flex-direction: column;
     }
