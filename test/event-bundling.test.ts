@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("bundlePullRequestEvents", () => {
-  it("bundles repeated human comments into one debounce window", () => {
+  it("bundles repeated human comments discovered in one polling session", () => {
     const { database, pullRequest } = createPullRequest();
     const normalizedEventRepository = new NormalizedEventRepository(database);
     const eventBundleRepository = new EventBundleRepository(database);
@@ -67,8 +67,8 @@ describe("bundlePullRequestEvents", () => {
 
       expect(bundles).toHaveLength(1);
       expect(bundles[0]).toMatchObject({
-        windowStartedAt: "2026-04-10T12:00:00.000Z",
-        windowEndsAt: "2026-04-10T12:02:20.000Z",
+        firstEventOccurredAt: "2026-04-10T12:00:00.000Z",
+        lastEventOccurredAt: "2026-04-10T12:01:20.000Z",
       });
       expect(
         normalizedEventRepository.listNormalizedEventsForBundle(bundles[0]?.id ?? -1).map((event) => ({
@@ -237,7 +237,7 @@ describe("bundlePullRequestEvents", () => {
     }
   });
 
-  it("keeps events on the debounce boundary in the same bundle", () => {
+  it("starts a new bundle on a later polling session", () => {
     const { database, pullRequest } = createPullRequest();
     const normalizedEventRepository = new NormalizedEventRepository(database);
     const eventBundleRepository = new EventBundleRepository(database);
@@ -250,40 +250,50 @@ describe("bundlePullRequestEvents", () => {
         decisionState: "notified",
         occurredAt: "2026-04-10T12:00:00.000Z",
       });
+
+      expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
+        eligibleCount: 1,
+        bundledCount: 1,
+        createdBundleCount: 1,
+      });
+
+      const firstBundle = eventBundleRepository.listEventBundlesForPullRequest(pullRequest.id)[0];
+
+      expect(firstBundle).toMatchObject({
+        firstEventOccurredAt: "2026-04-10T12:00:00.000Z",
+        lastEventOccurredAt: "2026-04-10T12:00:00.000Z",
+      });
+
       normalizedEventRepository.insertNormalizedEvent({
         pullRequestId: pullRequest.id,
         eventType: "review_inline_comment",
         actorClass: "human_other",
         decisionState: "notified",
-        occurredAt: "2026-04-10T12:01:00.000Z",
+        occurredAt: "2026-04-10T12:00:30.000Z",
       });
 
       expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
-        eligibleCount: 2,
-        bundledCount: 2,
+        eligibleCount: 1,
+        bundledCount: 1,
         createdBundleCount: 1,
       });
 
       const bundles = eventBundleRepository.listEventBundlesForPullRequest(pullRequest.id);
 
-      expect(bundles).toHaveLength(1);
-      expect(bundles[0]).toMatchObject({
-        windowStartedAt: "2026-04-10T12:00:00.000Z",
-        windowEndsAt: "2026-04-10T12:02:00.000Z",
-      });
+      expect(bundles).toHaveLength(2);
       expect(
-        normalizedEventRepository.listNormalizedEventsForBundle(bundles[0]?.id ?? -1).map((event) => ({
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
           eventType: event.eventType,
-          occurredAt: event.occurredAt,
+          eventBundleId: event.eventBundleId,
         })),
       ).toEqual([
         {
           eventType: "issue_comment",
-          occurredAt: "2026-04-10T12:00:00.000Z",
+          eventBundleId: bundles[0]?.id ?? null,
         },
         {
           eventType: "review_inline_comment",
-          occurredAt: "2026-04-10T12:01:00.000Z",
+          eventBundleId: bundles[1]?.id ?? null,
         },
       ]);
     } finally {

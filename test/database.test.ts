@@ -112,6 +112,26 @@ describe("initializeDatabase", () => {
       database.close();
     }
   });
+
+  it("applies event bundle event-range migration", () => {
+    const homeDir = createTempDir("octopulse-db-home-");
+    const database = initializeDatabase(resolveAppPaths({ homeDir }));
+
+    try {
+      expect(readTableColumns(database, "EventBundle")).toEqual([
+        "id",
+        "pull_request_id",
+        "status",
+        "first_event_occurred_at",
+        "last_event_occurred_at",
+        "summary",
+        "created_at",
+        "sent_at",
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createTempDir(prefix: string): string {

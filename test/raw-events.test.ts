@@ -78,8 +78,8 @@ describe("listRawEvents", () => {
       });
       const bundle = eventBundleRepository.createEventBundle({
         pullRequestId: pullRequest.id,
-        windowStartedAt: bundledEvent.occurredAt,
-        windowEndsAt: "2026-04-10T12:06:00.000Z",
+        firstEventOccurredAt: bundledEvent.occurredAt,
+        lastEventOccurredAt: "2026-04-10T12:06:00.000Z",
       });
 
       normalizedEventRepository.assignEventBundle([bundledEvent.id], bundle.id);

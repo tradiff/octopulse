@@ -86,7 +86,6 @@ export function renderExampleConfig(): string {
     "#[timings]",
     '#tracked_poll_interval = "1m"',
     '#discovery_poll_interval = "5m"',
-    '#debounce_window = "1m"',
     '#grace_period = "7 days"',
     "",
   ].join("\n");

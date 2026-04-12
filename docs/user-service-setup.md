@@ -41,7 +41,6 @@ api_key = "sk_replace_with_your_key"
 [timings]
 tracked_poll_interval = "1m"
 discovery_poll_interval = "5m"
-debounce_window = "1m"
 grace_period = "7 days"
 ```
 

@@ -59,8 +59,8 @@ describe("listNotificationHistory", () => {
       });
       const bundle = eventBundleRepository.createEventBundle({
         pullRequestId: pullRequest.id,
-        windowStartedAt: bundledComment.occurredAt,
-        windowEndsAt: "2026-04-10T12:02:20.000Z",
+        firstEventOccurredAt: bundledComment.occurredAt,
+        lastEventOccurredAt: "2026-04-10T12:02:20.000Z",
       });
 
       normalizedEventRepository.assignEventBundle([bundledComment.id, bundledCi.id], bundle.id);

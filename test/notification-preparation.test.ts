@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 describe("preparePullRequestNotifications", () => {
-  it("persists immediate notifications and only persists bundles after debounce window closes", () => {
+  it("persists immediate notifications and same-session bundles together", () => {
     const { database, pullRequest } = createPullRequest();
     const normalizedEventRepository = new NormalizedEventRepository(database);
     const eventBundleRepository = new EventBundleRepository(database);
@@ -65,41 +65,21 @@ describe("preparePullRequestNotifications", () => {
       });
 
       expect(
-        preparePullRequestNotifications(database, pullRequest, {
-          preparedAt: "2026-04-10T12:01:30.000Z",
-        }),
+        preparePullRequestNotifications(database, pullRequest),
       ).toEqual({
         immediateCount: 1,
-        bundledCount: 0,
-        createdCount: 1,
+        bundledCount: 1,
+        createdCount: 2,
       });
 
       const firstPass = notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest.id);
 
-      expect(firstPass).toHaveLength(1);
-      expect(firstPass[0]).toMatchObject({
-        normalizedEventId: expect.any(Number),
-        eventBundleId: null,
-        title: "acme/octopulse PR #7",
-        body: "alice approved review\nAdd notifications",
-        clickUrl: "https://github.com/acme/octopulse/pull/7",
-        deliveryStatus: "pending",
-      });
-
-      expect(
-        preparePullRequestNotifications(database, pullRequest, {
-          preparedAt: "2026-04-10T12:02:30.000Z",
-        }),
-      ).toEqual({
-        immediateCount: 0,
-        bundledCount: 1,
-        createdCount: 1,
-      });
+      expect(firstPass).toHaveLength(2);
 
       const bundle = eventBundleRepository.listEventBundlesForPullRequest(pullRequest.id)[0];
 
       expect(bundle).toBeDefined();
-      expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest.id)).toEqual([
+      expect(firstPass).toEqual([
         expect.objectContaining({
           normalizedEventId: expect.any(Number),
           eventBundleId: null,
@@ -115,9 +95,7 @@ describe("preparePullRequestNotifications", () => {
       ]);
 
       expect(
-        preparePullRequestNotifications(database, pullRequest, {
-          preparedAt: "2026-04-10T12:05:00.000Z",
-        }),
+        preparePullRequestNotifications(database, pullRequest),
       ).toEqual({
         immediateCount: 0,
         bundledCount: 0,
@@ -128,7 +106,7 @@ describe("preparePullRequestNotifications", () => {
     }
   });
 
-  it("prepares bundled notifications when prepared exactly at the debounce boundary", () => {
+  it("prepares bundled notifications immediately after bundling", () => {
     const { database, pullRequest } = createPullRequest();
     const normalizedEventRepository = new NormalizedEventRepository(database);
     const notificationRecordRepository = new NotificationRecordRepository(database);
@@ -150,9 +128,7 @@ describe("preparePullRequestNotifications", () => {
       });
 
       expect(
-        preparePullRequestNotifications(database, pullRequest, {
-          preparedAt: "2026-04-10T12:02:00.000Z",
-        }),
+        preparePullRequestNotifications(database, pullRequest),
       ).toEqual({
         immediateCount: 0,
         bundledCount: 1,
@@ -173,6 +149,7 @@ describe("preparePullRequestNotifications", () => {
       database.close();
     }
   });
+
 });
 
 function createRepository(): {

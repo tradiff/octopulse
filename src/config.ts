@@ -8,7 +8,6 @@ import { DEFAULT_LOG_RETENTION_MS, isLogLevel, type LogLevel } from "./logger.js
 
 const DEFAULT_TRACKED_PULL_REQUEST_POLL_MS = 60_000;
 const DEFAULT_DISCOVERY_POLL_MS = 5 * 60_000;
-const DEFAULT_DEBOUNCE_WINDOW_MS = 60_000;
 const DEFAULT_GRACE_PERIOD_MS = 7 * 24 * 60 * 60_000;
 
 type ConfigTable = Record<string, unknown>;
@@ -39,7 +38,6 @@ export interface AppConfig {
   timings: {
     trackedPullRequestPollMs: number;
     discoveryPollMs: number;
-    debounceWindowMs: number;
     gracePeriodMs: number;
   };
 }
@@ -112,12 +110,7 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
   if (timings) {
     assertAllowedKeys(
       timings,
-      [
-        "tracked_poll_interval",
-        "discovery_poll_interval",
-        "debounce_window",
-        "grace_period",
-      ],
+      ["tracked_poll_interval", "discovery_poll_interval", "grace_period"],
       "timings",
     );
   }
@@ -156,12 +149,6 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
         "discovery_poll_interval",
         "timings.discovery_poll_interval",
         DEFAULT_DISCOVERY_POLL_MS,
-      ),
-      debounceWindowMs: optionalDuration(
-        timings,
-        "debounce_window",
-        "timings.debounce_window",
-        DEFAULT_DEBOUNCE_WINDOW_MS,
       ),
       gracePeriodMs: optionalDuration(
         timings,

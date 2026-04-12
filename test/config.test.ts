@@ -48,7 +48,6 @@ describe("loadConfig", () => {
     expect(config.timings).toEqual({
       trackedPullRequestPollMs: 60_000,
       discoveryPollMs: 5 * 60_000,
-      debounceWindowMs: 60_000,
       gracePeriodMs: 7 * 24 * 60 * 60_000,
     });
     expect(config.paths).toEqual(resolveAppPaths({ homeDir }));
@@ -73,7 +72,6 @@ describe("loadConfig", () => {
         "[timings]",
         'tracked_poll_interval = "2 minutes"',
         'discovery_poll_interval = "10m"',
-        'debounce_window = "30 seconds"',
         'grace_period = "3 days"',
         "",
       ].join("\n"),
@@ -90,7 +88,6 @@ describe("loadConfig", () => {
     expect(config.timings).toEqual({
       trackedPullRequestPollMs: 2 * 60_000,
       discoveryPollMs: 10 * 60_000,
-      debounceWindowMs: 30_000,
       gracePeriodMs: 3 * 24 * 60 * 60_000,
     });
   });
@@ -122,6 +119,7 @@ describe("loadConfig", () => {
     expect((thrownError as Error).message).toContain("github.token must be a non-empty string");
     expect((thrownError as Error).message).not.toContain("sk-live-secret");
   });
+
 });
 
 function createTempHome(): string {

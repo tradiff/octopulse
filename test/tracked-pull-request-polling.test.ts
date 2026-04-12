@@ -932,7 +932,7 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
-  it("dispatches immediate and ready bundled notification records during polling", async () => {
+  it("dispatches immediate and same-session bundled notification records during polling", async () => {
     const { database, repository } = createRepository();
     const notificationRecordRepository = new NotificationRecordRepository(database);
     const notificationDispatcher = {
@@ -1005,8 +1005,7 @@ describe("pollTrackedPullRequests", () => {
           {
             pullRequestRepository: repository,
             observedAt: OBSERVED_AT,
-            notificationPreparedAt: "2026-04-10T12:02:00.000Z",
-            notificationDispatchedAt: "2026-04-10T12:02:05.000Z",
+            notificationDispatchedAt: "2026-04-10T12:00:30.000Z",
             notificationDispatcher,
           },
         ),
@@ -1027,7 +1026,7 @@ describe("pollTrackedPullRequests", () => {
           body: "bob approved review\nAdd pull request polling",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
           deliveryStatus: "sent",
-          deliveredAt: "2026-04-10T12:02:05.000Z",
+          deliveredAt: "2026-04-10T12:00:30.000Z",
         }),
         expect.objectContaining({
           normalizedEventId: null,
@@ -1036,7 +1035,7 @@ describe("pollTrackedPullRequests", () => {
           body: "2 comments\nAdd pull request polling",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
           deliveryStatus: "sent",
-          deliveredAt: "2026-04-10T12:02:05.000Z",
+          deliveredAt: "2026-04-10T12:00:30.000Z",
         }),
       ]);
     } finally {

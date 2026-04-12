@@ -2,16 +2,14 @@ import { DatabaseSync } from "node:sqlite";
 
 import { NormalizedEventRepository, type NormalizedEventRecord } from "./normalized-event-repository.js";
 
-const DEFAULT_BUNDLE_WINDOW_MS = 60_000;
-
 export type EventBundleStatus = "pending" | "sent" | "suppressed";
 
 export interface EventBundleRecord {
   id: number;
   pullRequestId: number;
   status: EventBundleStatus;
-  windowStartedAt: string;
-  windowEndsAt: string;
+  firstEventOccurredAt: string;
+  lastEventOccurredAt: string;
   summary: string | null;
   createdAt: string;
   sentAt: string | null;
@@ -20,22 +18,18 @@ export interface EventBundleRecord {
 export interface CreateEventBundleInput {
   pullRequestId: number;
   status?: EventBundleStatus;
-  windowStartedAt: string;
-  windowEndsAt: string;
+  firstEventOccurredAt: string;
+  lastEventOccurredAt: string;
   summary?: string | null;
   sentAt?: string | null;
 }
 
 export interface BundlePullRequestEventsOptions {
-  windowMs?: number;
   normalizedEventRepository?: Pick<
     NormalizedEventRepository,
     "assignEventBundle" | "listBundleEligibleUnbundledEventsForPullRequest"
   >;
-  eventBundleRepository?: Pick<
-    EventBundleRepository,
-    "createEventBundle" | "findPendingEventBundleForTime" | "updateEventBundleWindowEnd"
-  >;
+  eventBundleRepository?: Pick<EventBundleRepository, "createEventBundle">;
 }
 
 export interface BundlePullRequestEventsResult {
@@ -62,8 +56,8 @@ export class EventBundleRepository {
             INSERT INTO EventBundle (
               pull_request_id,
               status,
-              window_started_at,
-              window_ends_at,
+              first_event_occurred_at,
+              last_event_occurred_at,
               summary,
               sent_at
             ) VALUES (?, ?, ?, ?, ?, ?)
@@ -72,8 +66,8 @@ export class EventBundleRepository {
         .run(
           input.pullRequestId,
           input.status ?? "pending",
-          input.windowStartedAt,
-          input.windowEndsAt,
+          input.firstEventOccurredAt,
+          input.lastEventOccurredAt,
           input.summary ?? null,
           input.sentAt ?? null,
         );
@@ -90,35 +84,6 @@ export class EventBundleRepository {
     }
   }
 
-  findPendingEventBundleForTime(pullRequestId: number, occurredAt: string): EventBundleRecord | null {
-    try {
-      const row = this.database
-        .prepare(
-          `
-            SELECT *
-            FROM EventBundle
-            WHERE pull_request_id = ?
-              AND status = 'pending'
-              AND window_started_at <= ?
-              AND window_ends_at >= ?
-            ORDER BY window_started_at DESC, id DESC
-            LIMIT 1
-          `,
-        )
-        .get(pullRequestId, occurredAt, occurredAt);
-
-      return row === undefined ? null : mapEventBundleRow(row);
-    } catch (error) {
-      if (error instanceof EventBundlingError) {
-        throw error;
-      }
-
-      throw new EventBundlingError(
-        `Failed to load event bundles for pull request ${pullRequestId}: ${getErrorMessage(error)}`,
-      );
-    }
-  }
-
   listEventBundlesForPullRequest(pullRequestId: number): EventBundleRecord[] {
     const rows = this.database
       .prepare(
@@ -126,7 +91,7 @@ export class EventBundleRepository {
           SELECT *
           FROM EventBundle
           WHERE pull_request_id = ?
-          ORDER BY window_started_at ASC, id ASC
+          ORDER BY first_event_occurred_at ASC, id ASC
         `,
       )
       .all(pullRequestId);
@@ -134,10 +99,7 @@ export class EventBundleRepository {
     return rows.map((row) => mapEventBundleRow(row));
   }
 
-  listReadyPendingUnnotifiedBundlesForPullRequest(
-    pullRequestId: number,
-    readyAt: string,
-  ): EventBundleRecord[] {
+  listPendingUnnotifiedBundlesForPullRequest(pullRequestId: number): EventBundleRecord[] {
     const rows = this.database
       .prepare(
         `
@@ -147,38 +109,13 @@ export class EventBundleRepository {
             ON notification_record.event_bundle_id = event_bundle.id
           WHERE event_bundle.pull_request_id = ?
             AND event_bundle.status = 'pending'
-            AND event_bundle.window_ends_at <= ?
             AND notification_record.id IS NULL
-          ORDER BY event_bundle.window_started_at ASC, event_bundle.id ASC
+          ORDER BY event_bundle.first_event_occurred_at ASC, event_bundle.id ASC
         `,
       )
-      .all(pullRequestId, readyAt);
+      .all(pullRequestId);
 
     return rows.map((row) => mapEventBundleRow(row));
-  }
-
-  updateEventBundleWindowEnd(id: number, windowEndsAt: string): EventBundleRecord {
-    try {
-      this.database
-        .prepare(
-          `
-            UPDATE EventBundle
-            SET window_ends_at = ?
-            WHERE id = ?
-          `,
-        )
-        .run(windowEndsAt, id);
-
-      return this.requireEventBundleById(id);
-    } catch (error) {
-      if (error instanceof EventBundlingError) {
-        throw error;
-      }
-
-      throw new EventBundlingError(
-        `Failed to extend event bundle ${id}: ${getErrorMessage(error)}`,
-      );
-    }
   }
 
   private requireEventBundleById(id: number): EventBundleRecord {
@@ -197,12 +134,6 @@ export function bundlePullRequestEvents(
   pullRequestId: number,
   options: BundlePullRequestEventsOptions = {},
 ): BundlePullRequestEventsResult {
-  const windowMs = options.windowMs ?? DEFAULT_BUNDLE_WINDOW_MS;
-
-  if (!Number.isFinite(windowMs) || windowMs <= 0) {
-    throw new EventBundlingError("Bundle window must be greater than zero milliseconds");
-  }
-
   const normalizedEventRepository =
     options.normalizedEventRepository ?? new NormalizedEventRepository(database);
   const eventBundleRepository = options.eventBundleRepository ?? new EventBundleRepository(database);
@@ -223,35 +154,34 @@ export function bundlePullRequestEvents(
     );
   }
 
-  let currentBundle: EventBundleRecord | null = null;
-  let createdBundleCount = 0;
+  if (eligibleEvents.length === 0) {
+    return {
+      eligibleCount: 0,
+      bundledCount: 0,
+      createdBundleCount: 0,
+    };
+  }
+
+  const firstEvent = eligibleEvents[0];
+  const lastEvent = eligibleEvents[eligibleEvents.length - 1];
+
+  if (firstEvent === undefined || lastEvent === undefined) {
+    throw new EventBundlingError(
+      `Bundle-eligible events disappeared for pull request ${pullRequestId} before bundling`,
+    );
+  }
 
   try {
-    for (const event of eligibleEvents) {
-      const windowEndsAt = addWindowDuration(event.occurredAt, windowMs);
+    const bundle = eventBundleRepository.createEventBundle({
+      pullRequestId,
+      firstEventOccurredAt: firstEvent.occurredAt,
+      lastEventOccurredAt: lastEvent.occurredAt,
+    });
 
-      if (currentBundle === null || isTimestampAfter(event.occurredAt, currentBundle.windowEndsAt)) {
-        currentBundle = eventBundleRepository.findPendingEventBundleForTime(
-          pullRequestId,
-          event.occurredAt,
-        );
-
-        if (currentBundle === null) {
-          currentBundle = eventBundleRepository.createEventBundle({
-            pullRequestId,
-            windowStartedAt: event.occurredAt,
-            windowEndsAt,
-          });
-          createdBundleCount += 1;
-        }
-      }
-
-      normalizedEventRepository.assignEventBundle([event.id], currentBundle.id);
-
-      if (isTimestampAfter(windowEndsAt, currentBundle.windowEndsAt)) {
-        currentBundle = eventBundleRepository.updateEventBundleWindowEnd(currentBundle.id, windowEndsAt);
-      }
-    }
+    normalizedEventRepository.assignEventBundle(
+      eligibleEvents.map((event) => event.id),
+      bundle.id,
+    );
   } catch (error) {
     if (error instanceof EventBundlingError) {
       throw error;
@@ -265,7 +195,7 @@ export function bundlePullRequestEvents(
   return {
     eligibleCount: eligibleEvents.length,
     bundledCount: eligibleEvents.length,
-    createdBundleCount,
+    createdBundleCount: 1,
   };
 }
 
@@ -280,26 +210,18 @@ function mapEventBundleRow(row: unknown): EventBundleRecord {
     id: readInteger(value.id, "EventBundle.id"),
     pullRequestId: readInteger(value.pull_request_id, "EventBundle.pull_request_id"),
     status: readEventBundleStatus(value.status, "EventBundle.status"),
-    windowStartedAt: readString(value.window_started_at, "EventBundle.window_started_at"),
-    windowEndsAt: readString(value.window_ends_at, "EventBundle.window_ends_at"),
+    firstEventOccurredAt: readString(
+      value.first_event_occurred_at,
+      "EventBundle.first_event_occurred_at",
+    ),
+    lastEventOccurredAt: readString(
+      value.last_event_occurred_at,
+      "EventBundle.last_event_occurred_at",
+    ),
     summary: readNullableString(value.summary, "EventBundle.summary"),
     createdAt: readString(value.created_at, "EventBundle.created_at"),
     sentAt: readNullableString(value.sent_at, "EventBundle.sent_at"),
   };
-}
-
-function addWindowDuration(occurredAt: string, windowMs: number): string {
-  const timestamp = Date.parse(occurredAt);
-
-  if (Number.isNaN(timestamp)) {
-    throw new EventBundlingError(`Invalid event timestamp ${occurredAt}`);
-  }
-
-  return new Date(timestamp + windowMs).toISOString();
-}
-
-function isTimestampAfter(left: string, right: string): boolean {
-  return left.localeCompare(right) > 0;
 }
 
 function readInteger(value: unknown, fieldName: string): number {

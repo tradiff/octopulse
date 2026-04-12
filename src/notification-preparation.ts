@@ -7,11 +7,7 @@ import { renderNotification, type RenderedNotification } from "./notification-re
 import type { PullRequestRecord } from "./pull-request-repository.js";
 
 export interface PreparePullRequestNotificationsOptions {
-  preparedAt?: string;
-  eventBundleRepository?: Pick<
-    EventBundleRepository,
-    "listReadyPendingUnnotifiedBundlesForPullRequest"
-  >;
+  eventBundleRepository?: Pick<EventBundleRepository, "listPendingUnnotifiedBundlesForPullRequest">;
   normalizedEventRepository?: Pick<
     NormalizedEventRepository,
     "listImmediateEligibleUnnotifiedEventsForPullRequest" | "listNormalizedEventsForBundle"
@@ -40,7 +36,6 @@ export function preparePullRequestNotifications(
   >,
   options: PreparePullRequestNotificationsOptions = {},
 ): PreparePullRequestNotificationsResult {
-  const preparedAt = options.preparedAt ?? new Date().toISOString();
   const eventBundleRepository = options.eventBundleRepository ?? new EventBundleRepository(database);
   const normalizedEventRepository =
     options.normalizedEventRepository ?? new NormalizedEventRepository(database);
@@ -67,10 +62,7 @@ export function preparePullRequestNotifications(
     immediateCount += 1;
   }
 
-  for (const bundle of eventBundleRepository.listReadyPendingUnnotifiedBundlesForPullRequest(
-    pullRequest.id,
-    preparedAt,
-  )) {
+  for (const bundle of eventBundleRepository.listPendingUnnotifiedBundlesForPullRequest(pullRequest.id)) {
     const events = normalizedEventRepository.listNormalizedEventsForBundle(bundle.id);
 
     if (events.length === 0) {

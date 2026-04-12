@@ -27,7 +27,6 @@ export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   botActivityClassifier?: BotActivityClassifier;
   notificationDispatcher?: NotificationDispatcher;
   observedAt?: string;
-  notificationPreparedAt?: string;
   notificationDispatchedAt?: string;
   onError?: (error: PullRequestPollingError) => void;
 }
@@ -63,7 +62,6 @@ export async function pollTrackedPullRequests<TClient>(
   const botActivityClassifier = options.botActivityClassifier;
   const notificationDispatcher = options.notificationDispatcher;
   const observedAt = options.observedAt ?? new Date().toISOString();
-  const notificationPreparedAt = options.notificationPreparedAt ?? new Date().toISOString();
   const notificationDispatchedAt = options.notificationDispatchedAt ?? new Date().toISOString();
   const pollPullRequest =
     options.pollPullRequest ??
@@ -86,16 +84,13 @@ export async function pollTrackedPullRequests<TClient>(
 
       if (notificationDispatcher) {
         await dispatchPullRequestNotifications(database, pullRequest, {
-          preparedAt: notificationPreparedAt,
           dispatchedAt: notificationDispatchedAt,
           notificationDispatcher,
         });
         return;
       }
 
-      preparePullRequestNotifications(database, pullRequest, {
-        preparedAt: notificationPreparedAt,
-      });
+      preparePullRequestNotifications(database, pullRequest);
     });
   const onError = options.onError ?? logTrackedPullRequestPollingError;
 

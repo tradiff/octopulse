@@ -60,7 +60,6 @@ describe("dispatchPullRequestNotifications", () => {
 
       await expect(
         dispatchPullRequestNotifications(database, pullRequest, {
-          preparedAt: "2026-04-10T12:02:30.000Z",
           dispatchedAt: "2026-04-10T12:02:45.000Z",
           notificationDispatcher,
         }),
@@ -167,7 +166,6 @@ describe("dispatchPullRequestNotifications", () => {
 
       await expect(
         dispatchPullRequestNotifications(database, pullRequest, {
-          preparedAt: "2026-04-10T12:02:00.000Z",
           notificationDispatcher,
         }),
       ).resolves.toEqual({

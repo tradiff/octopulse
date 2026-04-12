@@ -14,7 +14,6 @@ export interface NotificationDispatcher {
 }
 
 export interface DispatchPullRequestNotificationsOptions {
-  preparedAt?: string;
   dispatchedAt?: string;
   notificationDispatcher?: NotificationDispatcher;
   notificationRecordRepository?: Pick<
@@ -47,15 +46,12 @@ export async function dispatchPullRequestNotifications(
   >,
   options: DispatchPullRequestNotificationsOptions = {},
 ): Promise<DispatchPullRequestNotificationsResult> {
-  const preparedAt = options.preparedAt ?? new Date().toISOString();
   const dispatchedAt = options.dispatchedAt ?? new Date().toISOString();
   const notificationDispatcher = options.notificationDispatcher ?? new LinuxNotificationAdapter();
   const notificationRecordRepository =
     options.notificationRecordRepository ?? new NotificationRecordRepository(database);
   const onError = options.onError ?? logNotificationDispatchError;
-  const preparation = preparePullRequestNotifications(database, pullRequest, {
-    preparedAt,
-  });
+  const preparation = preparePullRequestNotifications(database, pullRequest);
 
   let dispatchedCount = 0;
   let failedCount = 0;
