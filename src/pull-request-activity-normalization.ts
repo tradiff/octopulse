@@ -49,6 +49,7 @@ interface WorkflowRunSnapshot {
   status: string;
   conclusion: string | null;
   actorType: string | null;
+  actorAvatarUrl: string | null;
   name: string | null;
   url: string | null;
 }
@@ -187,15 +188,19 @@ function buildNormalizedPayload(
   rawEvent: RawEventRecord,
   payload: Record<string, unknown>,
 ): Record<string, number | string | null> | undefined {
+  const actorAvatarUrl = readActorAvatarUrl(rawEvent, payload);
+
   switch (rawEvent.eventType) {
     case "issue_comment":
       return {
+        ...(actorAvatarUrl === null ? {} : { actorAvatarUrl }),
         commentId: readOptionalInteger(payload.id),
         bodyText: readOptionalString(payload.body),
         url: readOptionalString(payload.html_url),
       };
     case "pull_request_review":
       return {
+        ...(actorAvatarUrl === null ? {} : { actorAvatarUrl }),
         reviewId: readOptionalInteger(payload.id),
         reviewState: normalizeReviewState(readOptionalString(payload.state)),
         bodyText: readOptionalString(payload.body),
@@ -203,6 +208,7 @@ function buildNormalizedPayload(
       };
     case "pull_request_review_comment":
       return {
+        ...(actorAvatarUrl === null ? {} : { actorAvatarUrl }),
         commentId: readOptionalInteger(payload.id),
         reviewId: readOptionalInteger(payload.pull_request_review_id),
         inReplyToCommentId: readOptionalInteger(payload.in_reply_to_id),
@@ -212,12 +218,13 @@ function buildNormalizedPayload(
       };
     case "committed":
       return {
+        ...(actorAvatarUrl === null ? {} : { actorAvatarUrl }),
         commitSha: readOptionalString(payload.sha),
         messageHeadline: readCommitMessageHeadline(payload),
         url: readOptionalString(payload.html_url),
       };
     default:
-      return undefined;
+      return actorAvatarUrl === null ? undefined : { actorAvatarUrl };
   }
 }
 
@@ -358,15 +365,46 @@ function parseWorkflowRunSnapshot(rawEvent: RawEventRecord): WorkflowRunSnapshot
     status: readRequiredNormalizedString(payload.status, rawEvent, "workflow run.status"),
     conclusion: readOptionalNormalizedString(payload.conclusion),
     actorType: readActorType(payload),
+    actorAvatarUrl: readActorAvatarUrl(rawEvent, payload),
     name: readOptionalString(payload.name),
     url: readOptionalString(payload.html_url),
   };
+}
+
+function readActorAvatarUrl(
+  rawEvent: RawEventRecord,
+  payload: Record<string, unknown>,
+): string | null {
+  switch (rawEvent.eventType) {
+    case "issue_comment":
+    case "pull_request_review":
+    case "pull_request_review_comment":
+      return readAvatarUrlFromActorRecord(readOptionalRecord(payload.user));
+    case "workflow_run":
+      return readAvatarUrlFromActorRecord(readOptionalRecord(payload.actor));
+    case "committed":
+      return (
+        readAvatarUrlFromActorRecord(readOptionalRecord(payload.committer)) ??
+        readAvatarUrlFromActorRecord(readOptionalRecord(payload.author))
+      );
+    default:
+      return readAvatarUrlFromActorRecord(readOptionalRecord(payload.actor));
+  }
+}
+
+function readAvatarUrlFromActorRecord(actor: Record<string, unknown> | null): string | null {
+  if (actor === null) {
+    return null;
+  }
+
+  return readOptionalString(actor.avatar_url);
 }
 
 function buildCiOutcomePayload(
   workflowRun: WorkflowRunSnapshot,
 ): Record<string, number | string | null> {
   return {
+    ...(workflowRun.actorAvatarUrl === null ? {} : { actorAvatarUrl: workflowRun.actorAvatarUrl }),
     headSha: workflowRun.headSha,
     workflowRunId: workflowRun.workflowRunId,
     workflowName: workflowRun.name,

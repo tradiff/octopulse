@@ -101,6 +101,7 @@ export async function trackPullRequestByUrl<TClient>(
         number: pullRequest.number,
         url: pullRequest.url,
         authorLogin: pullRequest.authorLogin,
+        authorAvatarUrl: pullRequest.authorAvatarUrl,
         title: pullRequest.title,
         state: pullRequest.state,
         isDraft: pullRequest.isDraft,

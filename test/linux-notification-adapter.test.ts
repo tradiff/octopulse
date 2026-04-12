@@ -101,15 +101,40 @@ describe("LinuxNotificationAdapter", () => {
     ).rejects.toThrowError("Notification failed: Error: notification daemon unavailable");
   });
 
-  it("uses legacy markup body when notification server supports it", async () => {
-    freedesktopMocks.getCapabilities.mockResolvedValue(["body-markup"]);
+  it("uses markup body when notification server supports it", async () => {
+    const avatarCache = {
+      resolveAvatarFileUri: vi
+        .fn()
+        .mockResolvedValueOnce("file:///tmp/octocat.png")
+        .mockResolvedValueOnce("file:///tmp/alice.png"),
+    };
+    freedesktopMocks.getCapabilities.mockResolvedValue(["body-markup", "body-images"]);
 
-    const adapter = new LinuxNotificationAdapter();
+    const adapter = new LinuxNotificationAdapter({ avatarCache });
 
     await expect(
       adapter.dispatchNotification({
         title: "acme/octopulse #7 Add notifications",
         body: "alice: ✅ LGTM\n\nCI failed",
+        markup: {
+          headerText: "[octopulse] Add notifications (open)",
+          headerAvatarKey: "octocat",
+          headerAvatarUrl: "https://avatars.example.test/octocat.png",
+          paragraphs: [
+            {
+              actorLogin: "alice",
+              actorAvatarKey: "alice",
+              actorAvatarUrl: "https://avatars.example.test/alice.png",
+              text: "✅ LGTM",
+            },
+            {
+              actorLogin: null,
+              actorAvatarKey: null,
+              actorAvatarUrl: null,
+              text: "CI failed",
+            },
+          ],
+        },
       }),
     ).resolves.toEqual({
       openedClickUrl: false,
@@ -118,7 +143,8 @@ describe("LinuxNotificationAdapter", () => {
     expect(freedesktopMocks.Notification).toHaveBeenCalledWith({
       appName: "Octopulse",
       summary: "",
-      body: "<b>acme/octopulse #7 Add notifications</b>\n\n<b>alice</b> ✅ LGTM\n\nCI failed",
+      body:
+        '<img src="file:///tmp/octocat.png"/> [octopulse] Add notifications (open)\n<b> </b>\n<img src="file:///tmp/alice.png"/> <b>alice</b> ✅ LGTM\n\nCI failed',
       actions: {},
     });
   });
@@ -139,6 +165,45 @@ describe("LinuxNotificationAdapter", () => {
       appName: "Octopulse",
       summary: "acme/octopulse #7 Add notifications",
       body: "alice: ✅ LGTM",
+      actions: {},
+    });
+  });
+
+  it("uses markup without images when body-images capability is absent", async () => {
+    freedesktopMocks.getCapabilities.mockResolvedValue(["body-markup"]);
+
+    const adapter = new LinuxNotificationAdapter({
+      avatarCache: {
+        resolveAvatarFileUri: vi.fn(),
+      },
+    });
+
+    await expect(
+      adapter.dispatchNotification({
+        title: "acme/octopulse #7 Add notifications",
+        body: "alice: ✅ LGTM",
+        markup: {
+          headerText: "[octopulse] Add notifications (open)",
+          headerAvatarKey: "octocat",
+          headerAvatarUrl: "https://avatars.example.test/octocat.png",
+          paragraphs: [
+            {
+              actorLogin: "alice",
+              actorAvatarKey: "alice",
+              actorAvatarUrl: "https://avatars.example.test/alice.png",
+              text: "✅ LGTM",
+            },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      openedClickUrl: false,
+    });
+
+    expect(freedesktopMocks.Notification).toHaveBeenCalledWith({
+      appName: "Octopulse",
+      summary: "",
+      body: "[octopulse] Add notifications (open)\n<b> </b>\n<b>alice</b> ✅ LGTM",
       actions: {},
     });
   });

@@ -8,9 +8,28 @@ export interface RenderedNotification {
   summary: string;
 }
 
+export interface NotificationMarkup {
+  headerText: string;
+  headerAvatarKey: string;
+  headerAvatarUrl: string | null;
+  paragraphs: readonly NotificationMarkupParagraph[];
+}
+
+export interface NotificationMarkupParagraph {
+  actorLogin: string | null;
+  actorAvatarKey: string | null;
+  actorAvatarUrl: string | null;
+  text: string;
+}
+
 type NotificationPullRequest = Pick<
   PullRequestRecord,
   "repositoryOwner" | "repositoryName" | "number" | "title" | "url"
+>;
+
+type NotificationMarkupPullRequest = Pick<
+  PullRequestRecord,
+  "repositoryName" | "title" | "authorLogin" | "authorAvatarUrl" | "state" | "isDraft" | "mergedAt"
 >;
 
 type NotificationEvent = Pick<
@@ -43,6 +62,27 @@ export function renderNotification(
     body: renderNotificationBody(events),
     clickUrl: pullRequest.url,
     summary,
+  };
+}
+
+export function renderNotificationMarkup(
+  pullRequest: NotificationMarkupPullRequest,
+  events: readonly NotificationEvent[],
+): NotificationMarkup {
+  if (events.length === 0) {
+    throw new Error("Cannot render notification markup without events");
+  }
+
+  return {
+    headerText: `[${pullRequest.repositoryName}] ${pullRequest.title} (${renderMarkupPullRequestState(pullRequest)})`,
+    headerAvatarKey: pullRequest.authorLogin,
+    headerAvatarUrl: pullRequest.authorAvatarUrl,
+    paragraphs: events.map((event) => ({
+      actorLogin: event.actorLogin,
+      actorAvatarKey: event.actorLogin,
+      actorAvatarUrl: readEventActorAvatarUrl(event),
+      text: renderEventText(event),
+    })),
   };
 }
 
@@ -144,33 +184,37 @@ function appendCount(parts: string[], count: number, label: string): void {
 }
 
 function renderNotificationBody(events: readonly NotificationEvent[]): string {
-  return events.map((event) => renderEventLine(event)).join("\n\n");
+  return events.map((event) => renderPlainEventLine(event)).join("\n\n");
 }
 
-function renderEventLine(event: NotificationEvent): string {
+function renderPlainEventLine(event: NotificationEvent): string {
   const actorPrefix = event.actorLogin === null ? "" : `${event.actorLogin}: `;
 
+  return `${actorPrefix}${renderEventText(event)}`.trim();
+}
+
+function renderEventText(event: NotificationEvent): string {
   switch (event.eventType) {
     case "issue_comment":
     case "review_inline_comment":
     case "review_submitted":
-      return `${actorPrefix}${renderEmojiText("💬", readEventText(event) ?? renderEventFallbackText(event))}`.trim();
+      return renderEmojiText("💬", readEventText(event) ?? renderEventFallbackText(event));
     case "review_approved":
-      return `${actorPrefix}${renderEmojiText("✅", readEventText(event) ?? "approved")}`.trim();
+      return renderEmojiText("✅", readEventText(event) ?? "approved");
     case "review_changes_requested":
-      return `${actorPrefix}${renderEmojiText("❗", readEventText(event) ?? "changes requested")}`.trim();
+      return renderEmojiText("❗", readEventText(event) ?? "changes requested");
     case "pr_merged":
     case "pr_closed":
     case "pr_reopened":
     case "ready_for_review":
     case "converted_to_draft":
     case "commit_pushed":
-      return `${actorPrefix}${renderEventFallbackText(event)}`.trim();
+      return renderEventFallbackText(event);
     case "ci_failed":
     case "ci_succeeded":
       return renderEventFallbackText(event);
     default:
-      return `${actorPrefix}${renderEventFallbackText(event)}`.trim();
+      return renderEventFallbackText(event);
   }
 }
 
@@ -201,6 +245,27 @@ function readEventText(event: NotificationEvent): string | null {
   }
 
   return `${normalizedText.slice(0, MAX_EVENT_TEXT_LENGTH - 3).trimEnd()}...`;
+}
+
+function readEventActorAvatarUrl(event: NotificationEvent): string | null {
+  const payload = parsePayload(event.payloadJson);
+  const actorAvatarUrl = payload?.actorAvatarUrl;
+
+  return typeof actorAvatarUrl === "string" && actorAvatarUrl.length > 0 ? actorAvatarUrl : null;
+}
+
+function renderMarkupPullRequestState(
+  pullRequest: Pick<PullRequestRecord, "state" | "isDraft" | "mergedAt">,
+): string {
+  if (pullRequest.mergedAt !== null) {
+    return "merged";
+  }
+
+  if (pullRequest.isDraft) {
+    return "draft";
+  }
+
+  return pullRequest.state;
 }
 
 function parsePayload(payloadJson: string): Record<string, unknown> | null {

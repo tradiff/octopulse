@@ -10,6 +10,7 @@ export interface PullRequestRecord {
   number: number;
   url: string;
   authorLogin: string;
+  authorAvatarUrl: string | null;
   title: string;
   state: string;
   isDraft: boolean;
@@ -38,6 +39,7 @@ export interface UpsertPullRequestInput {
   number: number;
   url: string;
   authorLogin: string;
+  authorAvatarUrl?: string | null;
   title: string;
   state: string;
   isDraft: boolean;
@@ -92,6 +94,7 @@ export class PullRequestRepository {
                     number = ?,
                     url = ?,
                     author_login = ?,
+                    author_avatar_url = ?,
                     title = ?,
                     state = ?,
                     is_draft = ?,
@@ -114,6 +117,7 @@ export class PullRequestRepository {
               input.number,
               input.url,
               input.authorLogin,
+              resolveNullableField(input.authorAvatarUrl, existing.authorAvatarUrl),
               input.title,
               input.state,
               writeBoolean(input.isDraft),
@@ -141,6 +145,7 @@ export class PullRequestRepository {
                 number,
                 url,
                 author_login,
+                author_avatar_url,
                 title,
                 state,
                 is_draft,
@@ -152,7 +157,7 @@ export class PullRequestRepository {
                 merged_at,
                 grace_until,
                 last_seen_head_sha
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
           )
           .run(
@@ -162,6 +167,7 @@ export class PullRequestRepository {
             input.number,
             input.url,
             input.authorLogin,
+            input.authorAvatarUrl ?? null,
             input.title,
             input.state,
             writeBoolean(input.isDraft),
@@ -362,6 +368,7 @@ function mapPullRequestRow(row: unknown): PullRequestRecord {
     number: readInteger(value.number, "PullRequest.number"),
     url: readString(value.url, "PullRequest.url"),
     authorLogin: readString(value.author_login, "PullRequest.author_login"),
+    authorAvatarUrl: readNullableString(value.author_avatar_url, "PullRequest.author_avatar_url"),
     title: readString(value.title, "PullRequest.title"),
     state: readString(value.state, "PullRequest.state"),
     isDraft: readBoolean(value.is_draft, "PullRequest.is_draft"),

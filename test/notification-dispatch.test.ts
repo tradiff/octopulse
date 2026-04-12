@@ -41,6 +41,7 @@ describe("dispatchPullRequestNotifications", () => {
         actorClass: "human_other",
         decisionState: "notified",
         notificationTiming: "immediate",
+        payloadJson: JSON.stringify({ actorAvatarUrl: "https://avatars.example.test/alice.png" }),
         occurredAt: "2026-04-10T12:00:00.000Z",
       });
       normalizedEventRepository.insertNormalizedEvent({
@@ -49,6 +50,7 @@ describe("dispatchPullRequestNotifications", () => {
         actorLogin: "bob",
         actorClass: "human_other",
         decisionState: "notified",
+        payloadJson: JSON.stringify({ actorAvatarUrl: "https://avatars.example.test/bob.png" }),
         occurredAt: "2026-04-10T12:01:00.000Z",
       });
 
@@ -72,16 +74,24 @@ describe("dispatchPullRequestNotifications", () => {
       });
 
       expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(2);
-      expect(notificationDispatcher.dispatchNotification).toHaveBeenNthCalledWith(1, {
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenNthCalledWith(1, expect.objectContaining({
         title: "acme/octopulse #7 Add notifications",
         body: "alice: ✅ approved",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
-      });
-      expect(notificationDispatcher.dispatchNotification).toHaveBeenNthCalledWith(2, {
+        markup: expect.objectContaining({
+          headerText: "[octopulse] Add notifications (open)",
+          headerAvatarUrl: "https://avatars.example.test/octocat.png",
+        }),
+      }));
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenNthCalledWith(2, expect.objectContaining({
         title: "acme/octopulse #7 Add notifications",
         body: "bob: 💬 commented",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
-      });
+        markup: expect.objectContaining({
+          headerText: "[octopulse] Add notifications (open)",
+          headerAvatarUrl: "https://avatars.example.test/octocat.png",
+        }),
+      }));
       expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest.id)).toEqual([
         expect.objectContaining({
           deliveryStatus: "sent",
@@ -115,6 +125,7 @@ describe("dispatchPullRequestNotifications", () => {
         actorClass: "human_other",
         decisionState: "notified",
         notificationTiming: "immediate",
+        payloadJson: JSON.stringify({ actorAvatarUrl: "https://avatars.example.test/alice.png" }),
         occurredAt: "2026-04-10T12:00:00.000Z",
       });
 
@@ -218,6 +229,7 @@ function createPullRequestInput(
     number: 7,
     url: "https://github.com/acme/octopulse/pull/7",
     authorLogin: "octocat",
+    authorAvatarUrl: "https://avatars.example.test/octocat.png",
     title: "Add notifications",
     state: "open",
     isDraft: false,

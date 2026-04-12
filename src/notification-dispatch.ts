@@ -5,9 +5,11 @@ import {
   type LinuxNotification,
 } from "./linux-notification-adapter.js";
 import { getLogger } from "./logger.js";
+import { NormalizedEventRepository, type NormalizedEventRecord } from "./normalized-event-repository.js";
 import { preparePullRequestNotifications } from "./notification-preparation.js";
-import { NotificationRecordRepository } from "./notification-record-repository.js";
-import type { PullRequestRecord } from "./pull-request-repository.js";
+import { NotificationRecordRepository, type NotificationRecord } from "./notification-record-repository.js";
+import { renderNotificationMarkup } from "./notification-rendering.js";
+import { PullRequestRepository, type PullRequestRecord } from "./pull-request-repository.js";
 
 export interface NotificationDispatcher {
   dispatchNotification(notification: LinuxNotification): Promise<unknown>;
@@ -40,16 +42,14 @@ export class NotificationDispatchError extends Error {
 
 export async function dispatchPullRequestNotifications(
   database: DatabaseSync,
-  pullRequest: Pick<
-    PullRequestRecord,
-    "id" | "repositoryOwner" | "repositoryName" | "number" | "title" | "url"
-  >,
+  pullRequest: PullRequestRecord,
   options: DispatchPullRequestNotificationsOptions = {},
 ): Promise<DispatchPullRequestNotificationsResult> {
   const dispatchedAt = options.dispatchedAt ?? new Date().toISOString();
   const notificationDispatcher = options.notificationDispatcher ?? new LinuxNotificationAdapter();
   const notificationRecordRepository =
     options.notificationRecordRepository ?? new NotificationRecordRepository(database);
+  const normalizedEventRepository = new NormalizedEventRepository(database);
   const onError = options.onError ?? logNotificationDispatchError;
   const preparation = preparePullRequestNotifications(database, pullRequest);
 
@@ -60,11 +60,9 @@ export async function dispatchPullRequestNotifications(
     pullRequest.id,
   )) {
     try {
-      await notificationDispatcher.dispatchNotification({
-        title: record.title,
-        body: record.body,
-        clickUrl: record.clickUrl,
-      });
+      await notificationDispatcher.dispatchNotification(
+        buildDispatchNotification(pullRequest, record, normalizedEventRepository),
+      );
       notificationRecordRepository.updateNotificationRecordDelivery(record.id, {
         deliveryStatus: "sent",
         deliveredAt: dispatchedAt,
@@ -125,6 +123,8 @@ export async function resendNotificationRecord(
   const notificationDispatcher = options.notificationDispatcher ?? new LinuxNotificationAdapter();
   const notificationRecordRepository =
     options.notificationRecordRepository ?? new NotificationRecordRepository(database);
+  const normalizedEventRepository = new NormalizedEventRepository(database);
+  const pullRequestRepository = new PullRequestRepository(database);
   const onError = options.onError ?? logNotificationDispatchError;
 
   const record = notificationRecordRepository.getNotificationRecordById(options.notificationRecordId);
@@ -138,11 +138,17 @@ export async function resendNotificationRecord(
   notificationRecordRepository.resetNotificationRecordDelivery(record.id);
 
   try {
-    await notificationDispatcher.dispatchNotification({
-      title: record.title,
-      body: record.body,
-      clickUrl: record.clickUrl,
-    });
+    const pullRequest = pullRequestRepository.getPullRequestById(record.pullRequestId);
+
+    if (!pullRequest) {
+      throw new NotificationDispatchError(
+        `Pull request ${record.pullRequestId} not found for notification record ${record.id}`,
+      );
+    }
+
+    await notificationDispatcher.dispatchNotification(
+      buildDispatchNotification(pullRequest, record, normalizedEventRepository),
+    );
     notificationRecordRepository.updateNotificationRecordDelivery(record.id, {
       deliveryStatus: "sent",
       deliveredAt: dispatchedAt,
@@ -160,6 +166,43 @@ export async function resendNotificationRecord(
     );
     throw error;
   }
+}
+
+function buildDispatchNotification(
+  pullRequest: PullRequestRecord,
+  record: NotificationRecord,
+  normalizedEventRepository: Pick<
+    NormalizedEventRepository,
+    "getNormalizedEventById" | "listNormalizedEventsForBundle"
+  >,
+): LinuxNotification {
+  const events = resolveNotificationEvents(record, normalizedEventRepository);
+
+  return {
+    title: record.title,
+    body: record.body,
+    clickUrl: record.clickUrl,
+    ...(events === null || events.length === 0 ? {} : { markup: renderNotificationMarkup(pullRequest, events) }),
+  };
+}
+
+function resolveNotificationEvents(
+  record: NotificationRecord,
+  normalizedEventRepository: Pick<
+    NormalizedEventRepository,
+    "getNormalizedEventById" | "listNormalizedEventsForBundle"
+  >,
+): NormalizedEventRecord[] | null {
+  if (record.normalizedEventId !== null) {
+    const event = normalizedEventRepository.getNormalizedEventById(record.normalizedEventId);
+    return event === null ? null : [event];
+  }
+
+  if (record.eventBundleId !== null) {
+    return normalizedEventRepository.listNormalizedEventsForBundle(record.eventBundleId);
+  }
+
+  return null;
 }
 
 function formatPullRequestLabel(

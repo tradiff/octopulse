@@ -23,6 +23,7 @@ export interface DiscoveredPullRequest extends PullRequestCoordinates {
   githubPullRequestId: number;
   url: string;
   authorLogin: string;
+  authorAvatarUrl: string | null;
   title: string;
   state: string;
   isDraft: boolean;
@@ -217,6 +218,7 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
         number: pullRequest.number,
         url: pullRequest.url,
         authorLogin: pullRequest.authorLogin,
+        authorAvatarUrl: pullRequest.authorAvatarUrl,
         title: pullRequest.title,
         state: pullRequest.state,
         isDraft: pullRequest.isDraft,
@@ -353,6 +355,7 @@ function mapPullRequestDetail(
     number,
     url: readString(value.html_url, "pull request response.html_url"),
     authorLogin: readString(user.login, "pull request response.user.login"),
+    authorAvatarUrl: readNullableString(user.avatar_url, "pull request response.user.avatar_url"),
     title: readString(value.title, "pull request response.title"),
     state: readString(value.state, "pull request response.state"),
     isDraft: readBoolean(value.draft, "pull request response.draft"),

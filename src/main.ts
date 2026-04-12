@@ -92,7 +92,7 @@ async function main(): Promise<void> {
           pullRequestRepository,
         }),
       resendNotificationRecord: (notificationRecordId: number) =>
-        resendNotificationRecord(currentDatabase, { notificationRecordId }),
+        resendNotificationRecord(currentDatabase, { notificationRecordId, notificationDispatcher }),
     });
     recurringDiscovery = startRecurringAuthoredPullRequestDiscovery(currentDatabase, githubAuth, {
       intervalMs: config.timings.discoveryPollMs,

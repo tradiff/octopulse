@@ -1,10 +1,14 @@
 import freedesktopNotifications from "freedesktop-notifications";
 import { spawn } from "node:child_process";
 
+import { FileAvatarCache, type AvatarImageCache } from "./avatar-cache.js";
+import type { NotificationMarkup } from "./notification-rendering.js";
+
 export interface LinuxNotification {
   title: string;
   body: string;
   clickUrl?: string | null;
+  markup?: NotificationMarkup;
 }
 
 export interface LinuxNotificationDispatchResult {
@@ -15,6 +19,8 @@ export interface LinuxNotificationAdapterOptions {
   dispatchNotification?: (
     notification: LinuxNotification,
   ) => Promise<LinuxNotificationDispatchResult>;
+  avatarCache?: AvatarImageCache;
+  avatarCacheDirPath?: string;
 }
 
 export class LinuxNotificationAdapterError extends Error {
@@ -28,9 +34,15 @@ export class LinuxNotificationAdapter {
   private readonly dispatchNotificationImpl: (
     notification: LinuxNotification,
   ) => Promise<LinuxNotificationDispatchResult>;
+  private readonly avatarCache: AvatarImageCache;
   private capabilitiesPromise: Promise<readonly string[]> | null = null;
 
   constructor(options: LinuxNotificationAdapterOptions = {}) {
+    this.avatarCache = options.avatarCache ?? new FileAvatarCache(
+      options.avatarCacheDirPath === undefined
+        ? {}
+        : { cacheDirPath: options.avatarCacheDirPath },
+    );
     this.dispatchNotificationImpl =
       options.dispatchNotification ?? this.defaultDispatch.bind(this);
   }
@@ -112,7 +124,9 @@ export class LinuxNotificationAdapter {
     summary: string;
     body: string;
   }> {
-    if (!(await this.serverSupportsBodyMarkup())) {
+    const capabilities = await this.readServerCapabilities();
+
+    if (!capabilities.includes("body-markup") || notification.markup === undefined) {
       return {
         summary: notification.title,
         body: notification.body,
@@ -121,43 +135,91 @@ export class LinuxNotificationAdapter {
 
     return {
       summary: "",
-      body: buildLegacyMarkupBody(notification),
+      body: await buildMarkupBody(notification.markup, {
+        avatarCache: this.avatarCache,
+        supportsImages: capabilities.includes("body-images"),
+      }),
     };
   }
 
-  private async serverSupportsBodyMarkup(): Promise<boolean> {
+  private async readServerCapabilities(): Promise<readonly string[]> {
     if (this.capabilitiesPromise === null) {
       this.capabilitiesPromise = freedesktopNotifications.getCapabilities().catch(() => []);
     }
 
-    return (await this.capabilitiesPromise).includes("body-markup");
+    return this.capabilitiesPromise;
   }
 }
 
-function buildLegacyMarkupBody(notification: LinuxNotification): string {
-  const bodyParagraphs = notification.body
-    .split(/\n\n+/)
-    .map((paragraph) => paragraph.trim())
-    .filter((paragraph) => paragraph.length > 0)
-    .map((paragraph) => formatLegacyParagraph(paragraph));
-  const titleParagraph = notification.title.trim().length > 0
-    ? [`<b>${escapeMarkup(notification.title)}</b>`]
-    : [];
+async function buildMarkupBody(
+  markup: NotificationMarkup,
+  options: { avatarCache: AvatarImageCache; supportsImages: boolean },
+): Promise<string> {
+  const headerImage = await resolveAvatarImage(
+    options.avatarCache,
+    options.supportsImages,
+    markup.headerAvatarKey,
+    markup.headerAvatarUrl,
+  );
+  const renderedParagraphs = await Promise.all(
+    markup.paragraphs.map(async (paragraph) => {
+      const image = await resolveAvatarImage(
+        options.avatarCache,
+        options.supportsImages,
+        paragraph.actorAvatarKey,
+        paragraph.actorAvatarUrl,
+      );
 
-  return [...titleParagraph, ...bodyParagraphs].join("\n\n");
+      return formatMarkupParagraph({
+        image,
+        actorLogin: paragraph.actorLogin,
+        text: paragraph.text,
+      });
+    }),
+  );
+
+  return [
+    formatMarkupHeader(markup.headerText, headerImage),
+    "<b> </b>",
+    renderedParagraphs.join("\n\n"),
+  ].join("\n");
 }
 
-function formatLegacyParagraph(paragraph: string): string {
-  const actorMatch = /^(.*?):\s(.+)$/.exec(paragraph);
-
-  if (actorMatch === null) {
-    return escapeMarkup(paragraph);
+async function resolveAvatarImage(
+  avatarCache: AvatarImageCache,
+  supportsImages: boolean,
+  key: string | null,
+  avatarUrl: string | null,
+): Promise<string | null> {
+  if (!supportsImages || key === null || avatarUrl === null) {
+    return null;
   }
 
-  const actor = actorMatch[1]!;
-  const rest = actorMatch[2]!;
+  try {
+    return await avatarCache.resolveAvatarFileUri({ key, avatarUrl });
+  } catch {
+    return null;
+  }
+}
 
-  return `<b>${escapeMarkup(actor)}</b> ${escapeMarkup(rest)}`;
+function formatMarkupHeader(headerText: string, image: string | null): string {
+  return image === null
+    ? escapeMarkup(headerText)
+    : `<img src="${escapeMarkup(image)}"/> ${escapeMarkup(headerText)}`;
+}
+
+function formatMarkupParagraph(input: {
+  image: string | null;
+  actorLogin: string | null;
+  text: string;
+}): string {
+  const imagePrefix = input.image === null ? "" : `<img src="${escapeMarkup(input.image)}"/> `;
+
+  if (input.actorLogin === null) {
+    return `${imagePrefix}${escapeMarkup(input.text)}`;
+  }
+
+  return `${imagePrefix}<b>${escapeMarkup(input.actorLogin)}</b> ${escapeMarkup(input.text)}`;
 }
 
 function escapeMarkup(value: string): string {

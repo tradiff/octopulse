@@ -211,6 +211,7 @@ function createPullRequestResponseRecord(
     number: number;
     url: string;
     authorLogin: string;
+    authorAvatarUrl: string | null;
     title: string;
     state: string;
     isDraft: boolean;
@@ -234,6 +235,7 @@ function createPullRequestResponseRecord(
     number: 7,
     url: "https://github.com/acme/octopulse/pull/7",
     authorLogin: "octocat",
+    authorAvatarUrl: "https://avatars.example.test/octocat.png",
     title: "Add pull request polling",
     state: "open",
     isDraft: false,

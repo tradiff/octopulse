@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { renderNotification } from "../src/notification-rendering.js";
+import {
+  renderNotificationMarkup,
+  renderNotification,
+} from "../src/notification-rendering.js";
 
 describe("renderNotification", () => {
   it("renders repo, PR number, actor name, and click url for immediate notifications", () => {
@@ -99,6 +102,61 @@ describe("renderNotification", () => {
       ),
     ).toMatchObject({
       body: expect.stringContaining("alice: 💬 This comment is intentionally very long so notification renderer must truncate it before sending"),
+    });
+  });
+
+  it("renders notification markup model with header avatar and actor avatars", () => {
+    expect(
+      renderNotificationMarkup(
+        {
+          repositoryName: "octopulse",
+          title: "Ship notifications",
+          authorLogin: "octocat",
+          authorAvatarUrl: "https://avatars.example.test/octocat.png",
+          state: "open",
+          isDraft: false,
+          mergedAt: null,
+        },
+        [
+          {
+            id: 401,
+            eventType: "review_approved",
+            actorLogin: "alice",
+            occurredAt: "2026-04-10T12:00:00.000Z",
+            payloadJson: JSON.stringify({
+              bodyText: "LGTM",
+              actorAvatarUrl: "https://avatars.example.test/alice.png",
+            }),
+          },
+          {
+            id: 402,
+            eventType: "ci_failed",
+            actorLogin: "github-actions[bot]",
+            occurredAt: "2026-04-10T12:00:30.000Z",
+            payloadJson: JSON.stringify({
+              actorAvatarUrl: "https://avatars.example.test/actions.png",
+            }),
+          },
+        ],
+      ),
+    ).toEqual({
+      headerText: "[octopulse] Ship notifications (open)",
+      headerAvatarKey: "octocat",
+      headerAvatarUrl: "https://avatars.example.test/octocat.png",
+      paragraphs: [
+        {
+          actorLogin: "alice",
+          actorAvatarKey: "alice",
+          actorAvatarUrl: "https://avatars.example.test/alice.png",
+          text: "✅ LGTM",
+        },
+        {
+          actorLogin: "github-actions[bot]",
+          actorAvatarKey: "github-actions[bot]",
+          actorAvatarUrl: "https://avatars.example.test/actions.png",
+          text: "CI failed",
+        },
+      ],
     });
   });
 });
