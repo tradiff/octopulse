@@ -144,6 +144,18 @@ describe("pollTrackedPullRequests", () => {
     const normalizedEventRepository = new NormalizedEventRepository(database);
     const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
       switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          expect(parameters).toMatchObject({
+            owner: "acme",
+            repo: "octopulse",
+            pull_number: 7,
+          });
+
+          return createPullRequestDetailResponse({
+            etag: 'W/"acme-octopulse-7-v1"',
+            title: "Refresh pull request polling",
+            headSha: "def456",
+          });
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
@@ -190,7 +202,7 @@ describe("pollTrackedPullRequests", () => {
           expect(parameters).toMatchObject({
             owner: "acme",
             repo: "octopulse",
-            head_sha: "abc123",
+            head_sha: "def456",
           });
 
           return {
@@ -201,7 +213,7 @@ describe("pollTrackedPullRequests", () => {
                   id: 8501,
                   actorLogin: "octocat",
                   actorType: "User",
-                  headSha: "abc123",
+                  headSha: "def456",
                   status: "completed",
                   conclusion: "failure",
                   updatedAt: "2026-04-10T12:05:00.000Z",
@@ -210,7 +222,7 @@ describe("pollTrackedPullRequests", () => {
                   id: 8502,
                   actorLogin: "octocat",
                   actorType: "User",
-                  headSha: "abc123",
+                  headSha: "def456",
                   status: "completed",
                   conclusion: "success",
                   updatedAt: "2026-04-10T12:06:00.000Z",
@@ -246,13 +258,13 @@ describe("pollTrackedPullRequests", () => {
         failedCount: 0,
       });
 
-      expect(request).toHaveBeenCalledTimes(5);
+      expect(request).toHaveBeenCalledTimes(6);
       expect(request).toHaveBeenCalledWith(
         "GET /repos/{owner}/{repo}/actions/runs",
         expect.objectContaining({
           owner: "acme",
           repo: "octopulse",
-          head_sha: "abc123",
+          head_sha: "def456",
           page: 1,
           per_page: 100,
         }),
@@ -261,6 +273,13 @@ describe("pollTrackedPullRequests", () => {
       const pullRequest = repository.listTrackedPullRequests()[0];
 
       expect(pullRequest).toBeDefined();
+      expect(pullRequest).toMatchObject({
+        title: "Refresh pull request polling",
+        lastSeenHeadSha: "def456",
+      });
+      expect(readPullRequestDetailEtag(database, pullRequest?.id ?? -1)).toBe(
+        'W/"acme-octopulse-7-v1"',
+      );
       expect(
         rawEventRepository.listRawEventsForPullRequest(pullRequest?.id ?? -1).map((rawEvent) => ({
           source: rawEvent.source,
@@ -345,12 +364,123 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
+  it("skips unchanged comment and review fanout when pull request detail is not modified", async () => {
+    const { database, repository } = createRepository();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          expect(parameters).toMatchObject({
+            owner: "acme",
+            repo: "octopulse",
+            pull_number: 7,
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-v1"',
+            }),
+          });
+
+          throw createGitHubNotModifiedError('W/"acme-octopulse-7-v1"');
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          expect(parameters).toMatchObject({
+            owner: "acme",
+            repo: "octopulse",
+            head_sha: "abc123",
+          });
+
+          return {
+            data: {
+              total_count: 1,
+              workflow_runs: [
+                createWorkflowRunFixture({
+                  id: 8501,
+                  actorLogin: "octocat",
+                  actorType: "User",
+                  headSha: "abc123",
+                  status: "completed",
+                  conclusion: "success",
+                  updatedAt: "2026-04-10T12:05:00.000Z",
+                }),
+              ],
+            },
+          };
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      const pullRequest = repository.upsertPullRequest(createPullRequestInput());
+      writePullRequestDetailEtag(database, pullRequest.id, 'W/"acme-octopulse-7-v1"');
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {
+              request,
+            },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      const refreshedPullRequest = repository.listTrackedPullRequests()[0];
+
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(refreshedPullRequest).toBeDefined();
+      expect(readPullRequestDetailEtag(database, refreshedPullRequest?.id ?? -1)).toBe(
+        'W/"acme-octopulse-7-v1"',
+      );
+      expect(
+        rawEventRepository.listRawEventsForPullRequest(refreshedPullRequest?.id ?? -1).map((rawEvent) => ({
+          source: rawEvent.source,
+          sourceId: rawEvent.sourceId,
+          eventType: rawEvent.eventType,
+        })),
+      ).toEqual([
+        {
+          source: "github_actions_workflow_run",
+          sourceId: "8501:2026-04-10T12:05:00.000Z",
+          eventType: "workflow_run",
+        },
+      ]);
+      expect(
+        normalizedEventRepository
+          .listNormalizedEventsForPullRequest(refreshedPullRequest?.id ?? -1)
+          .map((event) => ({
+            eventType: event.eventType,
+            actorLogin: event.actorLogin,
+            actorClass: event.actorClass,
+          })),
+      ).toEqual([
+        {
+          eventType: "ci_succeeded",
+          actorLogin: "octocat",
+          actorClass: "self",
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("marks bot comments for fallback notify when no OpenAI classifier is configured", async () => {
     const { database, repository } = createRepository();
     const eventBundleRepository = new EventBundleRepository(database);
     const normalizedEventRepository = new NormalizedEventRepository(database);
     const request = vi.fn(async (route: string) => {
       switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          return createPullRequestDetailResponse();
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
@@ -433,14 +563,24 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
-  it("keeps repeated polling idempotent and reuses comment fetch cursors", async () => {
+  it("reuses comment fetch cursors when pull request detail changes", async () => {
     const { database, repository } = createRepository();
     const rawEventRepository = new RawEventRepository(database);
     const normalizedEventRepository = new NormalizedEventRepository(database);
     const issueCommentSinceValues: Array<string | undefined> = [];
     const reviewCommentSinceValues: Array<string | undefined> = [];
+    let pullRequestDetailRequestCount = 0;
     const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
       switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          pullRequestDetailRequestCount += 1;
+
+          return createPullRequestDetailResponse({
+            etag:
+              pullRequestDetailRequestCount === 1
+                ? 'W/"acme-octopulse-7-v1"'
+                : 'W/"acme-octopulse-7-v2"',
+          });
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments": {
           const since = typeof parameters?.since === "string" ? parameters.since : undefined;
           issueCommentSinceValues.push(since);
@@ -570,10 +710,14 @@ describe("pollTrackedPullRequests", () => {
         undefined,
         "2026-04-10T12:13:00.000Z",
       ]);
+      expect(pullRequestDetailRequestCount).toBe(2);
 
       const pullRequest = repository.listTrackedPullRequests()[0];
 
       expect(pullRequest).toBeDefined();
+      expect(readPullRequestDetailEtag(database, pullRequest?.id ?? -1)).toBe(
+        'W/"acme-octopulse-7-v2"',
+      );
       expect(
         rawEventRepository.listRawEventsForPullRequest(pullRequest?.id ?? -1).map((rawEvent) => ({
           source: rawEvent.source,
@@ -653,6 +797,8 @@ describe("pollTrackedPullRequests", () => {
     const eventBundleRepository = new EventBundleRepository(database);
     const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
       switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          return createPullRequestDetailResponse();
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
@@ -796,6 +942,8 @@ describe("pollTrackedPullRequests", () => {
     );
     const request = vi.fn(async (route: string) => {
       switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          return createPullRequestDetailResponse();
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
@@ -943,6 +1091,10 @@ describe("pollTrackedPullRequests", () => {
     }));
     const request = vi.fn(async (route: string) => {
       switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          return createPullRequestDetailResponse({
+            authorLogin: "alice-pr-author",
+          });
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
@@ -1091,6 +1243,8 @@ describe("pollTrackedPullRequests", () => {
     };
     const request = vi.fn(async (route: string) => {
       switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          return createPullRequestDetailResponse();
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
@@ -1169,7 +1323,7 @@ describe("pollTrackedPullRequests", () => {
       const pullRequest = repository.listTrackedPullRequests()[0];
 
       expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(2);
-        expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest?.id ?? -1)).toEqual([
+      expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest?.id ?? -1)).toEqual([
         expect.objectContaining({
           normalizedEventId: expect.any(Number),
           eventBundleId: null,
@@ -1201,6 +1355,10 @@ describe("pollTrackedPullRequests", () => {
     let includeEditedBodies = false;
     const request = vi.fn(async (route: string) => {
       switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          return createPullRequestDetailResponse({
+            etag: includeEditedBodies ? 'W/"acme-octopulse-7-v2"' : 'W/"acme-octopulse-7-v1"',
+          });
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
@@ -1464,4 +1622,109 @@ function createPullRequestInput(
     ...input,
     ...overrides,
   };
+}
+
+function createPullRequestDetailResponse(
+  overrides: {
+    status?: number;
+    etag?: string | null;
+    githubPullRequestId?: number;
+    number?: number;
+    url?: string;
+    authorLogin?: string;
+    authorAvatarUrl?: string | null;
+    title?: string;
+    state?: string;
+    isDraft?: boolean;
+    closedAt?: string | null;
+    mergedAt?: string | null;
+    headSha?: string | null;
+  } = {},
+): {
+  status: number;
+  headers: Record<string, string>;
+  data: unknown;
+} {
+  const status = overrides.status ?? 200;
+  const etag = overrides.etag ?? 'W/"acme-octopulse-7-v1"';
+
+  if (status === 304) {
+    return {
+      status,
+      headers: etag ? { etag } : {},
+      data: "",
+    };
+  }
+
+  return {
+    status,
+    headers: etag ? { etag } : {},
+    data: {
+      id: overrides.githubPullRequestId ?? 101,
+      number: overrides.number ?? 7,
+      html_url: overrides.url ?? "https://github.com/acme/octopulse/pull/7",
+      user: {
+        login: overrides.authorLogin ?? "octocat",
+        avatar_url: overrides.authorAvatarUrl ?? "https://avatars.example.test/octocat.png",
+      },
+      title: overrides.title ?? "Add pull request polling",
+      state: overrides.state ?? "open",
+      draft: overrides.isDraft ?? false,
+      closed_at: overrides.closedAt ?? null,
+      merged_at: overrides.mergedAt ?? null,
+      head: {
+        sha: overrides.headSha ?? "abc123",
+      },
+    },
+  };
+}
+
+function readPullRequestDetailEtag(
+  database: ReturnType<typeof initializeDatabase>,
+  pullRequestId: number,
+): string | undefined {
+  const row = database
+    .prepare("SELECT value FROM AppState WHERE key = ?")
+    .get(`pull_request_detail_etag:${pullRequestId}`);
+
+  if (row?.value === undefined) {
+    return undefined;
+  }
+
+  return String(row.value);
+}
+
+function writePullRequestDetailEtag(
+  database: ReturnType<typeof initializeDatabase>,
+  pullRequestId: number,
+  etag: string,
+): void {
+  database
+    .prepare(
+      `
+        INSERT INTO AppState (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+    )
+    .run(`pull_request_detail_etag:${pullRequestId}`, etag);
+}
+
+function createGitHubNotModifiedError(etag: string): Error & {
+  status: number;
+  response: {
+    status: number;
+    headers: Record<string, string>;
+    data: unknown;
+  };
+} {
+  return Object.assign(new Error("Not modified"), {
+    status: 304,
+    response: createPullRequestDetailResponse({
+      status: 304,
+      etag,
+    }),
+  });
 }
