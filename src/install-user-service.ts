@@ -3,12 +3,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveAppPaths, type ResolveAppPathsOptions } from "./config.js";
+import { DESKTOP_ENTRY_FILE_NAME, renderDesktopEntry } from "./desktop-entry.js";
 
 const SERVICE_NAME = "octopulse.service";
 
 export interface InstallUserServicePaths {
   repoRoot: string;
   servicePath: string;
+  desktopEntryPath: string;
   configPath: string;
   stateDirPath: string;
   databasePath: string;
@@ -23,6 +25,7 @@ export interface ResolveInstallUserServicePathsOptions extends ResolveAppPathsOp
   homeDir?: string;
   repoRoot?: string;
   servicePath?: string;
+  desktopEntryPath?: string;
 }
 
 export function resolveInstallUserServicePaths(
@@ -39,6 +42,9 @@ export function resolveInstallUserServicePaths(
     repoRoot: path.resolve(options.repoRoot ?? process.cwd()),
     servicePath: path.resolve(
       options.servicePath ?? path.join(homeDir, ".config", "systemd", "user", SERVICE_NAME),
+    ),
+    desktopEntryPath: path.resolve(
+      options.desktopEntryPath ?? path.join(homeDir, ".local", "share", "applications", DESKTOP_ENTRY_FILE_NAME),
     ),
     configPath: appPaths.configPath,
     stateDirPath: appPaths.stateDirPath,
@@ -99,6 +105,7 @@ export function renderInstallUserServiceSummary(
 
   return [
     `Installed ${serviceName} at ${result.paths.servicePath}`,
+    `Installed desktop entry at ${result.paths.desktopEntryPath}`,
     result.createdConfig
       ? `Created example config at ${result.paths.configPath}`
       : `Kept existing config at ${result.paths.configPath}`,
@@ -118,10 +125,14 @@ export function installUserService(
 ): InstallUserServiceResult {
   const paths = resolveInstallUserServicePaths(options);
   const serviceDirectoryPath = path.dirname(paths.servicePath);
+  const desktopEntryDirectoryPath = path.dirname(paths.desktopEntryPath);
   const configDirectoryPath = path.dirname(paths.configPath);
 
   mkdirSync(serviceDirectoryPath, { recursive: true });
   writeFileSync(paths.servicePath, renderUserServiceUnit(paths.repoRoot), "utf8");
+
+  mkdirSync(desktopEntryDirectoryPath, { recursive: true });
+  writeFileSync(paths.desktopEntryPath, renderDesktopEntry(), "utf8");
 
   mkdirSync(configDirectoryPath, { recursive: true });
 

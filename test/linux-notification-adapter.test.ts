@@ -50,6 +50,7 @@ import {
   type LinuxNotificationDispatchResult,
   type LinuxNotification,
 } from "../src/linux-notification-adapter.js";
+import { DESKTOP_ENTRY_ID } from "../src/desktop-entry.js";
 import { spawn } from "node:child_process";
 
 vi.mock("node:child_process", () => ({
@@ -130,6 +131,7 @@ describe("LinuxNotificationAdapter", () => {
       summary: "acme/octopulse PR #7",
       body: "alice approved review\nShip notifications",
       actions: { default: "Open" },
+      "desktop-entry": DESKTOP_ENTRY_ID,
     });
     expect(spawn).not.toHaveBeenCalled();
 
@@ -200,6 +202,7 @@ describe("LinuxNotificationAdapter", () => {
       body:
         '<img src="file:///tmp/octocat.png"/> [octopulse] Add notifications (open)\n<b> </b>\n<img src="file:///tmp/alice.png"/> <b>alice</b> ✅ LGTM\n\nCI failed',
       actions: {},
+      "desktop-entry": DESKTOP_ENTRY_ID,
     });
   });
 
@@ -220,6 +223,7 @@ describe("LinuxNotificationAdapter", () => {
       summary: "acme/octopulse #7 Add notifications",
       body: "alice: ✅ LGTM",
       actions: {},
+      "desktop-entry": DESKTOP_ENTRY_ID,
     });
   });
 
@@ -259,6 +263,7 @@ describe("LinuxNotificationAdapter", () => {
       summary: "",
       body: "[octopulse] Add notifications (open)\n<b> </b>\n<b>alice</b> ✅ LGTM",
       actions: {},
+      "desktop-entry": DESKTOP_ENTRY_ID,
     });
   });
 });

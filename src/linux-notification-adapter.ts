@@ -1,6 +1,7 @@
 import freedesktopNotifications from "freedesktop-notifications";
 
 import { FileAvatarCache, type AvatarImageCache } from "./avatar-cache.js";
+import { DESKTOP_ENTRY_ID } from "./desktop-entry.js";
 import type { NotificationMarkup } from "./notification-rendering.js";
 import { openUrl } from "./open-url.js";
 
@@ -61,14 +62,20 @@ export class LinuxNotificationAdapter {
     notification: LinuxNotification,
   ): Promise<LinuxNotificationDispatchResult> {
     const renderedNotification = await this.renderForServer(notification);
-    const notif = new freedesktopNotifications.Notification({
+    const notificationData = {
       appName: "Octopulse",
       summary: renderedNotification.summary,
       body: renderedNotification.body,
       actions: notification.clickUrl
         ? { default: "Open" }
         : {},
-    });
+      "desktop-entry": DESKTOP_ENTRY_ID,
+    };
+    const notif = new freedesktopNotifications.Notification(
+      notificationData as ConstructorParameters<typeof freedesktopNotifications.Notification>[0] & {
+        "desktop-entry": string;
+      },
+    );
 
     if (!notification.clickUrl) {
       await notif.push();

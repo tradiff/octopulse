@@ -33,6 +33,10 @@ describe("installUserService", () => {
     expect(readFileSync(result.paths.servicePath, "utf8")).toContain(
       "ExecStart=/usr/bin/env mise exec -- npm run start",
     );
+    expect(existsSync(result.paths.desktopEntryPath)).toBe(true);
+    expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("Name=Octopulse");
+    expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("Icon=");
+    expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("X-GNOME-UsesNotifications=true");
     expect(existsSync(result.paths.configPath)).toBe(true);
     expect(readFileSync(result.paths.configPath, "utf8")).toContain('[github]');
     expect(readFileSync(result.paths.configPath, "utf8")).toContain('token = "ghp_replace_with_your_token"');
@@ -54,6 +58,7 @@ describe("installUserService", () => {
 
     expect(readFileSync(configPath, "utf8")).toBe('[github]\ntoken = "ghp_existing"\n');
     expect(result.createdConfig).toBe(false);
+    expect(summary).toContain(`Installed desktop entry at ${result.paths.desktopEntryPath}`);
     expect(summary).toContain(`Kept existing config at ${configPath}`);
     expect(summary).toContain(`Octopulse database path: ${path.join(homeDir, ".local", "state", "octopulse", "octopulse.db")}`);
     expect(summary).toContain("systemctl --user daemon-reload");
