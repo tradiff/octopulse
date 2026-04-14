@@ -72,6 +72,8 @@ export async function pollTrackedPullRequests<TClient>(
       try {
         await classifyBotPullRequestActivity(database, pullRequest.id, {
           ...(botActivityClassifier ? { botActivityClassifier } : {}),
+          currentUserLogin: githubAuth.currentUserLogin,
+          pullRequestAuthorLogin: pullRequest.authorLogin,
         });
       } catch (error) {
         getLogger().warn("Bot activity classification failed", {

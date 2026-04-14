@@ -35,6 +35,8 @@ export type BotActivityClassifier = (
 
 export interface ClassifyBotPullRequestActivityOptions {
   botActivityClassifier?: BotActivityClassifier;
+  currentUserLogin?: string;
+  pullRequestAuthorLogin?: string;
   normalizedEventRepository?: Pick<
     NormalizedEventRepository,
     "listAiEligibleUnbundledEventsForPullRequest" | "updateNormalizedEventDecision"
@@ -87,8 +89,16 @@ export async function classifyBotPullRequestActivity(
   let notifiedCount = 0;
   let suppressedCount = 0;
   let fallbackCount = 0;
+  const suppressBotActivityForNonAuthoredPullRequest =
+    shouldSuppressBotActivityForNonAuthoredPullRequest(options);
 
   for (const event of eligibleEvents) {
+    if (suppressBotActivityForNonAuthoredPullRequest) {
+      persistSuppressedDecision(normalizedEventRepository, event);
+      suppressedCount += 1;
+      continue;
+    }
+
     const payload = parseNormalizedPayload(event);
     const bodyText = readBodyText(payload);
 
@@ -265,6 +275,22 @@ function serializePayload(
   }
 }
 
+function persistSuppressedDecision(
+  normalizedEventRepository: Pick<NormalizedEventRepository, "updateNormalizedEventDecision">,
+  event: Pick<NormalizedEventRecord, "id" | "payloadJson">,
+): void {
+  try {
+    normalizedEventRepository.updateNormalizedEventDecision(event.id, {
+      decisionState: "suppressed_rule",
+      payloadJson: event.payloadJson,
+    });
+  } catch (error) {
+    throw new BotActivityClassificationError(
+      `Failed to persist suppression decision for normalized event ${event.id}: ${getErrorMessage(error)}`,
+    );
+  }
+}
+
 function persistFallbackDecision(
   normalizedEventRepository: Pick<NormalizedEventRepository, "updateNormalizedEventDecision">,
   event: Pick<NormalizedEventRecord, "id">,
@@ -376,6 +402,20 @@ function requireObject(value: unknown, fieldName: string): Record<string, unknow
   }
 
   return value as Record<string, unknown>;
+}
+
+function shouldSuppressBotActivityForNonAuthoredPullRequest(
+  options: Pick<ClassifyBotPullRequestActivityOptions, "currentUserLogin" | "pullRequestAuthorLogin">,
+): boolean {
+  if (!options.currentUserLogin || !options.pullRequestAuthorLogin) {
+    return false;
+  }
+
+  return normalizeLogin(options.currentUserLogin) !== normalizeLogin(options.pullRequestAuthorLogin);
+}
+
+function normalizeLogin(login: string): string {
+  return login.trim().toLowerCase();
 }
 
 function getErrorMessage(error: unknown): string {

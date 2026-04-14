@@ -141,6 +141,76 @@ describe("classifyBotPullRequestActivity", () => {
     }
   });
 
+  it("suppresses bot comments on other people's pull requests without calling OpenAI", async () => {
+    const { database, pullRequest } = createPullRequest({ authorLogin: "alice" });
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const classifier = vi.fn(async () => ({
+      decision: "notify" as const,
+      reason: "Needs attention",
+    }));
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        actorLogin: "dependabot[bot]",
+        actorClass: "bot",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ bodyText: "Routine dependency bump" }),
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_inline_comment",
+        actorLogin: "ci-bot[bot]",
+        actorClass: "bot",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ bodyText: "Build failed on ubuntu-latest" }),
+        occurredAt: "2026-04-10T12:02:00.000Z",
+      });
+
+      await expect(
+        classifyBotPullRequestActivity(database, pullRequest.id, {
+          botActivityClassifier: classifier,
+          currentUserLogin: "octocat",
+          pullRequestAuthorLogin: pullRequest.authorLogin,
+        }),
+      ).resolves.toEqual({
+        eligibleCount: 2,
+        classifiedCount: 0,
+        notifiedCount: 0,
+        suppressedCount: 2,
+        fallbackCount: 0,
+      });
+
+      expect(classifier).not.toHaveBeenCalled();
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          decisionState: event.decisionState,
+          payload: parsePayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          eventType: "issue_comment",
+          decisionState: "suppressed_rule",
+          payload: {
+            bodyText: "Routine dependency bump",
+          },
+        },
+        {
+          eventType: "review_inline_comment",
+          decisionState: "suppressed_rule",
+          payload: {
+            bodyText: "Build failed on ubuntu-latest",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("marks bot activity for fallback notify when OpenAI is not configured", async () => {
     const { database, pullRequest } = createPullRequest();
     const normalizedEventRepository = new NormalizedEventRepository(database);
@@ -295,6 +365,16 @@ function parsePayload(payloadJson: string): Record<string, unknown> {
 function createPullRequest(): {
   database: ReturnType<typeof initializeDatabase>;
   pullRequest: PullRequestRecord;
+}
+
+function createPullRequest(overrides: Partial<UpsertPullRequestInput>): {
+  database: ReturnType<typeof initializeDatabase>;
+  pullRequest: PullRequestRecord;
+}
+
+function createPullRequest(overrides: Partial<UpsertPullRequestInput> = {}): {
+  database: ReturnType<typeof initializeDatabase>;
+  pullRequest: PullRequestRecord;
 } {
   const homeDir = createTempDir("octopulse-bot-activity-classification-home-");
   const database = initializeDatabase(resolveAppPaths({ homeDir }));
@@ -302,7 +382,7 @@ function createPullRequest(): {
 
   return {
     database,
-    pullRequest: repository.upsertPullRequest(createPullRequestInput()),
+    pullRequest: repository.upsertPullRequest(createPullRequestInput(overrides)),
   };
 }
 
