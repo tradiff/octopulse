@@ -80,16 +80,16 @@ describe("preparePullRequestNotifications", () => {
       const bundle = eventBundleRepository.listEventBundlesForPullRequest(pullRequest.id)[0];
 
       expect(bundle).toBeDefined();
-      expect(firstPass).toEqual([
-        expect.objectContaining({
-          normalizedEventId: expect.any(Number),
-          eventBundleId: null,
-        }),
+        expect(firstPass).toEqual([
+          expect.objectContaining({
+            normalizedEventId: expect.any(Number),
+            eventBundleId: null,
+          }),
         expect.objectContaining({
           normalizedEventId: null,
           eventBundleId: bundle?.id ?? null,
           title: "acme/octopulse #7 Add notifications",
-          body: "bob: 💬 Need test coverage\n\ngithub-actions[bot]: CI failed",
+          body: "bob: 💬 Need test coverage\n\nCI failed",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
           deliveryStatus: "pending",
         }),

@@ -118,9 +118,9 @@ describe("listNotificationHistory", () => {
                 text: "💬 commented",
               },
               {
-                actorLogin: "github-actions[bot]",
-                actorAvatarKey: "github-actions[bot]",
-                actorAvatarUrl: "https://avatars.example.test/github-actions.png",
+                actorLogin: null,
+                actorAvatarKey: null,
+                actorAvatarUrl: null,
                 text: "CI failed",
               },
             ],

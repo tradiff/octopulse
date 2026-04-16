@@ -105,6 +105,41 @@ describe("renderNotification", () => {
     });
   });
 
+  it("does not attribute bundled CI outcomes to a person", () => {
+    expect(
+      renderNotification(
+        {
+          repositoryOwner: "acme",
+          repositoryName: "octopulse",
+          number: 7,
+          title: "Ship notifications",
+          url: "https://github.com/acme/octopulse/pull/7",
+        },
+        [
+          {
+            id: 211,
+            eventType: "issue_comment",
+            actorLogin: "alice",
+            occurredAt: "2026-04-10T12:00:00.000Z",
+            payloadJson: JSON.stringify({ bodyText: "Need test coverage" }),
+          },
+          {
+            id: 212,
+            eventType: "ci_failed",
+            actorLogin: "github-actions[bot]",
+            occurredAt: "2026-04-10T12:00:30.000Z",
+            payloadJson: "{}",
+          },
+        ],
+      ),
+    ).toEqual({
+      title: "acme/octopulse #7 Ship notifications",
+      body: "alice: 💬 Need test coverage\n\nCI failed",
+      clickUrl: "https://github.com/acme/octopulse/pull/7",
+      summary: "CI failed, 1 comment",
+    });
+  });
+
   it("truncates long snippets", () => {
     expect(
       renderNotification(
@@ -179,9 +214,9 @@ describe("renderNotification", () => {
           text: "✅ LGTM",
         },
         {
-          actorLogin: "github-actions[bot]",
-          actorAvatarKey: "github-actions[bot]",
-          actorAvatarUrl: "https://avatars.example.test/actions.png",
+          actorLogin: null,
+          actorAvatarKey: null,
+          actorAvatarUrl: null,
           text: "CI failed",
         },
       ],

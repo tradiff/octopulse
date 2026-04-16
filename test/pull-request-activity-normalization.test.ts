@@ -524,6 +524,75 @@ describe("normalizePullRequestActivity", () => {
     }
   });
 
+  it("suppresses ci outcomes on other people's pull requests", () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const pullRequestRepository = new PullRequestRepository(database);
+
+    try {
+      const nonAuthoredPullRequest = pullRequestRepository.upsertPullRequest(
+        createPullRequestInput({
+          githubPullRequestId: pullRequest.githubPullRequestId,
+          authorLogin: "alice-pr-author",
+        }),
+      );
+
+      rawEventRepository.insertRawEvent({
+        pullRequestId: nonAuthoredPullRequest.id,
+        source: "github_actions_workflow_run",
+        sourceId: "5103:2026-04-10T12:32:00.000Z",
+        eventType: "workflow_run",
+        actorLogin: "github-actions[bot]",
+        payloadJson: JSON.stringify(
+          createWorkflowRunFixture({
+            id: 5103,
+            actorLogin: "github-actions[bot]",
+            actorType: "Bot",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "failure",
+            updatedAt: "2026-04-10T12:32:00.000Z",
+          }),
+        ),
+        occurredAt: "2026-04-10T12:32:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, nonAuthoredPullRequest, "octocat")).toEqual({
+        processedCount: 1,
+        normalizedCount: 1,
+        skippedCount: 0,
+      });
+
+      expect(
+        normalizedEventRepository.listNormalizedEventsForPullRequest(nonAuthoredPullRequest.id).map((event) => ({
+          eventType: event.eventType,
+          actorLogin: event.actorLogin,
+          actorClass: event.actorClass,
+          decisionState: event.decisionState,
+          payload: parseNormalizedPayload(event.payloadJson),
+        })),
+      ).toEqual([
+        {
+          eventType: "ci_failed",
+          actorLogin: "github-actions[bot]",
+          actorClass: "bot",
+          decisionState: "suppressed_rule",
+          payload: {
+            headSha: "abc123",
+            workflowRunId: 5103,
+            workflowName: "CI",
+            workflowRunStatus: "completed",
+            workflowRunConclusion: "failure",
+            url: "https://github.com/acme/octopulse/actions/runs/5103",
+          },
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("preserves red-to-green ci transitions on same head sha", () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);

@@ -66,7 +66,7 @@ interface WorkflowRunHistoryEntry {
 
 export function normalizePullRequestActivity(
   database: DatabaseSync,
-  pullRequest: Pick<PullRequestRecord, "id" | "lastSeenHeadSha">,
+  pullRequest: Pick<PullRequestRecord, "id" | "lastSeenHeadSha" | "authorLogin">,
   currentUserLogin: string,
   options: NormalizePullRequestActivityOptions = {},
 ): NormalizePullRequestActivityResult {
@@ -275,7 +275,7 @@ function mapReviewEventType(payload: Record<string, unknown>): string {
 }
 
 function deriveMissingCiOutcomeEvents(input: {
-  pullRequest: Pick<PullRequestRecord, "id" | "lastSeenHeadSha">;
+  pullRequest: Pick<PullRequestRecord, "id" | "lastSeenHeadSha" | "authorLogin">;
   currentUserLogin: string;
   rawEvents: RawEventRecord[];
   normalizedEvents: NormalizedEventRecord[];
@@ -343,7 +343,12 @@ function deriveMissingCiOutcomeEvents(input: {
       eventType: nextOutcome,
       actorLogin: workflowRun.rawEvent.actorLogin,
       actorClass,
-      decisionState: resolveDecisionState(nextOutcome, actorClass),
+      decisionState: resolveCiOutcomeDecisionState({
+        eventType: nextOutcome,
+        actorClass,
+        currentUserLogin: input.currentUserLogin,
+        pullRequestAuthorLogin: input.pullRequest.authorLogin,
+      }),
       notificationTiming: resolveNotificationTiming(nextOutcome, actorClass),
       payloadJson: serializeNormalizedPayload(
         workflowRun.rawEvent,
@@ -446,6 +451,19 @@ function resolveDecisionState(eventType: string, actorClass: ActorClass): Decisi
   }
 
   return "notified";
+}
+
+function resolveCiOutcomeDecisionState(input: {
+  eventType: CiOutcomeEventType;
+  actorClass: ActorClass;
+  currentUserLogin: string;
+  pullRequestAuthorLogin: string;
+}): DecisionState {
+  if (!isAuthoredPullRequest(input.currentUserLogin, input.pullRequestAuthorLogin)) {
+    return "suppressed_rule";
+  }
+
+  return resolveDecisionState(input.eventType, input.actorClass);
 }
 
 function resolveNotificationTiming(
@@ -638,6 +656,10 @@ function normalizeHeadSha(headSha: string | null | undefined): string | null {
 
 function normalizeLogin(login: string): string {
   return login.trim().toLowerCase();
+}
+
+function isAuthoredPullRequest(currentUserLogin: string, pullRequestAuthorLogin: string): boolean {
+  return normalizeLogin(currentUserLogin) === normalizeLogin(pullRequestAuthorLogin);
 }
 
 function getErrorMessage(error: unknown): string {

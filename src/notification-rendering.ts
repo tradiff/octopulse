@@ -44,6 +44,7 @@ const TEXT_EVENT_TYPES = new Set([
   "review_approved",
   "review_changes_requested",
 ]);
+const EVENT_TYPES_WITHOUT_ACTOR_ATTRIBUTION = new Set(["ci_failed", "ci_succeeded"]);
 const MAX_EVENT_TEXT_LENGTH = 100;
 
 export function renderNotification(
@@ -77,22 +78,19 @@ export function renderNotificationMarkup(
     headerText: `[${pullRequest.repositoryName}] ${pullRequest.title} (${renderMarkupPullRequestState(pullRequest)})`,
     headerAvatarKey: pullRequest.authorLogin,
     headerAvatarUrl: pullRequest.authorAvatarUrl,
-    paragraphs: events.map((event) => ({
-      actorLogin: event.actorLogin,
-      actorAvatarKey: event.actorLogin,
-      actorAvatarUrl: readEventActorAvatarUrl(event),
-      text: renderEventText(event),
-    })),
+    paragraphs: events.map((event) => buildNotificationParagraph(event)),
   };
 }
 
 export function buildNotificationParagraph(
   event: Pick<NormalizedEventRecord, "actorLogin" | "eventType" | "payloadJson" | "id" | "occurredAt">,
 ): NotificationMarkupParagraph {
+  const actorLogin = readDisplayedActorLogin(event);
+
   return {
-    actorLogin: event.actorLogin,
-    actorAvatarKey: event.actorLogin,
-    actorAvatarUrl: readEventActorAvatarUrl(event),
+    actorLogin,
+    actorAvatarKey: actorLogin,
+    actorAvatarUrl: actorLogin === null ? null : readEventActorAvatarUrl(event),
     text: renderEventText(event),
   };
 }
@@ -102,7 +100,8 @@ function renderSingleEventSummary(event: NotificationEvent | undefined): string 
     throw new Error("Missing notification event");
   }
 
-  const actorPrefix = event.actorLogin === null ? "" : `${event.actorLogin} `;
+  const actorLogin = readDisplayedActorLogin(event);
+  const actorPrefix = actorLogin === null ? "" : `${actorLogin} `;
 
   return `${actorPrefix}${renderEventFallbackText(event)}`.trim();
 }
@@ -143,7 +142,16 @@ function renderEventFallbackText(event: NotificationEvent): string {
 }
 
 function renderBundleSummary(events: readonly NotificationEvent[]): string {
-  const actorLogins = [...new Set(events.flatMap((event) => (event.actorLogin === null ? [] : [event.actorLogin])))];
+  const actorLogins = [
+    ...new Set(
+      events.flatMap((event) => {
+        const actorLogin = readDisplayedActorLogin(event);
+
+        return actorLogin === null ? [] : [actorLogin];
+      }),
+    ),
+  ];
+  const hasUnattributedEvents = events.some((event) => shouldSuppressActorAttribution(event));
   const primaryParts: string[] = [];
   const commentParts: string[] = [];
 
@@ -177,7 +185,7 @@ function renderBundleSummary(events: readonly NotificationEvent[]): string {
   const parts = [...primaryParts, ...commentParts];
   const summary = parts.length > 0 ? parts.join(", ") : `${events.length} updates`;
 
-  if (actorLogins.length === 1) {
+  if (actorLogins.length === 1 && !hasUnattributedEvents) {
     return `${actorLogins[0]}: ${summary}`;
   }
 
@@ -268,6 +276,16 @@ function readEventActorAvatarUrl(event: NotificationEvent): string | null {
   const actorAvatarUrl = payload?.actorAvatarUrl;
 
   return typeof actorAvatarUrl === "string" && actorAvatarUrl.length > 0 ? actorAvatarUrl : null;
+}
+
+function readDisplayedActorLogin(
+  event: Pick<NormalizedEventRecord, "actorLogin" | "eventType">,
+): string | null {
+  return shouldSuppressActorAttribution(event) ? null : event.actorLogin;
+}
+
+function shouldSuppressActorAttribution(event: Pick<NormalizedEventRecord, "eventType">): boolean {
+  return EVENT_TYPES_WITHOUT_ACTOR_ATTRIBUTION.has(event.eventType);
 }
 
 function renderMarkupPullRequestState(

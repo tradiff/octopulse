@@ -1080,7 +1080,7 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
-  it("skips bot comment notifications on other people's pull requests", async () => {
+  it("skips bot comment and ci notifications on other people's pull requests", async () => {
     const { database, repository } = createRepository();
     const normalizedEventRepository = new NormalizedEventRepository(database);
     const eventBundleRepository = new EventBundleRepository(database);
@@ -1136,8 +1136,18 @@ describe("pollTrackedPullRequests", () => {
         case "GET /repos/{owner}/{repo}/actions/runs":
           return {
             data: {
-              total_count: 0,
-              workflow_runs: [],
+              total_count: 1,
+              workflow_runs: [
+                createWorkflowRunFixture({
+                  id: 9854,
+                  actorLogin: "github-actions[bot]",
+                  actorType: "Bot",
+                  headSha: "abc123",
+                  status: "completed",
+                  conclusion: "failure",
+                  updatedAt: "2026-04-10T12:51:30.000Z",
+                }),
+              ],
             },
           };
         default:
@@ -1219,7 +1229,23 @@ describe("pollTrackedPullRequests", () => {
             url: "https://github.com/acme/octopulse/pull/7#discussion_r9853",
           },
         },
+        {
+          eventType: "ci_failed",
+          decisionState: "suppressed_rule",
+          eventBundleId: null,
+          payload: {
+            headSha: "abc123",
+            workflowRunId: 9854,
+            workflowName: "CI",
+            workflowRunStatus: "completed",
+            workflowRunConclusion: "failure",
+            url: "https://github.com/acme/octopulse/actions/runs/9854",
+          },
+        },
       ]);
+      expect(
+        normalizedEventRepository.listNormalizedEventsForBundle(bundles[0]?.id ?? -1).map((event) => event.eventType),
+      ).toEqual(["issue_comment"]);
       expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest?.id ?? -1)).toEqual([
         expect.objectContaining({
           normalizedEventId: null,
