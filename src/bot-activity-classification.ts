@@ -10,9 +10,17 @@ const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const DEFAULT_OPENAI_TIMEOUT_MS = 10_000;
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_CLASSIFICATION_PROMPT = [
-  "You classify automated GitHub pull request comments and reviews for a local notifier.",
-  "Suppress routine bot noise like dependency update summaries, merge queue chatter, formatting notes, duplicate reminders, and FYI-only status posts.",
-  "Notify when text likely needs human attention, signals failure, blocks progress, requests action, or contains materially important information.",
+  "You classify automated pull request comments.",
+  "Your job is to decide whether the comment warrants user attention.",
+  "Notify when the message is negative, blocking, or action-oriented,",
+  "such as asking for a change, requesting follow-up, reporting a failure,",
+  "saying something is broken, rejected, blocked,",
+  "or otherwise needs human intervention,",
+  "including a failing Sonar quality gate.",
+  "Suppress when the message is positive, approving, or purely informational,",
+  "such as LGTM, approval, praise, all checks passing,",
+  "successful Sonar or CI results,",
+  "Jira ticket creation or links",
   'Reply with strict JSON only: {"decision":"notify"|"suppress","reason":"short explanation"}.',
 ].join(" ");
 

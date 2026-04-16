@@ -355,6 +355,14 @@ describe("createOpenAiBotActivityClassifier", () => {
         },
       ],
     });
+
+    const systemPrompt = (
+      (requestBody?.messages as Array<{ role: string; content: string }> | undefined)?.[0]
+    )?.content;
+
+    expect(systemPrompt).toContain("warrants user attention");
+    expect(systemPrompt).toContain("failing Sonar quality gate");
+    expect(systemPrompt).toContain("successful Sonar or CI results");
   });
 });
 
