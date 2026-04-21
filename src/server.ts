@@ -17,6 +17,10 @@ import {
   type UntrackPullRequestResult,
 } from "./manual-pull-request-tracking.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
+import {
+  isPullRequestStateAssetFilename,
+  resolvePullRequestStateAssetFilePathByFilename,
+} from "./pull-request-state-assets.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
 
@@ -138,6 +142,11 @@ async function handleRequest(
     return;
   }
 
+  if (request.method === "GET" && pathname.startsWith("/assets/")) {
+    handleAssetRequest(request, response, pathname.slice("/assets/".length));
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/tracked-pull-requests") {
     await handlePullRequestListRequest(
       request,
@@ -251,6 +260,26 @@ function handleFaviconRequest(request: IncomingMessage, response: ServerResponse
 
   const source = readFileSync(APP_ICON_PNG_URL);
   respond(response, request.method, 200, "image/png", source);
+}
+
+function handleAssetRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  filename: string,
+): void {
+  if (!isPullRequestStateAssetFilename(filename)) {
+    respond(response, request.method, 404, "text/plain; charset=utf-8", "Not Found");
+    return;
+  }
+
+  const assetPath = resolvePullRequestStateAssetFilePathByFilename(filename);
+
+  if (!existsSync(assetPath)) {
+    respond(response, request.method, 503, "text/plain; charset=utf-8", `Asset not found: ${filename}`);
+    return;
+  }
+
+  respond(response, request.method, 200, "image/svg+xml; charset=utf-8", readFileSync(assetPath));
 }
 
 async function handleManualTrackPullRequestRequest(

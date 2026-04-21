@@ -9,6 +9,7 @@ import { NormalizedEventRepository, type NormalizedEventRecord } from "./normali
 import { preparePullRequestNotifications } from "./notification-preparation.js";
 import { NotificationRecordRepository, type NotificationRecord } from "./notification-record-repository.js";
 import { renderNotificationMarkup } from "./notification-rendering.js";
+import { resolvePullRequestStateAssetFilePath } from "./pull-request-state-assets.js";
 import { PullRequestRepository, type PullRequestRecord } from "./pull-request-repository.js";
 
 export interface NotificationDispatcher {
@@ -182,6 +183,7 @@ function buildDispatchNotification(
     title: record.title,
     body: record.body,
     clickUrl: record.clickUrl,
+    icon: resolvePullRequestStateAssetFilePath(pullRequest),
     ...(events === null || events.length === 0 ? {} : { markup: renderNotificationMarkup(pullRequest, events) }),
   };
 }

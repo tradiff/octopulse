@@ -12,6 +12,7 @@ import { Highlight, themes } from "prism-react-renderer";
 
 import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
+import { formatPullRequestStateLabel, resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
 import {
@@ -1006,7 +1007,16 @@ function PullRequestList({
                   >
                     {formatTrackingStateLabel(pullRequest)}
                   </span>
-                  <span className="state-pill">{formatStateLabel(pullRequest)}</span>
+                  <span className="state-pill">
+                    <img
+                      className="state-pill-icon"
+                      src={resolvePullRequestStateAssetUrlPath(pullRequest)}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    {formatPullRequestStateLabel(pullRequest)}
+                  </span>
                   {renderAction ? renderAction(pullRequest) : null}
                 </div>
               </div>
@@ -1292,18 +1302,6 @@ function formatPullRequestEmptyMessage(uiFilters: UiFilterValues, hasActiveFilte
 
 function formatTrackingStateLabel(pullRequest: PullRequestRecord): string {
   return pullRequest.isTracked ? "Tracked" : "Untracked";
-}
-
-function formatStateLabel(pullRequest: PullRequestRecord): string {
-  if (pullRequest.isDraft) {
-    return "Draft";
-  }
-
-  if (pullRequest.state.length === 0) {
-    return "Unknown";
-  }
-
-  return `${pullRequest.state[0]!.toUpperCase()}${pullRequest.state.slice(1)}`;
 }
 
 function formatDeliveryStatusLabel(deliveryStatus: NotificationHistoryEntry["deliveryStatus"]): string {
@@ -1993,7 +1991,14 @@ const APP_STYLES = `
     padding: 4px 8px;
     background: rgba(148, 163, 184, 0.14);
     color: #cbd5e1;
+    gap: 6px;
     white-space: nowrap;
+  }
+
+  .state-pill-icon {
+    width: 0.875rem;
+    height: 0.875rem;
+    flex: 0 0 auto;
   }
 
   .tracking-pill {

@@ -78,6 +78,7 @@ describe("dispatchPullRequestNotifications", () => {
         title: "acme/octopulse #7 Add notifications",
         body: "alice: ✅ approved",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
+        icon: expect.stringContaining("pull-request-open.svg"),
         markup: expect.objectContaining({
           headerText: "[octopulse] Add notifications (open)",
           headerAvatarUrl: "https://avatars.example.test/octocat.png",
@@ -87,6 +88,7 @@ describe("dispatchPullRequestNotifications", () => {
         title: "acme/octopulse #7 Add notifications",
         body: "bob: 💬 commented",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
+        icon: expect.stringContaining("pull-request-open.svg"),
         markup: expect.objectContaining({
           headerText: "[octopulse] Add notifications (open)",
           headerAvatarUrl: "https://avatars.example.test/octocat.png",

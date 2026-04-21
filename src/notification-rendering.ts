@@ -1,4 +1,5 @@
 import type { NormalizedEventRecord } from "./normalized-event-repository.js";
+import { formatPullRequestStateLabel } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 
 export interface RenderedNotification {
@@ -75,7 +76,7 @@ export function renderNotificationMarkup(
   }
 
   return {
-    headerText: `[${pullRequest.repositoryName}] ${pullRequest.title} (${renderMarkupPullRequestState(pullRequest)})`,
+    headerText: `[${pullRequest.repositoryName}] ${pullRequest.title} (${formatPullRequestStateLabel(pullRequest).toLowerCase()})`,
     headerAvatarKey: pullRequest.authorLogin,
     headerAvatarUrl: pullRequest.authorAvatarUrl,
     paragraphs: events.map((event) => buildNotificationParagraph(event)),
@@ -286,20 +287,6 @@ function readDisplayedActorLogin(
 
 function shouldSuppressActorAttribution(event: Pick<NormalizedEventRecord, "eventType">): boolean {
   return EVENT_TYPES_WITHOUT_ACTOR_ATTRIBUTION.has(event.eventType);
-}
-
-function renderMarkupPullRequestState(
-  pullRequest: Pick<PullRequestRecord, "state" | "isDraft" | "mergedAt">,
-): string {
-  if (pullRequest.mergedAt !== null) {
-    return "merged";
-  }
-
-  if (pullRequest.isDraft) {
-    return "draft";
-  }
-
-  return pullRequest.state;
 }
 
 function parsePayload(payloadJson: string): Record<string, unknown> | null {

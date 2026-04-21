@@ -120,6 +120,7 @@ describe("LinuxNotificationAdapter", () => {
       adapter.dispatchNotification({
         title: "acme/octopulse PR #7",
         body: "alice approved review\nShip notifications",
+        icon: "/tmp/pull-request-open.svg",
         clickUrl,
       }),
     ).resolves.toEqual({
@@ -131,6 +132,7 @@ describe("LinuxNotificationAdapter", () => {
       summary: "acme/octopulse PR #7",
       body: "alice approved review\nShip notifications",
       actions: { default: "Open" },
+      icon: "/tmp/pull-request-open.svg",
       "desktop-entry": DESKTOP_ENTRY_ID,
     });
     expect(spawn).not.toHaveBeenCalled();
@@ -172,6 +174,7 @@ describe("LinuxNotificationAdapter", () => {
       adapter.dispatchNotification({
         title: "acme/octopulse #7 Add notifications",
         body: "alice: ✅ LGTM\n\nCI failed",
+        icon: "/tmp/pull-request-open.svg",
         markup: {
           headerText: "[octopulse] Add notifications (open)",
           headerAvatarKey: "octocat",
@@ -202,6 +205,7 @@ describe("LinuxNotificationAdapter", () => {
       body:
         '<img src="file:///tmp/octocat.png"/> [octopulse] Add notifications (open)\n<b> </b>\n<img src="file:///tmp/alice.png"/> <b>alice</b> ✅ LGTM\n\nCI failed',
       actions: {},
+      icon: "/tmp/pull-request-open.svg",
       "desktop-entry": DESKTOP_ENTRY_ID,
     });
   });

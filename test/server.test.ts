@@ -49,6 +49,18 @@ describe("startServer", () => {
     expect(favicon.byteLength).toBeGreaterThan(0);
   });
 
+  it("serves pull request state assets", async () => {
+    const server = await startServer({ host: "127.0.0.1", port: 0 });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/assets/pull-request-open.svg`);
+    const asset = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("image/svg+xml");
+    expect(asset).toContain("<svg");
+  });
+
   it("serves pull request APIs", async () => {
     const server = await startServer({
       host: "127.0.0.1",

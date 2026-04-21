@@ -9,6 +9,7 @@ export interface LinuxNotification {
   title: string;
   body: string;
   clickUrl?: string | null;
+  icon?: string | null;
   markup?: NotificationMarkup;
 }
 
@@ -69,6 +70,7 @@ export class LinuxNotificationAdapter {
       actions: notification.clickUrl
         ? { default: "Open" }
         : {},
+      ...(notification.icon ? { icon: notification.icon } : {}),
       "desktop-entry": DESKTOP_ENTRY_ID,
     };
     const notif = new freedesktopNotifications.Notification(
