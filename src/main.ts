@@ -120,7 +120,11 @@ async function main(): Promise<void> {
           pullRequestRepository,
         }),
       resendNotificationRecord: (notificationRecordId: number) =>
-        resendNotificationRecord(currentDatabase, { notificationRecordId, notificationDispatcher }),
+        resendNotificationRecord(currentDatabase, {
+          notificationRecordId,
+          currentUserLogin: githubAuth.currentUserLogin,
+          notificationDispatcher,
+        }),
     });
     const serverOrigin = readServerOrigin(server);
     trayIcon = await startTrayIcon({

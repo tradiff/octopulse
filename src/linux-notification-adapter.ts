@@ -11,7 +11,10 @@ export interface LinuxNotification {
   clickUrl?: string | null;
   icon?: string | null;
   markup?: NotificationMarkup;
+  sticky?: boolean;
 }
+
+const AUTO_DISMISS_TIMEOUT_MS = 10_000;
 
 export interface LinuxNotificationDispatchResult {
   openedClickUrl: boolean;
@@ -67,10 +70,12 @@ export class LinuxNotificationAdapter {
       appName: "Octopulse",
       summary: renderedNotification.summary,
       body: renderedNotification.body,
+      urgency: "normal",
       actions: notification.clickUrl
         ? { default: "Open" }
         : {},
       ...(notification.icon ? { icon: notification.icon } : {}),
+      ...(notification.sticky ? { timeout: 0 } : { timeout: AUTO_DISMISS_TIMEOUT_MS }),
       "desktop-entry": DESKTOP_ENTRY_ID,
     };
     const notif = new freedesktopNotifications.Notification(

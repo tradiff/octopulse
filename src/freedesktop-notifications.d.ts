@@ -4,6 +4,10 @@ declare module "freedesktop-notifications" {
     summary: string;
     body?: string;
     actions?: Record<string, string>;
+    icon?: string;
+    urgency?: string | number;
+    timeout?: number;
+    [key: string]: unknown;
   }
 
   export class Notification {

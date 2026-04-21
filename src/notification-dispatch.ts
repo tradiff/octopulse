@@ -18,6 +18,7 @@ export interface NotificationDispatcher {
 
 export interface DispatchPullRequestNotificationsOptions {
   dispatchedAt?: string;
+  currentUserLogin?: string;
   notificationDispatcher?: NotificationDispatcher;
   notificationRecordRepository?: Pick<
     NotificationRecordRepository,
@@ -62,7 +63,12 @@ export async function dispatchPullRequestNotifications(
   )) {
     try {
       await notificationDispatcher.dispatchNotification(
-        buildDispatchNotification(pullRequest, record, normalizedEventRepository),
+        buildDispatchNotification(
+          pullRequest,
+          record,
+          normalizedEventRepository,
+          options.currentUserLogin,
+        ),
       );
       notificationRecordRepository.updateNotificationRecordDelivery(record.id, {
         deliveryStatus: "sent",
@@ -106,6 +112,7 @@ export async function dispatchPullRequestNotifications(
 export interface ResendNotificationRecordOptions {
   notificationRecordId: number;
   dispatchedAt?: string;
+  currentUserLogin?: string;
   notificationDispatcher?: NotificationDispatcher;
   notificationRecordRepository?: Pick<
     NotificationRecordRepository,
@@ -148,7 +155,12 @@ export async function resendNotificationRecord(
     }
 
     await notificationDispatcher.dispatchNotification(
-      buildDispatchNotification(pullRequest, record, normalizedEventRepository),
+      buildDispatchNotification(
+        pullRequest,
+        record,
+        normalizedEventRepository,
+        options.currentUserLogin,
+      ),
     );
     notificationRecordRepository.updateNotificationRecordDelivery(record.id, {
       deliveryStatus: "sent",
@@ -176,6 +188,7 @@ function buildDispatchNotification(
     NormalizedEventRepository,
     "getNormalizedEventById" | "listNormalizedEventsForBundle"
   >,
+  currentUserLogin?: string,
 ): LinuxNotification {
   const events = resolveNotificationEvents(record, normalizedEventRepository);
 
@@ -184,8 +197,39 @@ function buildDispatchNotification(
     body: record.body,
     clickUrl: record.clickUrl,
     icon: resolvePullRequestStateAssetFilePath(pullRequest),
+    sticky: shouldKeepNotificationSticky(pullRequest, events, currentUserLogin),
     ...(events === null || events.length === 0 ? {} : { markup: renderNotificationMarkup(pullRequest, events) }),
   };
+}
+
+function shouldKeepNotificationSticky(
+  pullRequest: Pick<PullRequestRecord, "authorLogin">,
+  events: readonly NormalizedEventRecord[] | null,
+  currentUserLogin?: string,
+): boolean {
+  if (
+    currentUserLogin === undefined ||
+    !sameLogin(currentUserLogin, pullRequest.authorLogin) ||
+    events === null
+  ) {
+    return false;
+  }
+
+  return events.some((event) => isStickyNotificationEventType(event.eventType));
+}
+
+function isStickyNotificationEventType(eventType: string): boolean {
+  return (
+    eventType === "issue_comment" ||
+    eventType === "review_inline_comment" ||
+    eventType === "review_submitted" ||
+    eventType === "review_approved" ||
+    eventType === "review_changes_requested"
+  );
+}
+
+function sameLogin(left: string, right: string): boolean {
+  return left.localeCompare(right, undefined, { sensitivity: "accent" }) === 0;
 }
 
 function resolveNotificationEvents(

@@ -131,8 +131,10 @@ describe("LinuxNotificationAdapter", () => {
       appName: "Octopulse",
       summary: "acme/octopulse PR #7",
       body: "alice approved review\nShip notifications",
+      urgency: "normal",
       actions: { default: "Open" },
       icon: "/tmp/pull-request-open.svg",
+      timeout: 10000,
       "desktop-entry": DESKTOP_ENTRY_ID,
     });
     expect(spawn).not.toHaveBeenCalled();
@@ -157,6 +159,30 @@ describe("LinuxNotificationAdapter", () => {
         body: "alice approved review\nShip notifications",
       }),
     ).rejects.toThrowError("Notification failed: Error: notification daemon unavailable");
+  });
+
+  it("marks sticky notifications as non-expiring", async () => {
+    const adapter = new LinuxNotificationAdapter();
+
+    await expect(
+      adapter.dispatchNotification({
+        title: "acme/octopulse PR #7",
+        body: "alice approved review\nShip notifications",
+        sticky: true,
+      }),
+    ).resolves.toEqual({
+      openedClickUrl: false,
+    });
+
+    expect(freedesktopMocks.Notification).toHaveBeenCalledWith({
+      appName: "Octopulse",
+      summary: "acme/octopulse PR #7",
+      body: "alice approved review\nShip notifications",
+      urgency: "normal",
+      actions: {},
+      timeout: 0,
+      "desktop-entry": DESKTOP_ENTRY_ID,
+    });
   });
 
   it("uses markup body when notification server supports it", async () => {
@@ -204,8 +230,10 @@ describe("LinuxNotificationAdapter", () => {
       summary: "",
       body:
         '<img src="file:///tmp/octocat.png"/> [octopulse] Add notifications (open)\n<b> </b>\n<img src="file:///tmp/alice.png"/> <b>alice</b> ✅ LGTM\n\nCI failed',
+      urgency: "normal",
       actions: {},
       icon: "/tmp/pull-request-open.svg",
+      timeout: 10000,
       "desktop-entry": DESKTOP_ENTRY_ID,
     });
   });
@@ -226,7 +254,9 @@ describe("LinuxNotificationAdapter", () => {
       appName: "Octopulse",
       summary: "acme/octopulse #7 Add notifications",
       body: "alice: ✅ LGTM",
+      urgency: "normal",
       actions: {},
+      timeout: 10000,
       "desktop-entry": DESKTOP_ENTRY_ID,
     });
   });
@@ -266,7 +296,9 @@ describe("LinuxNotificationAdapter", () => {
       appName: "Octopulse",
       summary: "",
       body: "[octopulse] Add notifications (open)\n<b> </b>\n<b>alice</b> ✅ LGTM",
+      urgency: "normal",
       actions: {},
+      timeout: 10000,
       "desktop-entry": DESKTOP_ENTRY_ID,
     });
   });

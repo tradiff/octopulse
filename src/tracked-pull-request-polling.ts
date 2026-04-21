@@ -123,6 +123,7 @@ export async function pollTrackedPullRequests<TClient>(
       if (notificationDispatcher) {
         await dispatchPullRequestNotifications(database, refreshedPullRequest, {
           dispatchedAt: notificationDispatchedAt,
+          currentUserLogin: githubAuth.currentUserLogin,
           notificationDispatcher,
         });
         return;

@@ -62,6 +62,7 @@ describe("dispatchPullRequestNotifications", () => {
 
       await expect(
         dispatchPullRequestNotifications(database, pullRequest, {
+          currentUserLogin: "octocat",
           dispatchedAt: "2026-04-10T12:02:45.000Z",
           notificationDispatcher,
         }),
@@ -79,6 +80,7 @@ describe("dispatchPullRequestNotifications", () => {
         body: "alice: ✅ approved",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
         icon: expect.stringContaining("pull-request-open.svg"),
+        sticky: true,
         markup: expect.objectContaining({
           headerText: "[octopulse] Add notifications (open)",
           headerAvatarUrl: "https://avatars.example.test/octocat.png",
@@ -89,6 +91,7 @@ describe("dispatchPullRequestNotifications", () => {
         body: "bob: 💬 commented",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
         icon: expect.stringContaining("pull-request-open.svg"),
+        sticky: true,
         markup: expect.objectContaining({
           headerText: "[octopulse] Add notifications (open)",
           headerAvatarUrl: "https://avatars.example.test/octocat.png",
@@ -194,6 +197,52 @@ describe("dispatchPullRequestNotifications", () => {
       database.close();
     }
   });
+
+  it("auto-dismisses notifications for pull requests not authored by the current user", async () => {
+    const { database, pullRequest } = createPullRequest({ authorLogin: "alice" });
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const notificationDispatcher = {
+      dispatchNotification: vi.fn().mockResolvedValue(undefined),
+    };
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "issue_comment",
+        actorLogin: "bob",
+        actorClass: "human_other",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ actorAvatarUrl: "https://avatars.example.test/bob.png" }),
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+
+      expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
+        eligibleCount: 1,
+        bundledCount: 1,
+        createdBundleCount: 1,
+      });
+
+      await expect(
+        dispatchPullRequestNotifications(database, pullRequest, {
+          currentUserLogin: "octocat",
+          notificationDispatcher,
+        }),
+      ).resolves.toEqual({
+        immediateCount: 0,
+        bundledCount: 1,
+        createdCount: 1,
+        dispatchedCount: 1,
+        failedCount: 0,
+      });
+
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledWith(expect.objectContaining({
+        body: "bob: 💬 commented",
+        sticky: false,
+      }));
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {
@@ -209,7 +258,9 @@ function createRepository(): {
   };
 }
 
-function createPullRequest(): {
+function createPullRequest(
+  overrides: Partial<UpsertPullRequestInput> = {},
+): {
   database: ReturnType<typeof initializeDatabase>;
   pullRequest: PullRequestRecord;
 } {
@@ -217,7 +268,7 @@ function createPullRequest(): {
 
   return {
     database,
-    pullRequest: repository.upsertPullRequest(createPullRequestInput()),
+    pullRequest: repository.upsertPullRequest(createPullRequestInput(overrides)),
   };
 }
 

@@ -286,6 +286,7 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
         await createReviewRequestedNotification(database, persistedPullRequest, {
           occurredAt: observedAt,
           dispatchedAt: notificationDispatchedAt,
+          currentUserLogin: githubAuth.currentUserLogin,
           ...(options.notificationDispatcher
             ? { notificationDispatcher: options.notificationDispatcher }
             : {}),
@@ -464,6 +465,7 @@ async function createReviewRequestedNotification(
   options: {
     occurredAt: string;
     dispatchedAt: string;
+    currentUserLogin: string;
     notificationDispatcher?: NotificationDispatcher;
   },
 ): Promise<void> {
@@ -478,6 +480,7 @@ async function createReviewRequestedNotification(
   if (options.notificationDispatcher) {
     await dispatchPullRequestNotifications(database, pullRequest, {
       dispatchedAt: options.dispatchedAt,
+      currentUserLogin: options.currentUserLogin,
       notificationDispatcher: options.notificationDispatcher,
     });
     return;
