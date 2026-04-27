@@ -243,6 +243,89 @@ describe("dispatchPullRequestNotifications", () => {
       database.close();
     }
   });
+
+  it("keeps review-request notifications sticky even when the pull request is not authored by the current user", async () => {
+    const { database, pullRequest } = createPullRequest({ authorLogin: "alice" });
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const notificationDispatcher = {
+      dispatchNotification: vi.fn().mockResolvedValue(undefined),
+    };
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_requested",
+        decisionState: "notified",
+        notificationTiming: "immediate",
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+
+      await expect(
+        dispatchPullRequestNotifications(database, pullRequest, {
+          currentUserLogin: "octocat",
+          notificationDispatcher,
+        }),
+      ).resolves.toEqual({
+        immediateCount: 1,
+        bundledCount: 0,
+        createdCount: 1,
+        dispatchedCount: 1,
+        failedCount: 0,
+      });
+
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledWith(expect.objectContaining({
+        body: "👀 review requested",
+        sticky: true,
+      }));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps ready-for-review notifications sticky even when the pull request is not authored by the current user", async () => {
+    const { database, pullRequest } = createPullRequest({ authorLogin: "alice" });
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const notificationDispatcher = {
+      dispatchNotification: vi.fn().mockResolvedValue(undefined),
+    };
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "ready_for_review",
+        actorLogin: "bob",
+        actorClass: "human_other",
+        decisionState: "notified",
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+
+      expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
+        eligibleCount: 1,
+        bundledCount: 1,
+        createdBundleCount: 1,
+      });
+
+      await expect(
+        dispatchPullRequestNotifications(database, pullRequest, {
+          currentUserLogin: "octocat",
+          notificationDispatcher,
+        }),
+      ).resolves.toEqual({
+        immediateCount: 0,
+        bundledCount: 1,
+        createdCount: 1,
+        dispatchedCount: 1,
+        failedCount: 0,
+      });
+
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledWith(expect.objectContaining({
+        body: "bob: marked PR ready for review",
+        sticky: true,
+      }));
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {

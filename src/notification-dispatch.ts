@@ -207,25 +207,40 @@ function shouldKeepNotificationSticky(
   events: readonly NormalizedEventRecord[] | null,
   currentUserLogin?: string,
 ): boolean {
-  if (
-    currentUserLogin === undefined ||
-    !sameLogin(currentUserLogin, pullRequest.authorLogin) ||
-    events === null
-  ) {
+  if (events === null) {
     return false;
   }
 
-  return events.some((event) => isStickyNotificationEventType(event.eventType));
+  const hasStickyEventType = events.some((event) => isStickyNotificationEventType(event.eventType));
+
+  if (!hasStickyEventType) {
+    return false;
+  }
+
+  if (events.some((event) => isReviewRequestEventType(event.eventType))) {
+    return true;
+  }
+
+  if (currentUserLogin === undefined || !sameLogin(currentUserLogin, pullRequest.authorLogin)) {
+    return false;
+  }
+
+  return true;
 }
 
 function isStickyNotificationEventType(eventType: string): boolean {
   return (
+    isReviewRequestEventType(eventType) ||
     eventType === "issue_comment" ||
     eventType === "review_inline_comment" ||
     eventType === "review_submitted" ||
     eventType === "review_approved" ||
     eventType === "review_changes_requested"
   );
+}
+
+function isReviewRequestEventType(eventType: string): boolean {
+  return eventType === "review_requested" || eventType === "ready_for_review";
 }
 
 function sameLogin(left: string, right: string): boolean {
