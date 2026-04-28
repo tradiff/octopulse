@@ -130,13 +130,14 @@ describe("startServer", () => {
               decisionStates: ["notified" as const],
               eventTypes: ["review_approved"],
               actorClasses: ["human_other" as const],
-               sourceKind: "immediate" as const,
-               repositoryKey: "acme/octopulse",
-               isTracked: true,
-               pullRequestStatus: "open" as const,
-               author: {
-                 login: "octocat",
-                 avatarUrl: "https://avatars.example.test/octocat.png",
+                sourceKind: "immediate" as const,
+                repositoryKey: "acme/octopulse",
+                isTracked: true,
+                pullRequestStatus: "open" as const,
+                pullRequestStateAssetUrlPath: "/assets/pull-request-open.svg",
+                author: {
+                  login: "octocat",
+                  avatarUrl: "https://avatars.example.test/octocat.png",
               },
               actors: [
                 {
@@ -259,6 +260,7 @@ describe("startServer", () => {
            repositoryKey: "acme/octopulse",
            isTracked: true,
            pullRequestStatus: "open",
+           pullRequestStateAssetUrlPath: "/assets/pull-request-open.svg",
            author: {
              login: "octocat",
              avatarUrl: "https://avatars.example.test/octocat.png",

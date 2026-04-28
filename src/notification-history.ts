@@ -24,6 +24,7 @@ import {
 } from "./notification-rendering.js";
 import {
   resolvePullRequestLifecycleState,
+  resolvePullRequestStateAssetUrlPath,
   type PullRequestLifecycleState,
 } from "./pull-request-state.js";
 import { PullRequestRepository, type PullRequestRecord } from "./pull-request-repository.js";
@@ -49,6 +50,7 @@ export interface NotificationHistoryEntry {
   repositoryKey: string | null;
   isTracked: boolean | null;
   pullRequestStatus: PullRequestLifecycleState | null;
+  pullRequestStateAssetUrlPath: string | null;
   author: NotificationHistoryActor | null;
   actors: NotificationHistoryActor[];
   summaryParagraphs: NotificationMarkupParagraph[];
@@ -115,6 +117,9 @@ export function listNotificationHistory(
           repositoryKey: pullRequest ? formatRepositoryKey(pullRequest) : readRepositoryKeyFromUrl(record.clickUrl),
           isTracked: pullRequest?.isTracked ?? null,
           pullRequestStatus: pullRequest ? resolvePullRequestLifecycleState(pullRequest) : null,
+          pullRequestStateAssetUrlPath: pullRequest
+            ? resolvePullRequestStateAssetUrlPath(pullRequest)
+            : null,
           author: pullRequest
             ? {
                 login: pullRequest.authorLogin,

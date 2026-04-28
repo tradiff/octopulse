@@ -13,7 +13,7 @@ import { Highlight, themes } from "prism-react-renderer";
 import { DEFAULT_ACTIVITY_PAGE_SIZE } from "./activity-feed.js";
 import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
-import { formatPullRequestStateLabel, resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
+import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
 import {
@@ -735,17 +735,26 @@ function NotificationHistoryPanel({
                     {entry.author ? (
                       <GitHubAvatar login={entry.author.login} avatarUrl={entry.author.avatarUrl} />
                     ) : null}
+                    {entry.pullRequestStateAssetUrlPath ? (
+                      <img
+                        className="state-pill-icon"
+                        src={entry.pullRequestStateAssetUrlPath}
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : null}
                     {entry.clickUrl ? (
                       <a
                         href={entry.clickUrl}
                         className="notification-history-preview-link"
                         title={entry.title}
                       >
-                        {entry.markupHeaderText}
+                        {formatNotificationHistoryHeaderText(entry)}
                       </a>
                     ) : (
                       <strong className="notification-history-preview-title" title={entry.title}>
-                        {entry.markupHeaderText}
+                        {formatNotificationHistoryHeaderText(entry)}
                       </strong>
                     )}
                   </div>
@@ -1155,17 +1164,10 @@ function PullRequestList({
         <ul className="pull-request-list">
           {pullRequests.map((pullRequest) => (
             <li key={pullRequest.id} className="pull-request-item">
-              <div className="pull-request-meta">
-                <a href={pullRequest.url} className="pull-request-link">
-                  {pullRequest.repositoryOwner}/{pullRequest.repositoryName} #{pullRequest.number}
-                </a>
-                <div className="pull-request-controls">
-                  <span
-                    className={`tracking-pill ${pullRequest.isTracked ? "tracking-pill-tracked" : "tracking-pill-untracked"}`}
-                  >
-                    {formatTrackingStateLabel(pullRequest)}
-                  </span>
-                  <span className="state-pill">
+              <div className="notification-history-preview">
+                <div className="notification-history-preview-header-row">
+                  <div className="notification-history-preview-header">
+                    <GitHubAvatar login={pullRequest.authorLogin} avatarUrl={pullRequest.authorAvatarUrl} />
                     <img
                       className="state-pill-icon"
                       src={resolvePullRequestStateAssetUrlPath(pullRequest)}
@@ -1173,18 +1175,22 @@ function PullRequestList({
                       loading="lazy"
                       decoding="async"
                     />
-                    {formatPullRequestStateLabel(pullRequest)}
+                    <a
+                      href={pullRequest.url}
+                      className="notification-history-preview-link"
+                      title={`${pullRequest.repositoryOwner}/${pullRequest.repositoryName} #${pullRequest.number}`}
+                    >
+                      [{pullRequest.repositoryName}] {pullRequest.title}
+                    </a>
+                  </div>
+                </div>
+                <div className="notification-history-meta-row">
+                  <span className="history-pill">
+                    {pullRequest.repositoryOwner}/{pullRequest.repositoryName} #{pullRequest.number}
                   </span>
+                  <span className="history-pill">@{pullRequest.authorLogin}</span>
                   {renderAction ? renderAction(pullRequest) : null}
                 </div>
-              </div>
-              <strong>{pullRequest.title}</strong>
-              <div className="pull-request-meta-row">
-                <GitHubIdentityPill
-                  label="Author"
-                  login={pullRequest.authorLogin}
-                  avatarUrl={pullRequest.authorAvatarUrl}
-                />
               </div>
             </li>
           ))}
@@ -1262,9 +1268,25 @@ function renderPullRequestAction(
     onRetrack: (pullRequestUrl: string) => Promise<void>;
   },
 ): ReactNode {
+  return <PullRequestTrackingControl pullRequest={pullRequest} handlers={handlers} />;
+}
+
+function PullRequestTrackingControl({
+  pullRequest,
+  handlers,
+}: {
+  pullRequest: PullRequestRecord;
+  handlers: {
+    onUntrack: (githubPullRequestId: number) => Promise<void>;
+    onRetrack: (pullRequestUrl: string) => Promise<void>;
+  };
+}) {
+  const statusLabel = formatTrackingStateLabel(pullRequest);
+
   if (pullRequest.isTracked) {
     return (
       <form
+        className="pull-request-tracking-control-form"
         method="post"
         action={`/tracked-pull-requests/${pullRequest.githubPullRequestId}/untrack`}
         onSubmit={(event) => {
@@ -1272,15 +1294,22 @@ function renderPullRequestAction(
           void handlers.onUntrack(pullRequest.githubPullRequestId);
         }}
       >
-        <button type="submit" className="action-button">
-          Untrack
-        </button>
+        <div className="tracking-control tracking-control-tracked">
+          <span className="tracking-control-segment tracking-control-segment-active">{statusLabel}</span>
+          <button
+            type="submit"
+            className="tracking-control-button tracking-control-segment tracking-control-segment-inactive"
+          >
+            Untrack
+          </button>
+        </div>
       </form>
     );
   }
 
   return (
     <form
+      className="pull-request-tracking-control-form"
       method="post"
       action="/inactive-pull-requests/retrack"
       onSubmit={(event) => {
@@ -1289,9 +1318,15 @@ function renderPullRequestAction(
       }}
     >
       <input type="hidden" name="url" value={pullRequest.url} />
-      <button type="submit" className="action-button primary-button">
-        Track Again
-      </button>
+      <div className="tracking-control tracking-control-untracked">
+        <button
+          type="submit"
+          className="tracking-control-button tracking-control-segment tracking-control-segment-inactive"
+        >
+          Track Again
+        </button>
+        <span className="tracking-control-segment tracking-control-segment-active">{statusLabel}</span>
+      </div>
     </form>
   );
 }
@@ -1526,6 +1561,14 @@ function formatPullRequestEmptyMessage(uiFilters: UiFilterValues, hasActiveFilte
 
 function formatTrackingStateLabel(pullRequest: PullRequestRecord): string {
   return pullRequest.isTracked ? "Tracked" : "Untracked";
+}
+
+function formatNotificationHistoryHeaderText(entry: NotificationHistoryEntry): string {
+  if (entry.pullRequestStateAssetUrlPath === null) {
+    return entry.markupHeaderText;
+  }
+
+  return entry.markupHeaderText.replace(/ \((?:open|draft|merged|closed)\)$/, "");
 }
 
 function formatDeliveryStatusLabel(deliveryStatus: NotificationHistoryEntry["deliveryStatus"]): string {
@@ -2057,19 +2100,6 @@ const APP_STYLES = `
     outline-offset: 2px;
   }
 
-  .pull-request-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .pull-request-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
   .pull-request-link {
     font-size: 0.9rem;
     color: #7dd3fc;
@@ -2192,6 +2222,70 @@ const APP_STYLES = `
     margin-left: auto;
   }
 
+  .pull-request-tracking-control-form {
+    margin-left: auto;
+  }
+
+  .tracking-control {
+    display: inline-flex;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+  }
+
+  .tracking-control-segment {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .tracking-control-segment-active {
+    cursor: default;
+  }
+
+  .tracking-control-segment-inactive {
+    color: #94a3b8;
+  }
+
+  .tracking-control-tracked .tracking-control-segment-active {
+    background: rgba(34, 197, 94, 0.12);
+    color: #86efac;
+  }
+
+  .tracking-control-untracked .tracking-control-segment-active {
+    background: rgba(250, 204, 21, 0.14);
+    color: #fde68a;
+  }
+
+  .tracking-control-button {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    color: inherit;
+    font-family: inherit;
+    line-height: inherit;
+  }
+
+  .tracking-control-tracked .tracking-control-button:hover {
+    color: #bbf7d0;
+  }
+
+  .tracking-control-untracked .tracking-control-button:hover {
+    color: #fef08a;
+  }
+
+  .tracking-control-button:focus-visible {
+    outline: 2px solid rgba(56, 189, 248, 0.4);
+    outline-offset: 2px;
+  }
+
   .raw-events-meta-row {
     margin-bottom: 12px;
   }
@@ -2295,38 +2389,10 @@ const APP_STYLES = `
     display: block;
   }
 
-  .state-pill {
-    padding: 4px 8px;
-    background: rgba(148, 163, 184, 0.14);
-    color: #cbd5e1;
-    gap: 6px;
-    white-space: nowrap;
-  }
-
   .state-pill-icon {
     width: 0.875rem;
     height: 0.875rem;
     flex: 0 0 auto;
-  }
-
-  .tracking-pill {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    padding: 4px 8px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .tracking-pill-tracked {
-    background: rgba(34, 197, 94, 0.12);
-    color: #86efac;
-  }
-
-  .tracking-pill-untracked {
-    background: rgba(250, 204, 21, 0.14);
-    color: #fde68a;
   }
 
   .history-pill,
@@ -2521,16 +2587,6 @@ const APP_STYLES = `
     .manual-track-dialog-header {
       flex-direction: column;
       align-items: stretch;
-    }
-
-    .pull-request-meta {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-
-    .pull-request-controls {
-      align-items: flex-start;
-      flex-direction: column;
     }
 
     .notification-history-preview-header-row {

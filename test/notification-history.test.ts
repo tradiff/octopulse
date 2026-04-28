@@ -100,6 +100,7 @@ describe("listNotificationHistory", () => {
               repositoryKey: "acme/octopulse",
               isTracked: true,
               pullRequestStatus: "open",
+              pullRequestStateAssetUrlPath: "/assets/pull-request-open.svg",
               author: {
                 login: "octocat",
                 avatarUrl: null,
@@ -141,6 +142,7 @@ describe("listNotificationHistory", () => {
               repositoryKey: "acme/octopulse",
               isTracked: true,
               pullRequestStatus: "open",
+              pullRequestStateAssetUrlPath: "/assets/pull-request-open.svg",
               author: {
                 login: "octocat",
                 avatarUrl: null,
