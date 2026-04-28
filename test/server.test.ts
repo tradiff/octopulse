@@ -121,6 +121,7 @@ describe("startServer", () => {
             {
               id: 1,
               title: "acme/octopulse PR #7",
+              markupHeaderText: "[octopulse] Add pull request polling (open)",
               body: "alice approved review",
               clickUrl: "https://github.com/acme/octopulse/pull/7",
               deliveryStatus: "sent" as const,
@@ -243,6 +244,7 @@ describe("startServer", () => {
         {
           id: 1,
           title: "acme/octopulse PR #7",
+          markupHeaderText: "[octopulse] Add pull request polling (open)",
           body: "alice approved review",
           clickUrl: "https://github.com/acme/octopulse/pull/7",
           deliveryStatus: "sent",

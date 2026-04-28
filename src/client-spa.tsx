@@ -726,69 +726,80 @@ function NotificationHistoryPanel({
         <ul className="notification-history-list">
           {notificationHistory.map((entry) => (
             <li key={entry.id} className="notification-history-item">
-              <div className="notification-history-header">
-                {entry.clickUrl ? (
-                  <a href={entry.clickUrl} className="pull-request-link">
-                    {entry.title}
-                  </a>
-                ) : (
-                  <strong className="notification-history-title">{entry.title}</strong>
-                )}
-                <span className={`delivery-pill delivery-${entry.deliveryStatus}`}>
-                  {formatDeliveryStatusLabel(entry.deliveryStatus)}
-                </span>
-              </div>
-              {entry.summaryParagraphs.length > 0 ? (
-                <div className="notification-history-summary-list">
-                  {entry.summaryParagraphs.map((paragraph, index) => (
-                    <p key={`${entry.id}-summary-${index}`} className="notification-history-summary-line">
-                      {paragraph.actorLogin ? (
-                        <>
-                          <GitHubAvatar login={paragraph.actorLogin} avatarUrl={paragraph.actorAvatarUrl} />
-                          <span className="notification-history-summary-actor">{paragraph.actorLogin}</span>
-                        </>
-                      ) : null}
-                      <span className="notification-history-summary-text">{paragraph.text}</span>
-                    </p>
-                  ))}
+              <div className="notification-history-preview">
+                <div className="notification-history-preview-header-row">
+                  <div className="notification-history-preview-header">
+                    {entry.author ? (
+                      <GitHubAvatar login={entry.author.login} avatarUrl={entry.author.avatarUrl} />
+                    ) : null}
+                    {entry.clickUrl ? (
+                      <a
+                        href={entry.clickUrl}
+                        className="notification-history-preview-link"
+                        title={entry.title}
+                      >
+                        {entry.markupHeaderText}
+                      </a>
+                    ) : (
+                      <strong className="notification-history-preview-title" title={entry.title}>
+                        {entry.markupHeaderText}
+                      </strong>
+                    )}
+                  </div>
+                  <span className={`delivery-pill delivery-${entry.deliveryStatus}`}>
+                    {formatDeliveryStatusLabel(entry.deliveryStatus)}
+                  </span>
                 </div>
-              ) : (
-                <p className="notification-history-body">{entry.body}</p>
-              )}
-              <div className="notification-history-meta-row">
-                {entry.author ? (
-                  <GitHubIdentityPill
-                    label="Author"
-                    login={entry.author.login}
-                    avatarUrl={entry.author.avatarUrl}
-                  />
-                ) : null}
-                <span className="history-pill">{formatSourceKindLabel(entry.sourceKind)}</span>
-                {entry.decisionStates.map((decisionState) => (
-                  <span key={`${entry.id}-${decisionState}`} className="history-pill">
-                    {formatDecisionStateLabel(decisionState)}
-                  </span>
-                ))}
-                <span className="notification-history-time">
-                  Created {formatHistoryTimestamp(entry.createdAt)}
-                </span>
-                {entry.deliveredAt ? (
-                  <span className="notification-history-time">
-                    Delivered {formatHistoryTimestamp(entry.deliveredAt)}
-                  </span>
-                ) : null}
-                <form
-                  method="post"
-                  action={`/notification-records/${entry.id}/resend`}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void onResend(entry.id);
-                  }}
-                >
-                  <button type="submit" className="action-button small-button">
-                    Resend
-                  </button>
-                </form>
+                <div className="notification-history-preview-body">
+                  {entry.summaryParagraphs.length > 0 ? (
+                    <div className="notification-history-summary-list">
+                      {entry.summaryParagraphs.map((paragraph, index) => (
+                        <p key={`${entry.id}-summary-${index}`} className="notification-history-summary-line">
+                          {paragraph.actorLogin ? (
+                            <>
+                              <GitHubAvatar
+                                login={paragraph.actorLogin}
+                                avatarUrl={paragraph.actorAvatarUrl}
+                              />
+                              <span className="notification-history-summary-actor">
+                                {paragraph.actorLogin}
+                              </span>
+                            </>
+                          ) : null}
+                          <span className="notification-history-summary-text">{paragraph.text}</span>
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="notification-history-body">{entry.body}</p>
+                  )}
+                </div>
+                <div className="notification-history-meta-row">
+                  <span className="history-pill">{formatSourceKindLabel(entry.sourceKind)}</span>
+                  {entry.decisionStates.map((decisionState) => (
+                    <span key={`${entry.id}-${decisionState}`} className="history-pill">
+                      {formatDecisionStateLabel(decisionState)}
+                    </span>
+                  ))}
+                  {entry.deliveredAt ? (
+                    <span className="history-pill notification-history-time-pill">
+                      Delivered {formatHistoryTimestamp(entry.deliveredAt)}
+                    </span>
+                  ) : null}
+                  <form
+                    className="notification-history-resend-form"
+                    method="post"
+                    action={`/notification-records/${entry.id}/resend`}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void onResend(entry.id);
+                    }}
+                  >
+                    <button type="submit" className="action-button small-button">
+                      Resend
+                    </button>
+                  </form>
+                </div>
               </div>
             </li>
           ))}
@@ -1937,13 +1948,7 @@ const APP_STYLES = `
     border: 1px solid rgba(148, 163, 184, 0.16);
   }
 
-  .notification-history-item {
-    padding: 14px;
-    border-radius: 12px;
-    background: rgba(39, 46, 56, 0.78);
-    border: 1px solid rgba(148, 163, 184, 0.16);
-  }
-
+  .notification-history-item,
   .raw-events-item {
     padding: 14px;
     border-radius: 12px;
@@ -2061,11 +2066,59 @@ const APP_STYLES = `
     text-decoration: underline;
   }
 
-  .notification-history-header {
+  .notification-history-preview {
+    padding: 0;
+    background: none;
+    border: 0;
+  }
+
+  .notification-history-preview-header-row {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
+  }
+
+  .notification-history-preview-header {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .notification-history-preview-header .github-avatar {
+    width: 24px;
+    height: 24px;
+  }
+
+  .notification-history-preview-header .github-avatar-fallback {
+    font-size: 0.75rem;
+  }
+
+  .notification-history-preview-link,
+  .notification-history-preview-title {
+    display: block;
+    min-width: 0;
+    color: #f8fafc;
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+
+  .notification-history-preview-link {
+    text-decoration: none;
+  }
+
+  .notification-history-preview-link:hover {
+    text-decoration: underline;
+  }
+
+  .notification-history-preview-body {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
   }
 
   .raw-events-header {
@@ -2075,35 +2128,38 @@ const APP_STYLES = `
     gap: 12px;
   }
 
-  .notification-history-title {
-    margin: 0;
-  }
-
   .notification-history-body {
-    margin-top: 10px;
+    margin: 0;
+    color: #e2e8f0;
+    line-height: 1.5;
     white-space: pre-line;
   }
 
   .notification-history-summary-list {
     display: grid;
-    gap: 8px;
-    margin-top: 10px;
+    gap: 10px;
+    margin: 0;
   }
 
   .notification-history-summary-line {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    align-items: flex-start;
+    gap: 10px;
     margin: 0;
   }
 
   .notification-history-summary-actor {
-    color: #e2e8f0;
+    flex-shrink: 0;
+    color: #f8fafc;
     font-weight: 600;
   }
 
   .notification-history-summary-text {
-    color: #cbd5e1;
+    flex: 1 1 auto;
+    min-width: 0;
+    color: #dbe7f3;
+    line-height: 1.5;
+    word-break: break-word;
   }
 
   .notification-history-meta-row {
@@ -2111,6 +2167,14 @@ const APP_STYLES = `
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 12px;
+  }
+
+  .notification-history-time-pill {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .notification-history-resend-form {
+    margin-left: auto;
   }
 
   .raw-events-meta-row {
@@ -2454,7 +2518,7 @@ const APP_STYLES = `
       flex-direction: column;
     }
 
-    .notification-history-header {
+    .notification-history-preview-header-row {
       flex-direction: column;
     }
 

@@ -91,6 +91,7 @@ describe("listNotificationHistory", () => {
           entries: [
             expect.objectContaining({
               title: "acme/octopulse PR #7",
+              markupHeaderText: "[octopulse] Add notifications (open)",
               deliveryStatus: "sent",
               decisionStates: ["notified_ai_fallback", "notified"],
               eventTypes: ["issue_comment", "ci_failed"],
@@ -130,6 +131,7 @@ describe("listNotificationHistory", () => {
             }),
             expect.objectContaining({
               title: "acme/octopulse PR #7",
+              markupHeaderText: "[octopulse] Add notifications (open)",
               deliveryStatus: "pending",
               decisionStates: ["notified"],
               eventTypes: ["review_approved"],

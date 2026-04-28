@@ -19,6 +19,7 @@ import {
 } from "./notification-record-repository.js";
 import {
   buildNotificationParagraph,
+  renderNotificationMarkup,
   type NotificationMarkupParagraph,
 } from "./notification-rendering.js";
 import { PullRequestRepository, type PullRequestRecord } from "./pull-request-repository.js";
@@ -31,6 +32,7 @@ export interface NotificationHistoryActor {
 export interface NotificationHistoryEntry {
   id: number;
   title: string;
+  markupHeaderText: string;
   body: string;
   clickUrl: string | null;
   deliveryStatus: NotificationDeliveryStatus;
@@ -88,10 +90,14 @@ export function listNotificationHistory(
       .map((record) => {
         const events = resolveHistoryEvents(record, normalizedEventRepository);
         const pullRequest = resolveHistoryPullRequest(events, pullRequestRepository);
+        const markup = pullRequest === undefined || events.length === 0
+          ? null
+          : renderNotificationMarkup(pullRequest, events);
 
         return {
           id: record.id,
           title: record.title,
+          markupHeaderText: markup?.headerText ?? record.title,
           body: record.body,
           clickUrl: record.clickUrl,
           deliveryStatus: record.deliveryStatus,
@@ -110,7 +116,8 @@ export function listNotificationHistory(
               }
             : null,
           actors: collectActors(events),
-          summaryParagraphs: events.map((event) => buildNotificationParagraph(event)),
+          summaryParagraphs:
+            markup === null ? events.map((event) => buildNotificationParagraph(event)) : [...markup.paragraphs],
         };
       }),
     page: pagination.page,
