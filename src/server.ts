@@ -2,6 +2,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { existsSync, readFileSync } from "node:fs";
 
+import {
+  DEFAULT_ACTIVITY_PAGE_SIZE,
+  type ListActivityFeedOptions,
+  type PaginatedEntries,
+} from "./activity-feed.js";
 import { APP_ICON_PNG_URL } from "./app-icon.js";
 import {
   DEFAULT_LOG_VIEWER_ENTRY_LIMIT,
@@ -23,6 +28,7 @@ import {
 } from "./pull-request-state-assets.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
+import { readUiFilterValues } from "./ui-filters.js";
 
 const CLIENT_BUNDLE_PATH = new URL("../dist/public/app.js", import.meta.url);
 const SPA_DOCUMENT = [
@@ -52,12 +58,14 @@ export interface StartServerOptions {
   port?: number;
   listTrackedPullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
   listInactivePullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
-  listNotificationHistory?: () => SyncOrPromise<NotificationHistoryEntry[]>;
+  listNotificationHistory?: (
+    options: ListActivityFeedOptions,
+  ) => SyncOrPromise<PaginatedEntries<NotificationHistoryEntry>>;
   listRecentLogs?: (options: {
     level?: LogLevel;
     limit?: number;
   }) => SyncOrPromise<RecentLogEntry[]>;
-  listRawEvents?: () => SyncOrPromise<RawEventsEntry[]>;
+  listRawEvents?: (options: ListActivityFeedOptions) => SyncOrPromise<PaginatedEntries<RawEventsEntry>>;
   manualTrackPullRequestByUrl?: (pullRequestUrl: string) => Promise<TrackPullRequestByUrlResult>;
   manualUntrackPullRequest?: (
     githubPullRequestId: number,
@@ -168,12 +176,17 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && pathname === "/api/notification-history") {
-    await handleNotificationHistoryRequest(request, response, options.listNotificationHistory);
+    await handleNotificationHistoryRequest(
+      request,
+      response,
+      options.listNotificationHistory,
+      searchParams,
+    );
     return;
   }
 
   if (request.method === "GET" && pathname === "/api/raw-events") {
-    await handleRawEventsRequest(request, response, options.listRawEvents);
+    await handleRawEventsRequest(request, response, options.listRawEvents, searchParams);
     return;
   }
 
@@ -450,6 +463,7 @@ async function handleNotificationHistoryRequest(
   request: IncomingMessage,
   response: ServerResponse,
   listNotificationHistory: StartServerOptions["listNotificationHistory"],
+  searchParams: URLSearchParams,
 ): Promise<void> {
   if (!listNotificationHistory) {
     respond(
@@ -462,13 +476,20 @@ async function handleNotificationHistoryRequest(
     return;
   }
 
-  const notificationHistory = await listNotificationHistory();
+  const notificationHistoryPage = await listNotificationHistory({
+    filters: readUiFilterValues(searchParams),
+    page: readActivityPage(searchParams),
+    pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+  });
   respond(
     response,
     request.method,
     200,
     "application/json; charset=utf-8",
-    JSON.stringify({ notificationHistory }),
+    JSON.stringify({
+      notificationHistory: notificationHistoryPage.entries,
+      pagination: formatPaginationResponse(notificationHistoryPage),
+    }),
   );
 }
 
@@ -476,6 +497,7 @@ async function handleRawEventsRequest(
   request: IncomingMessage,
   response: ServerResponse,
   listRawEvents: StartServerOptions["listRawEvents"],
+  searchParams: URLSearchParams,
 ): Promise<void> {
   if (!listRawEvents) {
     respond(
@@ -488,13 +510,20 @@ async function handleRawEventsRequest(
     return;
   }
 
-  const rawEvents = await listRawEvents();
+  const rawEventsPage = await listRawEvents({
+    filters: readUiFilterValues(searchParams),
+    page: readActivityPage(searchParams),
+    pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+  });
   respond(
     response,
     request.method,
     200,
     "application/json; charset=utf-8",
-    JSON.stringify({ rawEvents }),
+    JSON.stringify({
+      rawEvents: rawEventsPage.entries,
+      pagination: formatPaginationResponse(rawEventsPage),
+    }),
   );
 }
 
@@ -607,6 +636,32 @@ function readLogLevelFilter(searchParams: URLSearchParams): LogLevelFilter {
   }
 
   return isLogLevel(value) ? value : "all";
+}
+
+function readActivityPage(searchParams: URLSearchParams): number {
+  const value = searchParams.get("page");
+
+  if (value === null) {
+    return 1;
+  }
+
+  const numericValue = Number(value);
+
+  return Number.isSafeInteger(numericValue) && numericValue > 0 ? numericValue : 1;
+}
+
+function formatPaginationResponse<T>(page: PaginatedEntries<T>): {
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+} {
+  return {
+    page: page.page,
+    pageSize: page.pageSize,
+    totalCount: page.totalCount,
+    totalPages: page.totalPages,
+  };
 }
 
 async function handleNotificationRecordResendRequest(

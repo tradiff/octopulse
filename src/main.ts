@@ -103,14 +103,24 @@ async function main(): Promise<void> {
     server = await startServer({
       listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
       listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
-      listNotificationHistory: async () => listNotificationHistory(currentDatabase),
+      listNotificationHistory: async ({ filters, page, pageSize }) =>
+        listNotificationHistory(currentDatabase, {
+          ...(filters ? { filters } : {}),
+          ...(page ? { page } : {}),
+          ...(pageSize ? { pageSize } : {}),
+        }),
       listRecentLogs: async ({ level, limit }) =>
         readRecentLogEntries({
           logsDirPath: config.paths.logsDirPath,
           ...(level ? { level } : {}),
           ...(limit ? { limit } : {}),
         }),
-      listRawEvents: async () => listRawEvents(currentDatabase),
+      listRawEvents: async ({ filters, page, pageSize }) =>
+        listRawEvents(currentDatabase, {
+          ...(filters ? { filters } : {}),
+          ...(page ? { page } : {}),
+          ...(pageSize ? { pageSize } : {}),
+        }),
       manualTrackPullRequestByUrl: (pullRequestUrl: string) =>
         trackPullRequestByUrl(currentDatabase, githubAuth, pullRequestUrl, {
           pullRequestRepository,

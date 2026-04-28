@@ -10,6 +10,7 @@ import {
 import { createRoot } from "react-dom/client";
 import { Highlight, themes } from "prism-react-renderer";
 
+import { DEFAULT_ACTIVITY_PAGE_SIZE } from "./activity-feed.js";
 import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import { formatPullRequestStateLabel, resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
@@ -32,6 +33,13 @@ interface AppFlashMessage {
   text: string;
 }
 
+interface PaginationState {
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
 type LogLevel = "debug" | "info" | "warn" | "error";
 type LogLevelFilter = "all" | LogLevel;
 type AppPage = "pull-requests" | "logs" | "notification-history" | "raw-events";
@@ -40,6 +48,7 @@ interface RouteState {
   currentPage: AppPage;
   uiFilters: UiFilterValues;
   logLevelFilter: LogLevelFilter;
+  activityPage: number;
 }
 
 type PageFilterField = keyof UiFilterValues;
@@ -53,6 +62,13 @@ const APP_PAGES: readonly AppPage[] = [
   "raw-events",
   "logs",
 ];
+const DEFAULT_ACTIVITY_PAGE = 1;
+const EMPTY_PAGINATION_STATE: PaginationState = {
+  page: DEFAULT_ACTIVITY_PAGE,
+  pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+  totalCount: 0,
+  totalPages: 1,
+};
 const SQLITE_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const NAIVE_ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
 const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -90,7 +106,10 @@ function App() {
   const [trackedPullRequests, setTrackedPullRequests] = useState<PullRequestRecord[]>([]);
   const [inactivePullRequests, setInactivePullRequests] = useState<PullRequestRecord[]>([]);
   const [notificationHistory, setNotificationHistory] = useState<NotificationHistoryEntry[]>([]);
+  const [notificationHistoryPagination, setNotificationHistoryPagination] =
+    useState<PaginationState>(EMPTY_PAGINATION_STATE);
   const [rawEvents, setRawEvents] = useState<RawEventsEntry[]>([]);
+  const [rawEventsPagination, setRawEventsPagination] = useState<PaginationState>(EMPTY_PAGINATION_STATE);
   const [recentLogs, setRecentLogs] = useState<RecentLogEntry[]>([]);
   const manualTrackDialogRef = useRef<HTMLDialogElement | null>(null);
   const [trackFormUrl, setTrackFormUrl] = useState("");
@@ -117,8 +136,8 @@ function App() {
       return;
     }
 
-    void loadBaseData();
-  }, [route.currentPage, route.logLevelFilter]);
+    void loadCurrentPageData(route);
+  }, [route]);
 
   useEffect(() => {
     if (route.currentPage === "pull-requests") {
@@ -196,20 +215,47 @@ function App() {
     setTrackFormUrl("");
   }
 
-  async function loadBaseData(): Promise<void> {
+  async function loadCurrentPageData(routeState: RouteState): Promise<void> {
     try {
-      const [trackedResponse, inactiveResponse, notificationHistoryResponse, rawEventsResponse] =
-        await Promise.all([
+      if (routeState.currentPage === "pull-requests") {
+        const [trackedResponse, inactiveResponse] = await Promise.all([
           apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
           apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
-          apiFetch<{ notificationHistory: NotificationHistoryEntry[] }>("/api/notification-history"),
-          apiFetch<{ rawEvents: RawEventsEntry[] }>("/api/raw-events"),
         ]);
+
+        setTrackedPullRequests(trackedResponse.pullRequests);
+        setInactivePullRequests(inactiveResponse.pullRequests);
+        return;
+      }
+
+      if (routeState.currentPage === "notification-history") {
+        const [trackedResponse, inactiveResponse, notificationHistoryResponse] = await Promise.all([
+          apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
+          apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
+          apiFetch<{ notificationHistory: NotificationHistoryEntry[]; pagination: PaginationState }>(
+            buildActivityApiPath("/api/notification-history", routeState.uiFilters, routeState.activityPage),
+          ),
+        ]);
+
+        setTrackedPullRequests(trackedResponse.pullRequests);
+        setInactivePullRequests(inactiveResponse.pullRequests);
+        setNotificationHistory(notificationHistoryResponse.notificationHistory);
+        setNotificationHistoryPagination(notificationHistoryResponse.pagination);
+        return;
+      }
+
+      const [trackedResponse, inactiveResponse, rawEventsResponse] = await Promise.all([
+        apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
+        apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
+        apiFetch<{ rawEvents: RawEventsEntry[]; pagination: PaginationState }>(
+          buildActivityApiPath("/api/raw-events", routeState.uiFilters, routeState.activityPage),
+        ),
+      ]);
 
       setTrackedPullRequests(trackedResponse.pullRequests);
       setInactivePullRequests(inactiveResponse.pullRequests);
-      setNotificationHistory(notificationHistoryResponse.notificationHistory);
       setRawEvents(rawEventsResponse.rawEvents);
+      setRawEventsPagination(rawEventsResponse.pagination);
     } catch (error) {
       setFlashMessage({
         kind: "error",
@@ -261,7 +307,7 @@ function App() {
       setTrackFormUrl("");
       setTrackFormMessage(undefined);
       setFlashMessage(createTrackFlashMessage(result));
-      await loadBaseData();
+      await loadCurrentPageData(route);
       setIsManualTrackDialogOpen(false);
     } catch (error) {
       setTrackFormMessage({
@@ -281,7 +327,7 @@ function App() {
       );
 
       setFlashMessage(createUntrackFlashMessage(result));
-      await loadBaseData();
+      await loadCurrentPageData(route);
     } catch (error) {
       setFlashMessage({
         kind: "error",
@@ -304,7 +350,7 @@ function App() {
       );
 
       setFlashMessage(createTrackFlashMessage(result));
-      await loadBaseData();
+      await loadCurrentPageData(route);
     } catch (error) {
       setFlashMessage({
         kind: "error",
@@ -323,7 +369,7 @@ function App() {
         kind: "success",
         text: "Notification resent.",
       });
-      await loadBaseData();
+      await loadCurrentPageData(route);
     } catch (error) {
       setFlashMessage({
         kind: "error",
@@ -365,7 +411,7 @@ function App() {
   }
 
   function handleBaseDataRefresh(): void {
-    void loadBaseData();
+    void loadCurrentPageData(route);
   }
 
   function handleLogsRefresh(): void {
@@ -420,15 +466,21 @@ function App() {
           {route.currentPage === "notification-history" ? (
             <NotificationHistoryPanel
               notificationHistory={filteredNotificationHistory}
+              pagination={notificationHistoryPagination}
               hasActiveFilters={hasActiveFilters}
+              uiFilters={route.uiFilters}
               onResend={handleResendNotificationRecord}
+              onNavigate={navigateToHref}
               onRefresh={handleBaseDataRefresh}
             />
           ) : null}
           {route.currentPage === "raw-events" ? (
             <RawEventsPanel
               rawEvents={filteredRawEvents}
+              pagination={rawEventsPagination}
               hasActiveFilters={hasActiveFilters}
+              uiFilters={route.uiFilters}
+              onNavigate={navigateToHref}
               onRefresh={handleBaseDataRefresh}
             />
           ) : null}
@@ -633,13 +685,19 @@ function PageNavigation({
 
 function NotificationHistoryPanel({
   notificationHistory,
+  pagination,
   hasActiveFilters,
+  uiFilters,
   onResend,
+  onNavigate,
   onRefresh,
 }: {
   notificationHistory: NotificationHistoryEntry[];
+  pagination: PaginationState;
   hasActiveFilters: boolean;
+  uiFilters: UiFilterValues;
   onResend: (notificationRecordId: number) => Promise<void>;
+  onNavigate: (href: string) => void;
   onRefresh: () => void;
 }) {
   return (
@@ -648,9 +706,16 @@ function NotificationHistoryPanel({
         <h2>Notification History</h2>
         <div className="panel-header-actions">
           <RefreshButton label="Refresh notification history" onClick={onRefresh} />
-          <span className="count">{notificationHistory.length}</span>
+          <span className="count">{pagination.totalCount}</span>
         </div>
       </div>
+      <ActivityPagination
+        currentPage="notification-history"
+        uiFilters={uiFilters}
+        pagination={pagination}
+        onNavigate={onNavigate}
+        position="top"
+      />
       {notificationHistory.length === 0 ? (
         <p>
           {hasActiveFilters
@@ -729,17 +794,30 @@ function NotificationHistoryPanel({
           ))}
         </ul>
       )}
+      <ActivityPagination
+        currentPage="notification-history"
+        uiFilters={uiFilters}
+        pagination={pagination}
+        onNavigate={onNavigate}
+        position="bottom"
+      />
     </section>
   );
 }
 
 function RawEventsPanel({
   rawEvents,
+  pagination,
   hasActiveFilters,
+  uiFilters,
+  onNavigate,
   onRefresh,
 }: {
   rawEvents: RawEventsEntry[];
+  pagination: PaginationState;
   hasActiveFilters: boolean;
+  uiFilters: UiFilterValues;
+  onNavigate: (href: string) => void;
   onRefresh: () => void;
 }) {
   return (
@@ -748,9 +826,16 @@ function RawEventsPanel({
         <h2>Raw Events</h2>
         <div className="panel-header-actions">
           <RefreshButton label="Refresh raw events" onClick={onRefresh} />
-          <span className="count">{rawEvents.length}</span>
+          <span className="count">{pagination.totalCount}</span>
         </div>
       </div>
+      <ActivityPagination
+        currentPage="raw-events"
+        uiFilters={uiFilters}
+        pagination={pagination}
+        onNavigate={onNavigate}
+        position="top"
+      />
       {rawEvents.length === 0 ? (
         <p>
           {hasActiveFilters
@@ -804,7 +889,66 @@ function RawEventsPanel({
           ))}
         </ul>
       )}
+      <ActivityPagination
+        currentPage="raw-events"
+        uiFilters={uiFilters}
+        pagination={pagination}
+        onNavigate={onNavigate}
+        position="bottom"
+      />
     </section>
+  );
+}
+
+function ActivityPagination({
+  currentPage,
+  uiFilters,
+  pagination,
+  onNavigate,
+  position = "bottom",
+}: {
+  currentPage: "notification-history" | "raw-events";
+  uiFilters: UiFilterValues;
+  pagination: PaginationState;
+  onNavigate: (href: string) => void;
+  position?: "top" | "bottom";
+}) {
+  if (pagination.totalCount === 0) {
+    return null;
+  }
+
+  const rangeStart = (pagination.page - 1) * pagination.pageSize + 1;
+  const rangeEnd = Math.min(pagination.page * pagination.pageSize, pagination.totalCount);
+
+  return (
+    <div className={`pagination-footer pagination-footer-${position}`}>
+      <p className="panel-description pagination-summary">
+        Showing {rangeStart}-{rangeEnd} of {pagination.totalCount}
+      </p>
+      {pagination.totalPages > 1 ? (
+        <div className="pagination-controls" aria-label="Activity pagination">
+          <button
+            type="button"
+            className="action-button pagination-button"
+            disabled={pagination.page <= 1}
+            onClick={() => onNavigate(buildActivityPageHref(currentPage, uiFilters, pagination.page - 1))}
+          >
+            Previous
+          </button>
+          <span className="pagination-status">
+            Page {pagination.page} of {pagination.totalPages}
+          </span>
+          <button
+            type="button"
+            className="action-button pagination-button"
+            disabled={pagination.page >= pagination.totalPages}
+            onClick={() => onNavigate(buildActivityPageHref(currentPage, uiFilters, pagination.page + 1))}
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1159,11 +1303,26 @@ function readRouteState(url: URL): RouteState {
     currentPage: readDocumentPage(url.pathname),
     uiFilters: readUiFilterValues(url.searchParams),
     logLevelFilter: readLogLevelFilter(url.searchParams),
+    activityPage: readActivityPage(url.searchParams),
   };
 }
 
 function buildLogsApiPath(logLevelFilter: LogLevelFilter): string {
   return logLevelFilter === "all" ? "/api/logs" : `/api/logs?level=${logLevelFilter}`;
+}
+
+function buildActivityApiPath(path: string, uiFilters: UiFilterValues, page: number): string {
+  const searchParams = new URLSearchParams();
+
+  appendUiFilters(searchParams, ACTIVITY_FILTER_FIELDS, uiFilters);
+
+  if (page > DEFAULT_ACTIVITY_PAGE) {
+    searchParams.set("page", String(page));
+  }
+
+  const search = searchParams.toString();
+
+  return search.length > 0 ? `${path}?${search}` : path;
 }
 
 function readDocumentPage(pathname: string): AppPage {
@@ -1190,6 +1349,18 @@ function readLogLevelFilter(searchParams: URLSearchParams): LogLevelFilter {
   }
 
   return isLogLevel(value) ? value : "all";
+}
+
+function readActivityPage(searchParams: URLSearchParams): number {
+  const value = searchParams.get("page");
+
+  if (value === null) {
+    return DEFAULT_ACTIVITY_PAGE;
+  }
+
+  const numericValue = Number(value);
+
+  return Number.isSafeInteger(numericValue) && numericValue > 0 ? numericValue : DEFAULT_ACTIVITY_PAGE;
 }
 
 function countActivePageFilters(filters: UiFilterValues, page: AppPage, logLevelFilter: LogLevelFilter): number {
@@ -1227,12 +1398,25 @@ function buildPageHref(page: AppPage, uiFilters: UiFilterValues, logLevelFilter:
 
   const searchParams = new URLSearchParams();
 
-  for (const field of getPageFilterFields(page)) {
-    if (uiFilters[field] === DEFAULT_UI_FILTERS[field]) {
-      continue;
-    }
+  appendUiFilters(searchParams, getPageFilterFields(page), uiFilters);
 
-    searchParams.set(formatFilterSearchParamKey(field), uiFilters[field]);
+  const pagePath = formatPagePath(page);
+  const search = searchParams.toString();
+
+  return search.length > 0 ? `${pagePath}?${search}` : pagePath;
+}
+
+function buildActivityPageHref(
+  page: "notification-history" | "raw-events",
+  uiFilters: UiFilterValues,
+  activityPage: number,
+): string {
+  const searchParams = new URLSearchParams();
+
+  appendUiFilters(searchParams, getPageFilterFields(page), uiFilters);
+
+  if (activityPage > DEFAULT_ACTIVITY_PAGE) {
+    searchParams.set("page", String(activityPage));
   }
 
   const pagePath = formatPagePath(page);
@@ -1257,6 +1441,20 @@ function formatFilterSearchParamKey(field: PageFilterField): string {
       return "repo";
     case "actorClass":
       return "actor-type";
+  }
+}
+
+function appendUiFilters(
+  searchParams: URLSearchParams,
+  fields: readonly PageFilterField[],
+  uiFilters: UiFilterValues,
+): void {
+  for (const field of fields) {
+    if (uiFilters[field] === DEFAULT_UI_FILTERS[field]) {
+      continue;
+    }
+
+    searchParams.set(formatFilterSearchParamKey(field), uiFilters[field]);
   }
 }
 
@@ -1699,6 +1897,37 @@ const APP_STYLES = `
     margin: 12px 0 0;
     padding: 0;
     list-style: none;
+  }
+
+  .pagination-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .pagination-footer-top {
+    margin: 12px 0 16px;
+  }
+
+  .pagination-footer-bottom {
+    margin-top: 16px;
+  }
+
+  .pagination-summary {
+    margin: 0;
+  }
+
+  .pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .pagination-status {
+    color: #94a3b8;
+    font-size: 0.875rem;
+    white-space: nowrap;
   }
 
   .pull-request-item {
@@ -2147,6 +2376,15 @@ const APP_STYLES = `
     text-decoration: none;
   }
 
+  .action-button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .pagination-button {
+    min-width: 88px;
+  }
+
   .icon-button {
     width: 34px;
     height: 34px;
@@ -2222,6 +2460,16 @@ const APP_STYLES = `
 
     .raw-events-header {
       flex-direction: column;
+    }
+
+    .pagination-footer {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .pagination-controls {
+      width: 100%;
+      justify-content: space-between;
     }
   }
 `;

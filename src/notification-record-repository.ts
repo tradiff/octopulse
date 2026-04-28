@@ -1,5 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 
+import {
+  DEFAULT_ACTIVITY_FEED_FILTERS,
+  type ActivityFeedFilters,
+} from "./activity-feed.js";
+
 export type NotificationDeliveryStatus = "pending" | "sent" | "failed";
 
 export interface NotificationRecord {
@@ -31,6 +36,12 @@ export interface UpdateNotificationRecordDeliveryInput {
   deliveredAt?: string | null;
 }
 
+export interface ListNotificationRecordsOptions {
+  filters?: ActivityFeedFilters;
+  limit?: number;
+  offset?: number;
+}
+
 export class NotificationRecordRepositoryError extends Error {
   constructor(message: string) {
     super(message);
@@ -41,18 +52,48 @@ export class NotificationRecordRepositoryError extends Error {
 export class NotificationRecordRepository {
   constructor(private readonly database: DatabaseSync) {}
 
-  listNotificationRecords(): NotificationRecord[] {
+  listNotificationRecords(options: ListNotificationRecordsOptions = {}): NotificationRecord[] {
+    const { filters = DEFAULT_ACTIVITY_FEED_FILTERS, limit, offset = 0 } = options;
+    const { whereClause, parameters } = buildNotificationRecordFilterClause(filters);
+    const query = [
+      "SELECT notification_record.*",
+      "FROM NotificationRecord notification_record",
+      "INNER JOIN PullRequest pull_request",
+      "  ON pull_request.id = notification_record.pull_request_id",
+      whereClause,
+      "ORDER BY notification_record.created_at DESC, notification_record.id DESC",
+      limit === undefined ? "" : "LIMIT ? OFFSET ?",
+    ]
+      .filter((line) => line.length > 0)
+      .join("\n");
     const rows = this.database
-      .prepare(
-        `
-          SELECT *
-          FROM NotificationRecord
-          ORDER BY created_at DESC, id DESC
-        `,
-      )
-      .all();
+      .prepare(query)
+      .all(...parameters, ...(limit === undefined ? [] : [limit, offset]));
 
     return rows.map((row) => mapNotificationRecordRow(row));
+  }
+
+  countNotificationRecords(filters: ActivityFeedFilters = DEFAULT_ACTIVITY_FEED_FILTERS): number {
+    const { whereClause, parameters } = buildNotificationRecordFilterClause(filters);
+    const row = this.database
+      .prepare(
+        [
+          "SELECT COUNT(*) AS total_count",
+          "FROM NotificationRecord notification_record",
+          "INNER JOIN PullRequest pull_request",
+          "  ON pull_request.id = notification_record.pull_request_id",
+          whereClause,
+        ]
+          .filter((line) => line.length > 0)
+          .join("\n"),
+      )
+      .get(...parameters);
+
+    if (typeof row !== "object" || row === null) {
+      throw new NotificationRecordRepositoryError("Expected a notification record count row from SQLite");
+    }
+
+    return readInteger((row as Record<string, unknown>).total_count, "NotificationRecord.total_count");
   }
 
   createNotificationRecord(input: CreateNotificationRecordInput): NotificationRecord {
@@ -223,6 +264,50 @@ function validateNotificationTarget(input: CreateNotificationRecordInput): void 
       "Notification record must target exactly one event bundle or normalized event",
     );
   }
+}
+
+function buildNotificationRecordFilterClause(filters: ActivityFeedFilters): {
+  whereClause: string;
+  parameters: Array<number | string>;
+} {
+  const clauses: string[] = [];
+  const parameters: Array<number | string> = [];
+
+  if (filters.pullRequestState !== "all") {
+    clauses.push("pull_request.is_tracked = ?");
+    parameters.push(filters.pullRequestState === "tracked" ? 1 : 0);
+  }
+
+  if (filters.repository.length > 0) {
+    clauses.push("(pull_request.repository_owner || '/' || pull_request.repository_name) = ?");
+    parameters.push(filters.repository);
+  }
+
+  if (filters.actorClass.length > 0) {
+    clauses.push(`
+      EXISTS (
+        SELECT 1
+        FROM NormalizedEvent normalized_event
+        WHERE normalized_event.actor_class = ?
+          AND (
+            (
+              notification_record.normalized_event_id IS NOT NULL
+              AND normalized_event.id = notification_record.normalized_event_id
+            )
+            OR (
+              notification_record.event_bundle_id IS NOT NULL
+              AND normalized_event.event_bundle_id = notification_record.event_bundle_id
+            )
+          )
+      )
+    `);
+    parameters.push(filters.actorClass);
+  }
+
+  return {
+    whereClause: clauses.length > 0 ? `WHERE ${clauses.join("\n  AND ")}` : "",
+    parameters,
+  };
 }
 
 function mapNotificationRecordRow(row: unknown): NotificationRecord {

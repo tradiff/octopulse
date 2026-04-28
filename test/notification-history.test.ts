@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { DEFAULT_ACTIVITY_PAGE_SIZE } from "../src/activity-feed.js";
 import { resolveAppPaths } from "../src/config.js";
 import { initializeDatabase } from "../src/database.js";
 import { EventBundleRepository } from "../src/event-bundling.js";
@@ -86,74 +87,108 @@ describe("listNotificationHistory", () => {
         deliveredAt: "2026-04-10T12:02:45.000Z",
       });
 
-        expect(listNotificationHistory(database)).toEqual([
+        expect(listNotificationHistory(database)).toEqual({
+          entries: [
+            expect.objectContaining({
+              title: "acme/octopulse PR #7",
+              deliveryStatus: "sent",
+              decisionStates: ["notified_ai_fallback", "notified"],
+              eventTypes: ["issue_comment", "ci_failed"],
+              actorClasses: ["bot"],
+              sourceKind: "bundle",
+              repositoryKey: "acme/octopulse",
+              isTracked: true,
+              author: {
+                login: "octocat",
+                avatarUrl: null,
+              },
+              actors: [
+                {
+                  login: "ci-bot[bot]",
+                  avatarUrl: "https://avatars.example.test/ci-bot.png",
+                },
+                {
+                  login: "github-actions[bot]",
+                  avatarUrl: "https://avatars.example.test/github-actions.png",
+                },
+              ],
+              summaryParagraphs: [
+                {
+                  actorLogin: "ci-bot[bot]",
+                  actorAvatarKey: "ci-bot[bot]",
+                  actorAvatarUrl: "https://avatars.example.test/ci-bot.png",
+                  text: "💬 commented",
+                },
+                {
+                  actorLogin: null,
+                  actorAvatarKey: null,
+                  actorAvatarUrl: null,
+                  text: "CI failed",
+                },
+              ],
+              deliveredAt: "2026-04-10T12:02:45.000Z",
+            }),
+            expect.objectContaining({
+              title: "acme/octopulse PR #7",
+              deliveryStatus: "pending",
+              decisionStates: ["notified"],
+              eventTypes: ["review_approved"],
+              actorClasses: ["human_other"],
+              sourceKind: "immediate",
+              repositoryKey: "acme/octopulse",
+              isTracked: true,
+              author: {
+                login: "octocat",
+                avatarUrl: null,
+              },
+              actors: [
+                {
+                  login: "alice",
+                  avatarUrl: "https://avatars.example.test/alice.png",
+                },
+              ],
+              summaryParagraphs: [
+                {
+                  actorLogin: "alice",
+                  actorAvatarKey: "alice",
+                  actorAvatarUrl: "https://avatars.example.test/alice.png",
+                  text: "✅ approved",
+                },
+              ],
+              deliveredAt: null,
+            }),
+          ],
+          page: 1,
+          pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+          totalCount: 2,
+          totalPages: 1,
+        });
+        expect(listNotificationHistory(database, { page: 2, pageSize: 1 })).toEqual(
           expect.objectContaining({
-            title: "acme/octopulse PR #7",
-            deliveryStatus: "sent",
-            decisionStates: ["notified_ai_fallback", "notified"],
-            eventTypes: ["issue_comment", "ci_failed"],
-            actorClasses: ["bot"],
-            sourceKind: "bundle",
-            repositoryKey: "acme/octopulse",
-            isTracked: true,
-            author: {
-              login: "octocat",
-              avatarUrl: null,
-            },
-            actors: [
-              {
-                login: "ci-bot[bot]",
-                avatarUrl: "https://avatars.example.test/ci-bot.png",
-              },
-              {
-                login: "github-actions[bot]",
-                avatarUrl: "https://avatars.example.test/github-actions.png",
-              },
+            entries: [
+              expect.objectContaining({
+                deliveryStatus: "pending",
+                sourceKind: "immediate",
+              }),
             ],
-            summaryParagraphs: [
-              {
-                actorLogin: "ci-bot[bot]",
-                actorAvatarKey: "ci-bot[bot]",
-                actorAvatarUrl: "https://avatars.example.test/ci-bot.png",
-                text: "💬 commented",
-              },
-              {
-                actorLogin: null,
-                actorAvatarKey: null,
-                actorAvatarUrl: null,
-                text: "CI failed",
-              },
-            ],
-            deliveredAt: "2026-04-10T12:02:45.000Z",
+            page: 2,
+            pageSize: 1,
+            totalCount: 2,
+            totalPages: 2,
           }),
-          expect.objectContaining({
-            title: "acme/octopulse PR #7",
-            deliveryStatus: "pending",
-            decisionStates: ["notified"],
-            eventTypes: ["review_approved"],
-            actorClasses: ["human_other"],
-            sourceKind: "immediate",
-            repositoryKey: "acme/octopulse",
-            isTracked: true,
-            author: {
-              login: "octocat",
-              avatarUrl: null,
+        );
+        expect(
+          listNotificationHistory(database, {
+            filters: {
+              pullRequestState: "tracked",
+              repository: "acme/octopulse",
+              actorClass: "human_other",
             },
-            actors: [
-              {
-                login: "alice",
-                avatarUrl: "https://avatars.example.test/alice.png",
-              },
-            ],
-            summaryParagraphs: [
-              {
-                actorLogin: "alice",
-                actorAvatarKey: "alice",
-                actorAvatarUrl: "https://avatars.example.test/alice.png",
-                text: "✅ approved",
-              },
-            ],
-            deliveredAt: null,
+          }).entries,
+        ).toEqual([
+          expect.objectContaining({
+            deliveryStatus: "pending",
+            actorClasses: ["human_other"],
           }),
         ]);
     } finally {

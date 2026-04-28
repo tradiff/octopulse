@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { DEFAULT_ACTIVITY_PAGE_SIZE } from "../src/activity-feed.js";
 import { resolveAppPaths } from "../src/config.js";
 import { initializeDatabase } from "../src/database.js";
 import { EventBundleRepository } from "../src/event-bundling.js";
@@ -102,24 +103,82 @@ describe("listRawEvents", () => {
         deliveryStatus: "pending",
       });
 
-        expect(listRawEvents(database)).toEqual([
-          {
-            id: bundledEvent.id,
-            repositoryKey: "acme/octopulse",
-            isTracked: true,
-            pullRequestLabel: "acme/octopulse #7",
-            pullRequestTitle: "Add notifications",
-            pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
-          eventType: "issue_comment",
-          actorLogin: "ci-bot[bot]",
-          actorClass: "bot",
-          decisionState: "notified_ai_fallback",
-          notificationTiming: null,
-          occurredAt: "2026-04-10T12:05:00.000Z",
-          rawPayloadJson: '{"body":"CI says hello"}',
-          notificationSourceKind: "bundle",
-          notificationDeliveryStatus: "pending",
-        },
+        expect(listRawEvents(database)).toEqual({
+          entries: [
+            {
+              id: bundledEvent.id,
+              repositoryKey: "acme/octopulse",
+              isTracked: true,
+              pullRequestLabel: "acme/octopulse #7",
+              pullRequestTitle: "Add notifications",
+              pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+              eventType: "issue_comment",
+              actorLogin: "ci-bot[bot]",
+              actorClass: "bot",
+              decisionState: "notified_ai_fallback",
+              notificationTiming: null,
+              occurredAt: "2026-04-10T12:05:00.000Z",
+              rawPayloadJson: '{"body":"CI says hello"}',
+              notificationSourceKind: "bundle",
+              notificationDeliveryStatus: "pending",
+            },
+            {
+              id: immediateEvent.id,
+              repositoryKey: "acme/octopulse",
+              isTracked: true,
+              pullRequestLabel: "acme/octopulse #7",
+              pullRequestTitle: "Add notifications",
+              pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+              eventType: "review_changes_requested",
+              actorLogin: "alice",
+              actorClass: "human_other",
+              decisionState: "notified",
+              notificationTiming: "immediate",
+              occurredAt: "2026-04-10T12:04:00.000Z",
+              rawPayloadJson: '{"state":"CHANGES_REQUESTED","body":"Please add tests."}',
+              notificationSourceKind: "immediate",
+              notificationDeliveryStatus: "sent",
+            },
+          ],
+          page: 1,
+          pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+          totalCount: 2,
+          totalPages: 1,
+        });
+        expect(listRawEvents(database, { page: 2, pageSize: 1 })).toEqual({
+          entries: [
+            {
+              id: immediateEvent.id,
+              repositoryKey: "acme/octopulse",
+              isTracked: true,
+              pullRequestLabel: "acme/octopulse #7",
+              pullRequestTitle: "Add notifications",
+              pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+              eventType: "review_changes_requested",
+              actorLogin: "alice",
+              actorClass: "human_other",
+              decisionState: "notified",
+              notificationTiming: "immediate",
+              occurredAt: "2026-04-10T12:04:00.000Z",
+              rawPayloadJson: '{"state":"CHANGES_REQUESTED","body":"Please add tests."}',
+              notificationSourceKind: "immediate",
+              notificationDeliveryStatus: "sent",
+            },
+          ],
+          page: 2,
+          pageSize: 1,
+          totalCount: 2,
+          totalPages: 2,
+        });
+        expect(
+          listRawEvents(database, {
+            filters: {
+              pullRequestState: "tracked",
+              repository: "acme/octopulse",
+              actorClass: "human_other",
+            },
+          }).entries,
+        ).toEqual([
           {
             id: immediateEvent.id,
             repositoryKey: "acme/octopulse",
@@ -127,17 +186,17 @@ describe("listRawEvents", () => {
             pullRequestLabel: "acme/octopulse #7",
             pullRequestTitle: "Add notifications",
             pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
-          eventType: "review_changes_requested",
-          actorLogin: "alice",
-          actorClass: "human_other",
-          decisionState: "notified",
-          notificationTiming: "immediate",
-          occurredAt: "2026-04-10T12:04:00.000Z",
-          rawPayloadJson: '{"state":"CHANGES_REQUESTED","body":"Please add tests."}',
-          notificationSourceKind: "immediate",
-          notificationDeliveryStatus: "sent",
-        },
-      ]);
+            eventType: "review_changes_requested",
+            actorLogin: "alice",
+            actorClass: "human_other",
+            decisionState: "notified",
+            notificationTiming: "immediate",
+            occurredAt: "2026-04-10T12:04:00.000Z",
+            rawPayloadJson: '{"state":"CHANGES_REQUESTED","body":"Please add tests."}',
+            notificationSourceKind: "immediate",
+            notificationDeliveryStatus: "sent",
+          },
+        ]);
     } finally {
       database.close();
     }

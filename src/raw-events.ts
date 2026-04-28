@@ -1,5 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 
+import {
+  DEFAULT_ACTIVITY_FEED_FILTERS,
+  DEFAULT_ACTIVITY_PAGE_SIZE,
+  resolvePaginationWindow,
+  type ActivityFeedFilters,
+  type ListActivityFeedOptions,
+  type PaginatedEntries,
+} from "./activity-feed.js";
 import type {
   ActorClass,
   DecisionState,
@@ -25,6 +33,8 @@ export interface RawEventsEntry {
   notificationDeliveryStatus: NotificationDeliveryStatus | null;
 }
 
+export interface ListRawEventsOptions extends ListActivityFeedOptions {}
+
 export class RawEventsError extends Error {
   constructor(message: string) {
     super(message);
@@ -32,46 +42,124 @@ export class RawEventsError extends Error {
   }
 }
 
-export function listRawEvents(database: DatabaseSync): RawEventsEntry[] {
+export function listRawEvents(
+  database: DatabaseSync,
+  options: ListRawEventsOptions = {},
+): PaginatedEntries<RawEventsEntry> {
   try {
-    const rows = database
-      .prepare(
-        `
-          SELECT
-            normalized_event.id,
-            pull_request.repository_owner,
-            pull_request.repository_name,
-            pull_request.is_tracked,
-            pull_request.number,
-            pull_request.url,
-            pull_request.title,
-            normalized_event.event_type,
-            normalized_event.actor_login,
-            normalized_event.actor_class,
-            normalized_event.decision_state,
-            normalized_event.notification_timing,
-            normalized_event.occurred_at,
-            raw_event.payload_json AS raw_payload_json,
-            immediate_notification.delivery_status AS immediate_delivery_status,
-            bundle_notification.delivery_status AS bundle_delivery_status
-          FROM NormalizedEvent normalized_event
-          INNER JOIN PullRequest pull_request
-            ON pull_request.id = normalized_event.pull_request_id
-          LEFT JOIN RawEvent raw_event
-            ON raw_event.id = normalized_event.raw_event_id
-          LEFT JOIN NotificationRecord immediate_notification
-            ON immediate_notification.normalized_event_id = normalized_event.id
-          LEFT JOIN NotificationRecord bundle_notification
-            ON bundle_notification.event_bundle_id = normalized_event.event_bundle_id
-          ORDER BY normalized_event.occurred_at DESC, normalized_event.id DESC
-        `,
-      )
-      .all();
+    const filters = options.filters ?? DEFAULT_ACTIVITY_FEED_FILTERS;
+    const pagination = resolvePaginationWindow(
+      readRawEventCount(database, filters),
+      options.page ?? 1,
+      options.pageSize ?? DEFAULT_ACTIVITY_PAGE_SIZE,
+    );
 
-    return rows.map((row) => mapRawEventsEntry(row));
+    return {
+      entries: readRawEventRows(database, filters, pagination.limit, pagination.offset).map((row) =>
+        mapRawEventsEntry(row),
+      ),
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      totalCount: pagination.totalCount,
+      totalPages: pagination.totalPages,
+    };
   } catch (error) {
     throw new RawEventsError(`Failed to list raw events: ${getErrorMessage(error)}`);
   }
+}
+
+function readRawEventRows(
+  database: DatabaseSync,
+  filters: ActivityFeedFilters,
+  limit: number,
+  offset: number,
+): unknown[] {
+  const { whereClause, parameters } = buildRawEventsFilterClause(filters);
+
+  return database
+    .prepare(
+      `
+        SELECT
+          normalized_event.id,
+          pull_request.repository_owner,
+          pull_request.repository_name,
+          pull_request.is_tracked,
+          pull_request.number,
+          pull_request.url,
+          pull_request.title,
+          normalized_event.event_type,
+          normalized_event.actor_login,
+          normalized_event.actor_class,
+          normalized_event.decision_state,
+          normalized_event.notification_timing,
+          normalized_event.occurred_at,
+          raw_event.payload_json AS raw_payload_json,
+          immediate_notification.delivery_status AS immediate_delivery_status,
+          bundle_notification.delivery_status AS bundle_delivery_status
+        FROM NormalizedEvent normalized_event
+        INNER JOIN PullRequest pull_request
+          ON pull_request.id = normalized_event.pull_request_id
+        LEFT JOIN RawEvent raw_event
+          ON raw_event.id = normalized_event.raw_event_id
+        LEFT JOIN NotificationRecord immediate_notification
+          ON immediate_notification.normalized_event_id = normalized_event.id
+        LEFT JOIN NotificationRecord bundle_notification
+          ON bundle_notification.event_bundle_id = normalized_event.event_bundle_id
+        ${whereClause}
+        ORDER BY normalized_event.occurred_at DESC, normalized_event.id DESC
+        LIMIT ? OFFSET ?
+      `,
+    )
+    .all(...parameters, limit, offset);
+}
+
+function readRawEventCount(database: DatabaseSync, filters: ActivityFeedFilters): number {
+  const { whereClause, parameters } = buildRawEventsFilterClause(filters);
+  const row = database
+    .prepare(
+      `
+        SELECT COUNT(*) AS total_count
+        FROM NormalizedEvent normalized_event
+        INNER JOIN PullRequest pull_request
+          ON pull_request.id = normalized_event.pull_request_id
+        ${whereClause}
+      `,
+    )
+    .get(...parameters);
+
+  if (typeof row !== "object" || row === null) {
+    throw new RawEventsError("Expected a raw events count row from SQLite");
+  }
+
+  return readInteger((row as Record<string, unknown>).total_count, "RawEvents.total_count");
+}
+
+function buildRawEventsFilterClause(filters: ActivityFeedFilters): {
+  whereClause: string;
+  parameters: Array<number | string>;
+} {
+  const clauses: string[] = [];
+  const parameters: Array<number | string> = [];
+
+  if (filters.pullRequestState !== "all") {
+    clauses.push("pull_request.is_tracked = ?");
+    parameters.push(filters.pullRequestState === "tracked" ? 1 : 0);
+  }
+
+  if (filters.repository.length > 0) {
+    clauses.push("(pull_request.repository_owner || '/' || pull_request.repository_name) = ?");
+    parameters.push(filters.repository);
+  }
+
+  if (filters.actorClass.length > 0) {
+    clauses.push("normalized_event.actor_class = ?");
+    parameters.push(filters.actorClass);
+  }
+
+  return {
+    whereClause: clauses.length > 0 ? `WHERE ${clauses.join("\n        AND ")}` : "",
+    parameters,
+  };
 }
 
 function mapRawEventsEntry(row: unknown): RawEventsEntry {

@@ -1,3 +1,7 @@
+import {
+  DEFAULT_ACTIVITY_FEED_FILTERS,
+  type ActivityFeedFilters,
+} from "./activity-feed.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { ActorClass } from "./normalized-event-repository.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
@@ -5,11 +9,7 @@ import type { RawEventsEntry } from "./raw-events.js";
 
 export type PullRequestStateFilter = "all" | "tracked" | "inactive";
 
-export interface UiFilterValues {
-  pullRequestState: PullRequestStateFilter;
-  repository: string;
-  actorClass: "" | ActorClass;
-}
+export type UiFilterValues = ActivityFeedFilters;
 
 export interface UiFilterOptions {
   repositories: string[];
@@ -23,14 +23,11 @@ export interface BuildUiFilterOptionsInput {
   rawEvents: RawEventsEntry[];
 }
 
-export const DEFAULT_UI_FILTERS: UiFilterValues = {
-  pullRequestState: "all",
-  repository: "",
-  actorClass: "",
-};
+export const DEFAULT_UI_FILTERS: UiFilterValues = { ...DEFAULT_ACTIVITY_FEED_FILTERS };
 
 const PULL_REQUEST_STATE_FILTERS = new Set<PullRequestStateFilter>(["all", "tracked", "inactive"]);
 const ACTOR_CLASSES = new Set<ActorClass>(["self", "human_other", "bot"]);
+const ALL_ACTIVITY_ACTOR_CLASSES = ["self", "human_other", "bot"] satisfies ActorClass[];
 
 export function readUiFilterValues(searchParams: URLSearchParams): UiFilterValues {
   const pullRequestState = searchParams.get("pr-state");
@@ -56,6 +53,7 @@ export function buildUiFilterOptions(input: BuildUiFilterOptionsInput): UiFilter
       ...input.rawEvents.map((entry) => entry.repositoryKey),
     ]),
     actorClasses: sortStrings([
+      ...ALL_ACTIVITY_ACTOR_CLASSES,
       ...input.notificationHistory.flatMap((entry) => entry.actorClasses),
       ...input.rawEvents.flatMap((entry) => (entry.actorClass ? [entry.actorClass] : [])),
     ]) as ActorClass[],

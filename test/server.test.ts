@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { DEFAULT_ACTIVITY_PAGE_SIZE } from "../src/activity-feed.js";
 import { readServerOrigin, startServer } from "../src/server.js";
 
 const servers: Server[] = [];
@@ -106,63 +107,86 @@ describe("startServer", () => {
   });
 
   it("serves notification history, raw events, and logs APIs", async () => {
+    let notificationHistoryOptions: unknown;
+    let rawEventsOptions: unknown;
+
     const server = await startServer({
       host: "127.0.0.1",
       port: 0,
-      listNotificationHistory: async () => [
-        {
-          id: 1,
-          title: "acme/octopulse PR #7",
-          body: "alice approved review",
-          clickUrl: "https://github.com/acme/octopulse/pull/7",
-          deliveryStatus: "sent" as const,
-          createdAt: "2026-04-10 12:03:00",
-          deliveredAt: "2026-04-10T12:03:02.000Z",
-          decisionStates: ["notified" as const],
-          eventTypes: ["review_approved"],
-          actorClasses: ["human_other" as const],
-          sourceKind: "immediate" as const,
-          repositoryKey: "acme/octopulse",
-          isTracked: true,
-          author: {
-            login: "octocat",
-            avatarUrl: "https://avatars.example.test/octocat.png",
-          },
-          actors: [
+      listNotificationHistory: async (options) => {
+        notificationHistoryOptions = options;
+
+        return {
+          entries: [
             {
-              login: "alice",
-              avatarUrl: "https://avatars.example.test/alice.png",
+              id: 1,
+              title: "acme/octopulse PR #7",
+              body: "alice approved review",
+              clickUrl: "https://github.com/acme/octopulse/pull/7",
+              deliveryStatus: "sent" as const,
+              createdAt: "2026-04-10 12:03:00",
+              deliveredAt: "2026-04-10T12:03:02.000Z",
+              decisionStates: ["notified" as const],
+              eventTypes: ["review_approved"],
+              actorClasses: ["human_other" as const],
+              sourceKind: "immediate" as const,
+              repositoryKey: "acme/octopulse",
+              isTracked: true,
+              author: {
+                login: "octocat",
+                avatarUrl: "https://avatars.example.test/octocat.png",
+              },
+              actors: [
+                {
+                  login: "alice",
+                  avatarUrl: "https://avatars.example.test/alice.png",
+                },
+              ],
+              summaryParagraphs: [
+                {
+                  actorLogin: "alice",
+                  actorAvatarKey: "alice",
+                  actorAvatarUrl: "https://avatars.example.test/alice.png",
+                  text: "✅ approved",
+                },
+              ],
             },
           ],
-          summaryParagraphs: [
+          page: 2,
+          pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+          totalCount: 3,
+          totalPages: 3,
+        };
+      },
+      listRawEvents: async (options) => {
+        rawEventsOptions = options;
+
+        return {
+          entries: [
             {
+              id: 17,
+              repositoryKey: "acme/octopulse",
+              isTracked: true,
+              pullRequestLabel: "acme/octopulse #7",
+              pullRequestTitle: "Add pull request polling",
+              pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
+              eventType: "review_changes_requested",
               actorLogin: "alice",
-              actorAvatarKey: "alice",
-              actorAvatarUrl: "https://avatars.example.test/alice.png",
-              text: "✅ approved",
+              actorClass: "human_other" as const,
+              decisionState: "notified" as const,
+              notificationTiming: "immediate" as const,
+              occurredAt: "2026-04-10T12:04:00.000Z",
+              rawPayloadJson: "{\"state\":\"CHANGES_REQUESTED\"}",
+              notificationSourceKind: "immediate" as const,
+              notificationDeliveryStatus: "sent" as const,
             },
           ],
-        },
-      ],
-      listRawEvents: async () => [
-        {
-          id: 17,
-          repositoryKey: "acme/octopulse",
-          isTracked: true,
-          pullRequestLabel: "acme/octopulse #7",
-          pullRequestTitle: "Add pull request polling",
-          pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
-          eventType: "review_changes_requested",
-          actorLogin: "alice",
-          actorClass: "human_other" as const,
-          decisionState: "notified" as const,
-          notificationTiming: "immediate" as const,
-          occurredAt: "2026-04-10T12:04:00.000Z",
-          rawPayloadJson: "{\"state\":\"CHANGES_REQUESTED\"}",
-          notificationSourceKind: "immediate" as const,
-          notificationDeliveryStatus: "sent" as const,
-        },
-      ],
+          page: 2,
+          pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+          totalCount: 4,
+          totalPages: 4,
+        };
+      },
       listRecentLogs: async ({ level }) =>
         level === "warn"
           ? [
@@ -184,14 +208,36 @@ describe("startServer", () => {
     });
     servers.push(server);
 
-    const historyResponse = await fetch(`${readServerOrigin(server)}/api/notification-history`);
-    const rawEventsResponse = await fetch(`${readServerOrigin(server)}/api/raw-events`);
+    const historyResponse = await fetch(
+      `${readServerOrigin(server)}/api/notification-history?pr-state=tracked&repo=acme%2Foctopulse&actor-type=human_other&page=2`,
+    );
+    const rawEventsResponse = await fetch(
+      `${readServerOrigin(server)}/api/raw-events?pr-state=tracked&repo=acme%2Foctopulse&actor-type=human_other&page=2`,
+    );
     const logsResponse = await fetch(`${readServerOrigin(server)}/api/logs?level=warn`);
 
     expect(historyResponse.status).toBe(200);
     expect(rawEventsResponse.status).toBe(200);
     expect(logsResponse.status).toBe(200);
 
+    expect(notificationHistoryOptions).toEqual({
+      filters: {
+        pullRequestState: "tracked",
+        repository: "acme/octopulse",
+        actorClass: "human_other",
+      },
+      page: 2,
+      pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+    });
+    expect(rawEventsOptions).toEqual({
+      filters: {
+        pullRequestState: "tracked",
+        repository: "acme/octopulse",
+        actorClass: "human_other",
+      },
+      page: 2,
+      pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+    });
     expect((await historyResponse.json()) as unknown).toEqual({
       notificationHistory: [
         {
@@ -228,6 +274,12 @@ describe("startServer", () => {
           ],
         },
       ],
+      pagination: {
+        page: 2,
+        pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+        totalCount: 3,
+        totalPages: 3,
+      },
     });
     expect((await rawEventsResponse.json()) as unknown).toEqual({
       rawEvents: [
@@ -249,6 +301,12 @@ describe("startServer", () => {
           notificationDeliveryStatus: "sent",
         },
       ],
+      pagination: {
+        page: 2,
+        pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
+        totalCount: 4,
+        totalPages: 4,
+      },
     });
     expect((await logsResponse.json()) as unknown).toEqual({
       logs: [
