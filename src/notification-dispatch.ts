@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 
 import {
   LinuxNotificationAdapter,
@@ -41,6 +42,9 @@ export class NotificationDispatchError extends Error {
     this.name = "NotificationDispatchError";
   }
 }
+
+const APPROVED_SOUND_FILE_PATH = fileURLToPath(new URL("../assets/approved.wav", import.meta.url));
+const COMMENT_SOUND_FILE_PATH = fileURLToPath(new URL("../assets/comment.wav", import.meta.url));
 
 export async function dispatchPullRequestNotifications(
   database: DatabaseSync,
@@ -191,15 +195,48 @@ function buildDispatchNotification(
   currentUserLogin?: string,
 ): LinuxNotification {
   const events = resolveNotificationEvents(record, normalizedEventRepository);
+  const soundFile = resolveNotificationSoundFilePath(pullRequest, events, currentUserLogin);
 
   return {
     title: record.title,
     body: record.body,
     clickUrl: record.clickUrl,
     icon: resolvePullRequestStateAssetFilePath(pullRequest),
+    ...(soundFile === undefined ? {} : { soundFile }),
     sticky: shouldKeepNotificationSticky(pullRequest, events, currentUserLogin),
     ...(events === null || events.length === 0 ? {} : { markup: renderNotificationMarkup(pullRequest, events) }),
   };
+}
+
+function resolveNotificationSoundFilePath(
+  pullRequest: Pick<PullRequestRecord, "authorLogin">,
+  events: readonly NormalizedEventRecord[] | null,
+  currentUserLogin?: string,
+): string | undefined {
+  if (
+    events === null ||
+    currentUserLogin === undefined ||
+    !sameLogin(currentUserLogin, pullRequest.authorLogin)
+  ) {
+    return undefined;
+  }
+
+  if (events.some((event) => event.eventType === "review_approved")) {
+    return APPROVED_SOUND_FILE_PATH;
+  }
+
+  if (
+    events.some(
+      (event) =>
+        event.eventType === "issue_comment" ||
+        event.eventType === "review_inline_comment" ||
+        event.eventType === "review_submitted",
+    )
+  ) {
+    return COMMENT_SOUND_FILE_PATH;
+  }
+
+  return undefined;
 }
 
 function shouldKeepNotificationSticky(

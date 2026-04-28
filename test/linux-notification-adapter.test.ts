@@ -185,6 +185,31 @@ describe("LinuxNotificationAdapter", () => {
     });
   });
 
+  it("passes sound-file hints to the notification server", async () => {
+    const adapter = new LinuxNotificationAdapter();
+
+    await expect(
+      adapter.dispatchNotification({
+        title: "acme/octopulse PR #7",
+        body: "alice approved review\nShip notifications",
+        soundFile: "/tmp/approved.wav",
+      }),
+    ).resolves.toEqual({
+      openedClickUrl: false,
+    });
+
+    expect(freedesktopMocks.Notification).toHaveBeenCalledWith({
+      appName: "Octopulse",
+      summary: "acme/octopulse PR #7",
+      body: "alice approved review\nShip notifications",
+      urgency: "normal",
+      actions: {},
+      "sound-file": "/tmp/approved.wav",
+      timeout: 10000,
+      "desktop-entry": DESKTOP_ENTRY_ID,
+    });
+  });
+
   it("uses markup body when notification server supports it", async () => {
     const avatarCache = {
       resolveAvatarFileUri: vi

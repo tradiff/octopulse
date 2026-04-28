@@ -11,6 +11,7 @@ export interface LinuxNotification {
   clickUrl?: string | null;
   icon?: string | null;
   markup?: NotificationMarkup;
+  soundFile?: string;
   sticky?: boolean;
 }
 
@@ -75,6 +76,7 @@ export class LinuxNotificationAdapter {
         ? { default: "Open" }
         : {},
       ...(notification.icon ? { icon: notification.icon } : {}),
+      ...(notification.soundFile ? { "sound-file": notification.soundFile } : {}),
       ...(notification.sticky ? { timeout: 0 } : { timeout: AUTO_DISMISS_TIMEOUT_MS }),
       "desktop-entry": DESKTOP_ENTRY_ID,
     };

@@ -80,6 +80,7 @@ describe("dispatchPullRequestNotifications", () => {
         body: "alice: ✅ approved",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
         icon: expect.stringContaining("pull-request-open.svg"),
+        soundFile: expect.stringContaining("approved.wav"),
         sticky: true,
         markup: expect.objectContaining({
           headerText: "[octopulse] Add notifications (open)",
@@ -91,6 +92,7 @@ describe("dispatchPullRequestNotifications", () => {
         body: "bob: 💬 commented",
         clickUrl: "https://github.com/acme/octopulse/pull/7",
         icon: expect.stringContaining("pull-request-open.svg"),
+        soundFile: expect.stringContaining("comment.wav"),
         sticky: true,
         markup: expect.objectContaining({
           headerText: "[octopulse] Add notifications (open)",
@@ -239,6 +241,54 @@ describe("dispatchPullRequestNotifications", () => {
         body: "bob: 💬 commented",
         sticky: false,
       }));
+      expect(notificationDispatcher.dispatchNotification.mock.calls[0]?.[0]).not.toHaveProperty(
+        "soundFile",
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not attach sounds to unrelated own pull request notifications", async () => {
+    const { database, pullRequest } = createPullRequest();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const notificationDispatcher = {
+      dispatchNotification: vi.fn().mockResolvedValue(undefined),
+    };
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "ci_failed",
+        actorLogin: "github-actions",
+        actorClass: "bot",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ workflowName: "ci" }),
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+
+      expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
+        eligibleCount: 1,
+        bundledCount: 1,
+        createdBundleCount: 1,
+      });
+
+      await expect(
+        dispatchPullRequestNotifications(database, pullRequest, {
+          currentUserLogin: "octocat",
+          notificationDispatcher,
+        }),
+      ).resolves.toEqual({
+        immediateCount: 0,
+        bundledCount: 1,
+        createdCount: 1,
+        dispatchedCount: 1,
+        failedCount: 0,
+      });
+
+      expect(notificationDispatcher.dispatchNotification.mock.calls[0]?.[0]).not.toHaveProperty(
+        "soundFile",
+      );
     } finally {
       database.close();
     }
