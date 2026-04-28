@@ -61,11 +61,14 @@ systemctl --user enable --now octopulse.service
 Useful service commands:
 
 ```bash
+npm run deploy:user-service
 systemctl --user status octopulse.service
 systemctl --user restart octopulse.service
 systemctl --user stop octopulse.service
 systemctl --user disable octopulse.service
 ```
+
+`npm run deploy:user-service` rebuilds the app and restarts the user service in one step.
 
 The service is configured with `Restart=on-failure`, so systemd will try to bring it back if the process exits unexpectedly.
 
@@ -106,7 +109,7 @@ Common debugging checks:
 - check service status with `systemctl --user status octopulse.service`
 - check startup failures in the journal if the UI is not reachable
 - run `npm run start` from the repo root to reproduce startup issues in the foreground
-- run `npm run build` after changing server code before restarting the service
+- run `npm run deploy:user-service` after changing service code
 
 When startup succeeds, Octopulse logs the localhost UI origin and the authenticated GitHub login.
 

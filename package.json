@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "npm run build:client && tsx watch src/main.ts",
     "install:user-service": "tsx src/install-user-service.ts",
+    "deploy:user-service": "npm run build && systemctl --user restart octopulse.service",
     "start": "npm run build:client && tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json",
