@@ -31,7 +31,7 @@ describe("installUserService", () => {
     expect(existsSync(result.paths.servicePath)).toBe(true);
     expect(readFileSync(result.paths.servicePath, "utf8")).toContain(`WorkingDirectory=${repoRoot}`);
     expect(readFileSync(result.paths.servicePath, "utf8")).toContain(
-      "ExecStart=/usr/bin/env mise exec -- npm run start",
+      `ExecStart=/usr/bin/node ${path.join(repoRoot, "dist", "main.js")}`,
     );
     expect(existsSync(result.paths.desktopEntryPath)).toBe(true);
     expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("Name=Octopulse");
@@ -61,6 +61,7 @@ describe("installUserService", () => {
     expect(summary).toContain(`Installed desktop entry at ${result.paths.desktopEntryPath}`);
     expect(summary).toContain(`Kept existing config at ${configPath}`);
     expect(summary).toContain(`Octopulse database path: ${path.join(homeDir, ".local", "state", "octopulse", "octopulse.db")}`);
+    expect(summary).toContain("npm run build");
     expect(summary).toContain("systemctl --user daemon-reload");
     expect(summary).toContain("systemctl --user enable --now octopulse.service");
     expect(summary).toContain("journalctl --user -u octopulse.service -f");

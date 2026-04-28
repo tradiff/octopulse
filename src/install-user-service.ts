@@ -6,6 +6,7 @@ import { resolveAppPaths, type ResolveAppPathsOptions } from "./config.js";
 import { DESKTOP_ENTRY_FILE_NAME, renderDesktopEntry } from "./desktop-entry.js";
 
 const SERVICE_NAME = "octopulse.service";
+const SYSTEM_NODE_EXECUTABLE_PATH = "/usr/bin/node";
 
 export interface InstallUserServicePaths {
   repoRoot: string;
@@ -53,6 +54,8 @@ export function resolveInstallUserServicePaths(
 }
 
 export function renderUserServiceUnit(repoRoot: string): string {
+  const entryPointPath = path.join(repoRoot, "dist", "main.js");
+
   return [
     "[Unit]",
     "Description=Octopulse local PR activity monitor",
@@ -62,7 +65,7 @@ export function renderUserServiceUnit(repoRoot: string): string {
     "[Service]",
     "Type=simple",
     `WorkingDirectory=${repoRoot}`,
-    "ExecStart=/usr/bin/env mise exec -- npm run start",
+    `ExecStart=${SYSTEM_NODE_EXECUTABLE_PATH} ${entryPointPath}`,
     "Restart=on-failure",
     "RestartSec=5",
     "StandardOutput=journal",
@@ -113,10 +116,11 @@ export function renderInstallUserServiceSummary(
     "",
     "Next steps:",
     `1. Edit ${result.paths.configPath} and set [github].token.`,
-    "2. Run: systemctl --user daemon-reload",
-    `3. Run: systemctl --user enable --now ${serviceName}`,
-    `4. Run: systemctl --user status ${serviceName}`,
-    `5. Follow logs: journalctl --user -u ${serviceName} -f`,
+    "2. Run: npm run build",
+    "3. Run: systemctl --user daemon-reload",
+    `4. Run: systemctl --user enable --now ${serviceName}`,
+    `5. Run: systemctl --user status ${serviceName}`,
+    `6. Follow logs: journalctl --user -u ${serviceName} -f`,
   ].join("\n");
 }
 

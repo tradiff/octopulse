@@ -10,13 +10,14 @@ From the repo root:
 mise install
 npm install
 npm run install:user-service
+npm run build
 ```
 
 The install helper:
 
 - writes `octopulse.service` to `~/.config/systemd/user/octopulse.service`
 - creates `~/.config/octopulse/config.toml` only if it does not already exist
-- uses `mise exec -- npm run start` as the service command
+- uses `/usr/bin/node /path/to/repo/dist/main.js` as the service command
 - leaves runtime data under `~/.local/state/octopulse`
 
 ## Configure Octopulse
@@ -52,6 +53,7 @@ Supported log levels are `debug`, `info`, `warn`, and `error`.
 After the install helper runs:
 
 ```bash
+npm run build
 systemctl --user daemon-reload
 systemctl --user enable --now octopulse.service
 ```
@@ -104,6 +106,7 @@ Common debugging checks:
 - check service status with `systemctl --user status octopulse.service`
 - check startup failures in the journal if the UI is not reachable
 - run `npm run start` from the repo root to reproduce startup issues in the foreground
+- run `npm run build` after changing server code before restarting the service
 
 When startup succeeds, Octopulse logs the localhost UI origin and the authenticated GitHub login.
 
