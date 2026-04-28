@@ -1,13 +1,14 @@
 import {
   DEFAULT_ACTIVITY_FEED_FILTERS,
+  matchesPullRequestStateFilter,
   type ActivityFeedFilters,
+  type PullRequestStateFilter,
 } from "./activity-feed.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { ActorClass } from "./normalized-event-repository.js";
+import { resolvePullRequestLifecycleState } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { RawEventsEntry } from "./raw-events.js";
-
-export type PullRequestStateFilter = "all" | "tracked" | "inactive";
 
 export type UiFilterValues = ActivityFeedFilters;
 
@@ -25,7 +26,14 @@ export interface BuildUiFilterOptionsInput {
 
 export const DEFAULT_UI_FILTERS: UiFilterValues = { ...DEFAULT_ACTIVITY_FEED_FILTERS };
 
-const PULL_REQUEST_STATE_FILTERS = new Set<PullRequestStateFilter>(["all", "tracked", "inactive"]);
+const PULL_REQUEST_STATE_FILTERS = new Set<PullRequestStateFilter>([
+  "all",
+  "tracked",
+  "inactive",
+  "open",
+  "merged",
+  "closed",
+]);
 const ACTOR_CLASSES = new Set<ActorClass>(["self", "human_other", "bot"]);
 const ALL_ACTIVITY_ACTOR_CLASSES = ["self", "human_other", "bot"] satisfies ActorClass[];
 
@@ -64,14 +72,14 @@ export function filterTrackedPullRequests(
   pullRequests: PullRequestRecord[],
   filters: UiFilterValues,
 ): PullRequestRecord[] {
-  return filterPullRequests(pullRequests, filters, "tracked");
+  return filterPullRequests(pullRequests, filters);
 }
 
 export function filterInactivePullRequests(
   pullRequests: PullRequestRecord[],
   filters: UiFilterValues,
 ): PullRequestRecord[] {
-  return filterPullRequests(pullRequests, filters, "inactive");
+  return filterPullRequests(pullRequests, filters);
 }
 
 export function filterNotificationHistory(
@@ -79,7 +87,12 @@ export function filterNotificationHistory(
   filters: UiFilterValues,
 ): NotificationHistoryEntry[] {
   return entries.filter((entry) => {
-    if (!matchesPullRequestState(entry.isTracked, filters.pullRequestState)) {
+    if (
+      !matchesPullRequestStateFilter(filters.pullRequestState, {
+        isTracked: entry.isTracked,
+        pullRequestStatus: entry.pullRequestStatus,
+      })
+    ) {
       return false;
     }
 
@@ -97,7 +110,12 @@ export function filterNotificationHistory(
 
 export function filterRawEvents(entries: RawEventsEntry[], filters: UiFilterValues): RawEventsEntry[] {
   return entries.filter((entry) => {
-    if (!matchesPullRequestState(entry.isTracked, filters.pullRequestState)) {
+    if (
+      !matchesPullRequestStateFilter(filters.pullRequestState, {
+        isTracked: entry.isTracked,
+        pullRequestStatus: entry.pullRequestStatus,
+      })
+    ) {
       return false;
     }
 
@@ -128,30 +146,19 @@ export function countActiveUiFilters(filters: UiFilterValues): number {
 function filterPullRequests(
   pullRequests: PullRequestRecord[],
   filters: UiFilterValues,
-  state: Exclude<PullRequestStateFilter, "all">,
 ): PullRequestRecord[] {
-  if (filters.pullRequestState !== "all" && filters.pullRequestState !== state) {
-    return [];
-  }
+  return pullRequests.filter((pullRequest) => {
+    if (
+      !matchesPullRequestStateFilter(filters.pullRequestState, {
+        isTracked: pullRequest.isTracked,
+        pullRequestStatus: resolvePullRequestLifecycleState(pullRequest),
+      })
+    ) {
+      return false;
+    }
 
-  return pullRequests.filter((pullRequest) =>
-    matchesRepository(formatRepositoryKey(pullRequest), filters.repository),
-  );
-}
-
-function matchesPullRequestState(
-  isTracked: boolean | null,
-  filter: PullRequestStateFilter,
-): boolean {
-  if (filter === "all") {
-    return true;
-  }
-
-  if (isTracked === null) {
-    return false;
-  }
-
-  return filter === "tracked" ? isTracked : !isTracked;
+    return matchesRepository(formatRepositoryKey(pullRequest), filters.repository);
+  });
 }
 
 function matchesRepository(repositoryKey: string | null, filterValue: string): boolean {

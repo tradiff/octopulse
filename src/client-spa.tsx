@@ -607,11 +607,14 @@ function FilterPanel({
           ) : (
             <>
               <label className="filter-field">
-                <span className="input-label">Tracked state</span>
+                <span className="input-label">Pull request filter</span>
                 <select name="pr-state" defaultValue={uiFilters.pullRequestState} className="text-input">
                   <option value="all">All pull requests</option>
                   <option value="tracked">Tracked only</option>
                   <option value="inactive">Untracked only</option>
+                  <option value="open">Open only</option>
+                  <option value="merged">Merged only</option>
+                  <option value="closed">Closed only</option>
                 </select>
               </label>
               <label className="filter-field">
@@ -1504,6 +1507,18 @@ function formatPullRequestEmptyMessage(uiFilters: UiFilterValues, hasActiveFilte
 
   if (uiFilters.pullRequestState === "inactive") {
     return "No untracked pull requests match current filters.";
+  }
+
+  if (uiFilters.pullRequestState === "open") {
+    return "No open pull requests match current filters.";
+  }
+
+  if (uiFilters.pullRequestState === "merged") {
+    return "No merged pull requests match current filters.";
+  }
+
+  if (uiFilters.pullRequestState === "closed") {
+    return "No closed pull requests match current filters.";
   }
 
   return "No pull requests match current filters.";

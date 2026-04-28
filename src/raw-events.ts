@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
 import {
+  buildPullRequestStateSqlFilter,
   DEFAULT_ACTIVITY_FEED_FILTERS,
   DEFAULT_ACTIVITY_PAGE_SIZE,
   resolvePaginationWindow,
@@ -14,11 +15,16 @@ import type {
   NotificationTiming,
 } from "./normalized-event-repository.js";
 import type { NotificationDeliveryStatus } from "./notification-record-repository.js";
+import {
+  resolvePullRequestLifecycleState,
+  type PullRequestLifecycleState,
+} from "./pull-request-state.js";
 
 export interface RawEventsEntry {
   id: number;
   repositoryKey: string;
   isTracked: boolean;
+  pullRequestStatus: PullRequestLifecycleState;
   pullRequestLabel: string;
   pullRequestTitle: string;
   pullRequestUrl: string;
@@ -84,6 +90,8 @@ function readRawEventRows(
           pull_request.repository_owner,
           pull_request.repository_name,
           pull_request.is_tracked,
+          pull_request.state,
+          pull_request.merged_at,
           pull_request.number,
           pull_request.url,
           pull_request.title,
@@ -140,11 +148,14 @@ function buildRawEventsFilterClause(filters: ActivityFeedFilters): {
 } {
   const clauses: string[] = [];
   const parameters: Array<number | string> = [];
+  const pullRequestStateFilter = buildPullRequestStateSqlFilter(filters.pullRequestState, {
+    tracked: "pull_request.is_tracked",
+    state: "pull_request.state",
+    mergedAt: "pull_request.merged_at",
+  });
 
-  if (filters.pullRequestState !== "all") {
-    clauses.push("pull_request.is_tracked = ?");
-    parameters.push(filters.pullRequestState === "tracked" ? 1 : 0);
-  }
+  clauses.push(...pullRequestStateFilter.clauses);
+  parameters.push(...pullRequestStateFilter.parameters);
 
   if (filters.repository.length > 0) {
     clauses.push("(pull_request.repository_owner || '/' || pull_request.repository_name) = ?");
@@ -176,11 +187,14 @@ function mapRawEventsEntry(row: unknown): RawEventsEntry {
     value.bundle_delivery_status,
     "RawEvents.bundle_delivery_status",
   );
+  const state = readString(value.state, "RawEvents.state");
+  const mergedAt = readNullableString(value.merged_at, "RawEvents.merged_at");
 
   return {
     id: readInteger(value.id, "RawEvents.id"),
     repositoryKey: `${readString(value.repository_owner, "RawEvents.repository_owner")}/${readString(value.repository_name, "RawEvents.repository_name")}`,
     isTracked: readBoolean(value.is_tracked, "RawEvents.is_tracked"),
+    pullRequestStatus: resolvePullRequestLifecycleState({ state, mergedAt }),
     pullRequestLabel: `${readString(value.repository_owner, "RawEvents.repository_owner")}/${readString(value.repository_name, "RawEvents.repository_name")} #${readInteger(value.number, "RawEvents.number")}`,
     pullRequestTitle: readString(value.title, "RawEvents.title"),
     pullRequestUrl: readString(value.url, "RawEvents.url"),

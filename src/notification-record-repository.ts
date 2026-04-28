@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
 import {
+  buildPullRequestStateSqlFilter,
   DEFAULT_ACTIVITY_FEED_FILTERS,
   type ActivityFeedFilters,
 } from "./activity-feed.js";
@@ -272,11 +273,14 @@ function buildNotificationRecordFilterClause(filters: ActivityFeedFilters): {
 } {
   const clauses: string[] = [];
   const parameters: Array<number | string> = [];
+  const pullRequestStateFilter = buildPullRequestStateSqlFilter(filters.pullRequestState, {
+    tracked: "pull_request.is_tracked",
+    state: "pull_request.state",
+    mergedAt: "pull_request.merged_at",
+  });
 
-  if (filters.pullRequestState !== "all") {
-    clauses.push("pull_request.is_tracked = ?");
-    parameters.push(filters.pullRequestState === "tracked" ? 1 : 0);
-  }
+  clauses.push(...pullRequestStateFilter.clauses);
+  parameters.push(...pullRequestStateFilter.parameters);
 
   if (filters.repository.length > 0) {
     clauses.push("(pull_request.repository_owner || '/' || pull_request.repository_name) = ?");

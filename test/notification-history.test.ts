@@ -99,6 +99,7 @@ describe("listNotificationHistory", () => {
               sourceKind: "bundle",
               repositoryKey: "acme/octopulse",
               isTracked: true,
+              pullRequestStatus: "open",
               author: {
                 login: "octocat",
                 avatarUrl: null,
@@ -139,6 +140,7 @@ describe("listNotificationHistory", () => {
               sourceKind: "immediate",
               repositoryKey: "acme/octopulse",
               isTracked: true,
+              pullRequestStatus: "open",
               author: {
                 login: "octocat",
                 avatarUrl: null,
@@ -191,6 +193,24 @@ describe("listNotificationHistory", () => {
           expect.objectContaining({
             deliveryStatus: "pending",
             actorClasses: ["human_other"],
+          }),
+        ]);
+        expect(
+          listNotificationHistory(database, {
+            filters: {
+              pullRequestState: "open",
+              repository: "",
+              actorClass: "",
+            },
+          }).entries,
+        ).toEqual([
+          expect.objectContaining({
+            deliveryStatus: "sent",
+            pullRequestStatus: "open",
+          }),
+          expect.objectContaining({
+            deliveryStatus: "pending",
+            pullRequestStatus: "open",
           }),
         ]);
     } finally {

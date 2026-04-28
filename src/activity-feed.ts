@@ -1,9 +1,23 @@
 import type { ActorClass } from "./normalized-event-repository.js";
+import type { PullRequestLifecycleState } from "./pull-request-state.js";
+
+export type PullRequestStateFilter = "all" | "tracked" | "inactive" | PullRequestLifecycleState;
 
 export interface ActivityFeedFilters {
-  pullRequestState: "all" | "tracked" | "inactive";
+  pullRequestState: PullRequestStateFilter;
   repository: string;
   actorClass: "" | ActorClass;
+}
+
+export interface PullRequestStateFilterMatchInput {
+  isTracked: boolean | null;
+  pullRequestStatus: PullRequestLifecycleState | null;
+}
+
+export interface PullRequestStateSqlColumns {
+  tracked: string;
+  state: string;
+  mergedAt: string;
 }
 
 export interface ListActivityFeedOptions {
@@ -36,6 +50,63 @@ export const DEFAULT_ACTIVITY_FEED_FILTERS: ActivityFeedFilters = {
 };
 
 export const DEFAULT_ACTIVITY_PAGE_SIZE = 50;
+
+export function matchesPullRequestStateFilter(
+  filter: PullRequestStateFilter,
+  input: PullRequestStateFilterMatchInput,
+): boolean {
+  if (filter === "all") {
+    return true;
+  }
+
+  if (filter === "tracked" || filter === "inactive") {
+    if (input.isTracked === null) {
+      return false;
+    }
+
+    return filter === "tracked" ? input.isTracked : !input.isTracked;
+  }
+
+  return input.pullRequestStatus === filter;
+}
+
+export function buildPullRequestStateSqlFilter(
+  filter: PullRequestStateFilter,
+  columns: PullRequestStateSqlColumns,
+): { clauses: string[]; parameters: Array<number | string> } {
+  if (filter === "all") {
+    return {
+      clauses: [],
+      parameters: [],
+    };
+  }
+
+  if (filter === "tracked" || filter === "inactive") {
+    return {
+      clauses: [`${columns.tracked} = ?`],
+      parameters: [filter === "tracked" ? 1 : 0],
+    };
+  }
+
+  if (filter === "merged") {
+    return {
+      clauses: [`${columns.mergedAt} IS NOT NULL`],
+      parameters: [],
+    };
+  }
+
+  if (filter === "closed") {
+    return {
+      clauses: [`${columns.mergedAt} IS NULL`, `LOWER(${columns.state}) = 'closed'`],
+      parameters: [],
+    };
+  }
+
+  return {
+    clauses: [`${columns.mergedAt} IS NULL`, `LOWER(${columns.state}) <> 'closed'`],
+    parameters: [],
+  };
+}
 
 export function resolvePaginationWindow(
   totalCount: number,

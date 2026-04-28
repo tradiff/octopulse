@@ -130,12 +130,13 @@ describe("startServer", () => {
               decisionStates: ["notified" as const],
               eventTypes: ["review_approved"],
               actorClasses: ["human_other" as const],
-              sourceKind: "immediate" as const,
-              repositoryKey: "acme/octopulse",
-              isTracked: true,
-              author: {
-                login: "octocat",
-                avatarUrl: "https://avatars.example.test/octocat.png",
+               sourceKind: "immediate" as const,
+               repositoryKey: "acme/octopulse",
+               isTracked: true,
+               pullRequestStatus: "open" as const,
+               author: {
+                 login: "octocat",
+                 avatarUrl: "https://avatars.example.test/octocat.png",
               },
               actors: [
                 {
@@ -165,11 +166,12 @@ describe("startServer", () => {
         return {
           entries: [
             {
-              id: 17,
-              repositoryKey: "acme/octopulse",
-              isTracked: true,
-              pullRequestLabel: "acme/octopulse #7",
-              pullRequestTitle: "Add pull request polling",
+               id: 17,
+               repositoryKey: "acme/octopulse",
+               isTracked: true,
+               pullRequestStatus: "open" as const,
+               pullRequestLabel: "acme/octopulse #7",
+               pullRequestTitle: "Add pull request polling",
               pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
               eventType: "review_changes_requested",
               actorLogin: "alice",
@@ -253,12 +255,13 @@ describe("startServer", () => {
           decisionStates: ["notified"],
           eventTypes: ["review_approved"],
           actorClasses: ["human_other"],
-          sourceKind: "immediate",
-          repositoryKey: "acme/octopulse",
-          isTracked: true,
-          author: {
-            login: "octocat",
-            avatarUrl: "https://avatars.example.test/octocat.png",
+           sourceKind: "immediate",
+           repositoryKey: "acme/octopulse",
+           isTracked: true,
+           pullRequestStatus: "open",
+           author: {
+             login: "octocat",
+             avatarUrl: "https://avatars.example.test/octocat.png",
           },
           actors: [
             {
@@ -286,11 +289,12 @@ describe("startServer", () => {
     expect((await rawEventsResponse.json()) as unknown).toEqual({
       rawEvents: [
         {
-          id: 17,
-          repositoryKey: "acme/octopulse",
-          isTracked: true,
-          pullRequestLabel: "acme/octopulse #7",
-          pullRequestTitle: "Add pull request polling",
+           id: 17,
+           repositoryKey: "acme/octopulse",
+           isTracked: true,
+           pullRequestStatus: "open",
+           pullRequestLabel: "acme/octopulse #7",
+           pullRequestTitle: "Add pull request polling",
           pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
           eventType: "review_changes_requested",
           actorLogin: "alice",

@@ -22,6 +22,10 @@ import {
   renderNotificationMarkup,
   type NotificationMarkupParagraph,
 } from "./notification-rendering.js";
+import {
+  resolvePullRequestLifecycleState,
+  type PullRequestLifecycleState,
+} from "./pull-request-state.js";
 import { PullRequestRepository, type PullRequestRecord } from "./pull-request-repository.js";
 
 export interface NotificationHistoryActor {
@@ -44,6 +48,7 @@ export interface NotificationHistoryEntry {
   sourceKind: "immediate" | "bundle";
   repositoryKey: string | null;
   isTracked: boolean | null;
+  pullRequestStatus: PullRequestLifecycleState | null;
   author: NotificationHistoryActor | null;
   actors: NotificationHistoryActor[];
   summaryParagraphs: NotificationMarkupParagraph[];
@@ -109,6 +114,7 @@ export function listNotificationHistory(
           sourceKind: record.normalizedEventId === null ? "bundle" : "immediate",
           repositoryKey: pullRequest ? formatRepositoryKey(pullRequest) : readRepositoryKeyFromUrl(record.clickUrl),
           isTracked: pullRequest?.isTracked ?? null,
+          pullRequestStatus: pullRequest ? resolvePullRequestLifecycleState(pullRequest) : null,
           author: pullRequest
             ? {
                 login: pullRequest.authorLogin,

@@ -109,6 +109,7 @@ describe("listRawEvents", () => {
               id: bundledEvent.id,
               repositoryKey: "acme/octopulse",
               isTracked: true,
+              pullRequestStatus: "open",
               pullRequestLabel: "acme/octopulse #7",
               pullRequestTitle: "Add notifications",
               pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
@@ -126,6 +127,7 @@ describe("listRawEvents", () => {
               id: immediateEvent.id,
               repositoryKey: "acme/octopulse",
               isTracked: true,
+              pullRequestStatus: "open",
               pullRequestLabel: "acme/octopulse #7",
               pullRequestTitle: "Add notifications",
               pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
@@ -148,11 +150,12 @@ describe("listRawEvents", () => {
         expect(listRawEvents(database, { page: 2, pageSize: 1 })).toEqual({
           entries: [
             {
-              id: immediateEvent.id,
-              repositoryKey: "acme/octopulse",
-              isTracked: true,
-              pullRequestLabel: "acme/octopulse #7",
-              pullRequestTitle: "Add notifications",
+               id: immediateEvent.id,
+               repositoryKey: "acme/octopulse",
+               isTracked: true,
+               pullRequestStatus: "open",
+               pullRequestLabel: "acme/octopulse #7",
+               pullRequestTitle: "Add notifications",
               pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
               eventType: "review_changes_requested",
               actorLogin: "alice",
@@ -179,12 +182,13 @@ describe("listRawEvents", () => {
             },
           }).entries,
         ).toEqual([
-          {
-            id: immediateEvent.id,
-            repositoryKey: "acme/octopulse",
-            isTracked: true,
-            pullRequestLabel: "acme/octopulse #7",
-            pullRequestTitle: "Add notifications",
+           {
+             id: immediateEvent.id,
+             repositoryKey: "acme/octopulse",
+             isTracked: true,
+             pullRequestStatus: "open",
+             pullRequestLabel: "acme/octopulse #7",
+             pullRequestTitle: "Add notifications",
             pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
             eventType: "review_changes_requested",
             actorLogin: "alice",
@@ -196,6 +200,24 @@ describe("listRawEvents", () => {
             notificationSourceKind: "immediate",
             notificationDeliveryStatus: "sent",
           },
+        ]);
+        expect(
+          listRawEvents(database, {
+            filters: {
+              pullRequestState: "open",
+              repository: "",
+              actorClass: "",
+            },
+          }).entries,
+        ).toEqual([
+          expect.objectContaining({
+            id: bundledEvent.id,
+            pullRequestStatus: "open",
+          }),
+          expect.objectContaining({
+            id: immediateEvent.id,
+            pullRequestStatus: "open",
+          }),
         ]);
     } finally {
       database.close();
