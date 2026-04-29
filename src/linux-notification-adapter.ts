@@ -71,7 +71,8 @@ export class LinuxNotificationAdapter {
       appName: "Octopulse",
       summary: renderedNotification.summary,
       body: renderedNotification.body,
-      urgency: "normal",
+      // freedesktop-notifications sends its own 30s anti-leak close request for normal urgency.
+      urgency: notification.sticky ? "critical" : "normal",
       actions: notification.clickUrl
         ? { default: "Open" }
         : {},

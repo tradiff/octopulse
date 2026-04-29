@@ -178,7 +178,7 @@ describe("LinuxNotificationAdapter", () => {
       appName: "Octopulse",
       summary: "acme/octopulse PR #7",
       body: "alice approved review\nShip notifications",
-      urgency: "normal",
+      urgency: "critical",
       actions: {},
       timeout: 0,
       "desktop-entry": DESKTOP_ENTRY_ID,
