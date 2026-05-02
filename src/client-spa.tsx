@@ -107,6 +107,28 @@ const RAW_EVENT_JSON_THEME = {
     color: "#cbd5e1",
   },
 };
+const PULL_REQUEST_APPROVER_EVENT_TYPES = new Set(["review_approved"]);
+const PULL_REQUEST_COMMENTER_EVENT_TYPES = new Set([
+  "issue_comment",
+  "review_inline_comment",
+  "review_submitted",
+  "review_approved",
+  "review_changes_requested",
+]);
+const PULL_REQUEST_DECLINER_EVENT_TYPES = new Set(["review_changes_requested"]);
+
+type PullRequestInteractionGroupKind = "approvers" | "commenters" | "decliners";
+
+interface PullRequestInteractionActor {
+  login: string;
+  avatarUrl: string | null;
+}
+
+interface PullRequestInteractionGroup {
+  kind: PullRequestInteractionGroupKind;
+  label: string;
+  actors: PullRequestInteractionActor[];
+}
 
 function isLogLevel(value: string): value is LogLevel {
   return value === "debug" || value === "info" || value === "warn" || value === "error";
@@ -1199,7 +1221,11 @@ function PullRequestList({
               <div className="notification-history-preview">
                 <div className="notification-history-preview-header-row">
                   <div className="notification-history-preview-header">
-                    <GitHubAvatar login={pullRequest.authorLogin} avatarUrl={pullRequest.authorAvatarUrl} />
+                    <GitHubAvatar
+                      login={pullRequest.authorLogin}
+                      avatarUrl={pullRequest.authorAvatarUrl}
+                      title={`@${pullRequest.authorLogin}`}
+                    />
                     <img
                       className="state-pill-icon"
                       src={resolvePullRequestStateAssetUrlPath(pullRequest)}
@@ -1220,7 +1246,9 @@ function PullRequestList({
                   <span className="history-pill">
                     {pullRequest.repositoryOwner}/{pullRequest.repositoryName} #{pullRequest.number}
                   </span>
-                  <span className="history-pill">@{pullRequest.authorLogin}</span>
+                  <PullRequestInteractionGroups
+                    entries={timelineByPullRequest[String(pullRequest.githubPullRequestId)] ?? []}
+                  />
                   {renderAction ? renderAction(pullRequest) : null}
                 </div>
                 <PullRequestTimelineDropdown
@@ -1234,6 +1262,144 @@ function PullRequestList({
         </ul>
       )}
     </section>
+  );
+}
+
+function PullRequestInteractionGroups({ entries }: { entries: PullRequestTimelineEntry[] }) {
+  const groups = buildPullRequestInteractionGroups(entries);
+
+  if (groups.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="pull-request-interaction-groups" aria-label="Pull request interactions">
+      {groups.map((group) => {
+        return (
+          <span
+            key={group.kind}
+            className={`pull-request-interaction-group pull-request-interaction-group-${group.kind}`}
+            role="group"
+            aria-label={group.label}
+          >
+            <span className="pull-request-interaction-group-icon" aria-hidden="true" title={group.label}>
+              <PullRequestInteractionGroupIcon kind={group.kind} />
+            </span>
+            <span className="pull-request-interaction-avatar-stack" aria-hidden="true">
+              {group.actors.map((actor) => (
+                <span
+                  key={`${group.kind}-${actor.login}`}
+                  className="pull-request-interaction-avatar-stack-item"
+                  title={`@${actor.login}`}
+                >
+                  <GitHubAvatar login={actor.login} avatarUrl={actor.avatarUrl} />
+                </span>
+              ))}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function buildPullRequestInteractionGroups(
+  entries: PullRequestTimelineEntry[],
+): PullRequestInteractionGroup[] {
+  const approvers = collectPullRequestInteractionActors(entries, PULL_REQUEST_APPROVER_EVENT_TYPES);
+  const commenters = collectPullRequestInteractionActors(entries, PULL_REQUEST_COMMENTER_EVENT_TYPES);
+  const decliners = collectPullRequestInteractionActors(entries, PULL_REQUEST_DECLINER_EVENT_TYPES);
+  const groups: PullRequestInteractionGroup[] = [];
+
+  if (approvers.length > 0) {
+    groups.push({ kind: "approvers", label: "Approvers", actors: approvers });
+  }
+
+  if (commenters.length > 0) {
+    groups.push({ kind: "commenters", label: "Commenters / Reviewers", actors: commenters });
+  }
+
+  if (decliners.length > 0) {
+    groups.push({ kind: "decliners", label: "Decliners", actors: decliners });
+  }
+
+  return groups;
+}
+
+function collectPullRequestInteractionActors(
+  entries: PullRequestTimelineEntry[],
+  eventTypes: ReadonlySet<string>,
+): PullRequestInteractionActor[] {
+  const actors = new Map<string, PullRequestInteractionActor>();
+
+  for (const entry of entries) {
+    const actorLogin = entry.paragraph.actorLogin;
+
+    if (actorLogin === null || !eventTypes.has(entry.eventType) || isBotActorLogin(actorLogin)) {
+      continue;
+    }
+
+    const actorAvatarUrl = entry.paragraph.actorAvatarUrl;
+    const existingActor = actors.get(actorLogin);
+
+    if (existingActor === undefined) {
+      actors.set(actorLogin, { login: actorLogin, avatarUrl: actorAvatarUrl });
+      continue;
+    }
+
+    if (existingActor.avatarUrl === null && actorAvatarUrl !== null) {
+      actors.set(actorLogin, { login: actorLogin, avatarUrl: actorAvatarUrl });
+    }
+  }
+
+  return [...actors.values()];
+}
+
+function isBotActorLogin(login: string): boolean {
+  return /\[bot\]$/i.test(login);
+}
+
+function PullRequestInteractionGroupIcon({ kind }: { kind: PullRequestInteractionGroupKind }) {
+  if (kind === "approvers") {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path
+          d="M5.75 10.5 8.5 13.25 14.25 7.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  if (kind === "commenters") {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path
+          d="M5.5 6.25h9a1.75 1.75 0 0 1 1.75 1.75v4A1.75 1.75 0 0 1 14.5 13.75H10l-3.25 2v-2H5.5A1.75 1.75 0 0 1 3.75 12V8A1.75 1.75 0 0 1 5.5 6.25Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M7 7 13 13M13 7l-6 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -1383,13 +1549,21 @@ function GitHubIdentityPill({
   );
 }
 
-function GitHubAvatar({ login, avatarUrl }: { login: string; avatarUrl: string | null }) {
+function GitHubAvatar({
+  login,
+  avatarUrl,
+  title,
+}: {
+  login: string;
+  avatarUrl: string | null;
+  title?: string;
+}) {
   const [hasImageError, setHasImageError] = useState(false);
   const fallback = login.slice(0, 1).toUpperCase() || "?";
   const showImage = avatarUrl !== null && avatarUrl.length > 0 && !hasImageError;
 
   return (
-    <span className="github-avatar" aria-hidden="true">
+    <span className="github-avatar" aria-hidden="true" title={title}>
       {showImage ? (
         <img
           src={avatarUrl}
@@ -2520,6 +2694,86 @@ const APP_STYLES = `
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 12px;
+  }
+
+  .pull-request-interaction-groups {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .pull-request-interaction-group {
+    --interaction-group-accent: #7dd3fc;
+    --interaction-group-background: rgba(14, 116, 144, 0.18);
+    --interaction-group-border: rgba(56, 189, 248, 0.24);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px 4px 6px;
+    border: 1px solid var(--interaction-group-border);
+    border-radius: 999px;
+    background: var(--interaction-group-background);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      inset 0 -1px 0 rgba(2, 6, 23, 0.16);
+  }
+
+  .pull-request-interaction-group-approvers {
+    --interaction-group-accent: #86efac;
+    --interaction-group-background: rgba(21, 128, 61, 0.16);
+    --interaction-group-border: rgba(74, 222, 128, 0.24);
+  }
+
+  .pull-request-interaction-group-commenters {
+    --interaction-group-accent: #7dd3fc;
+    --interaction-group-background: rgba(14, 116, 144, 0.18);
+    --interaction-group-border: rgba(56, 189, 248, 0.24);
+  }
+
+  .pull-request-interaction-group-decliners {
+    --interaction-group-accent: #fda4af;
+    --interaction-group-background: rgba(190, 24, 93, 0.14);
+    --interaction-group-border: rgba(244, 63, 94, 0.24);
+  }
+
+  .pull-request-interaction-group-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: rgba(2, 6, 23, 0.22);
+    color: var(--interaction-group-accent);
+    flex: 0 0 auto;
+  }
+
+  .pull-request-interaction-group-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .pull-request-interaction-avatar-stack {
+    display: inline-flex;
+    align-items: center;
+    padding-right: 2px;
+  }
+
+  .pull-request-interaction-avatar-stack-item {
+    display: inline-flex;
+  }
+
+  .pull-request-interaction-avatar-stack-item + .pull-request-interaction-avatar-stack-item {
+    margin-left: -6px;
+  }
+
+  .pull-request-interaction-avatar-stack .github-avatar {
+    width: 22px;
+    height: 22px;
+    border: 2px solid rgba(15, 23, 42, 0.94);
+    box-shadow: 0 0 0 1px var(--interaction-group-border);
+    background: rgba(15, 23, 42, 0.82);
   }
 
   .notification-history-time-pill {
