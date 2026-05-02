@@ -27,7 +27,7 @@ import {
   resolvePullRequestStateAssetFilePathByFilename,
 } from "./pull-request-state-assets.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
-import type { RawEventsEntry } from "./raw-events.js";
+import type { PullRequestTimeline, RawEventsEntry } from "./raw-events.js";
 import { readUiFilterValues } from "./ui-filters.js";
 
 const CLIENT_BUNDLE_PATH = new URL("../dist/public/app.js", import.meta.url);
@@ -58,6 +58,7 @@ export interface StartServerOptions {
   port?: number;
   listTrackedPullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
   listInactivePullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
+  listPullRequestTimeline?: () => SyncOrPromise<PullRequestTimeline>;
   listNotificationHistory?: (
     options: ListActivityFeedOptions,
   ) => SyncOrPromise<PaginatedEntries<NotificationHistoryEntry>>;
@@ -172,6 +173,11 @@ async function handleRequest(
       options.listInactivePullRequests,
       "Inactive pull request listing is not configured",
     );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/pull-request-timeline") {
+    await handlePullRequestTimelineRequest(request, response, options.listPullRequestTimeline);
     return;
   }
 
@@ -490,6 +496,33 @@ async function handleNotificationHistoryRequest(
       notificationHistory: notificationHistoryPage.entries,
       pagination: formatPaginationResponse(notificationHistoryPage),
     }),
+  );
+}
+
+async function handlePullRequestTimelineRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  listPullRequestTimeline: StartServerOptions["listPullRequestTimeline"],
+): Promise<void> {
+  if (!listPullRequestTimeline) {
+    respond(
+      response,
+      request.method,
+      503,
+      "application/json; charset=utf-8",
+      JSON.stringify({ error: "Pull request timeline listing is not configured" }),
+    );
+    return;
+  }
+
+  const timelineByPullRequest = await listPullRequestTimeline();
+
+  respond(
+    response,
+    request.method,
+    200,
+    "application/json; charset=utf-8",
+    JSON.stringify({ timelineByPullRequest }),
   );
 }
 

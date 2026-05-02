@@ -9,11 +9,17 @@ import {
   type ListActivityFeedOptions,
   type PaginatedEntries,
 } from "./activity-feed.js";
-import type {
-  ActorClass,
-  DecisionState,
-  NotificationTiming,
+import {
+  NormalizedEventRepository,
+  type ActorClass,
+  type DecisionState,
+  type NotificationTiming,
 } from "./normalized-event-repository.js";
+import {
+  buildNotificationParagraph,
+  type NotificationMarkupParagraph,
+} from "./notification-rendering.js";
+import { PullRequestRepository } from "./pull-request-repository.js";
 import type { NotificationDeliveryStatus } from "./notification-record-repository.js";
 import {
   resolvePullRequestLifecycleState,
@@ -39,7 +45,21 @@ export interface RawEventsEntry {
   notificationDeliveryStatus: NotificationDeliveryStatus | null;
 }
 
+export interface PullRequestTimelineEntry {
+  id: number;
+  eventType: string;
+  occurredAt: string;
+  paragraph: NotificationMarkupParagraph;
+}
+
+export type PullRequestTimeline = Record<string, PullRequestTimelineEntry[]>;
+
 export interface ListRawEventsOptions extends ListActivityFeedOptions {}
+
+export interface ListPullRequestTimelineOptions {
+  normalizedEventRepository?: Pick<NormalizedEventRepository, "listNormalizedEventsForPullRequest">;
+  pullRequestRepository?: Pick<PullRequestRepository, "listTrackedPullRequests" | "listInactivePullRequests">;
+}
 
 export class RawEventsError extends Error {
   constructor(message: string) {
@@ -72,6 +92,35 @@ export function listRawEvents(
   } catch (error) {
     throw new RawEventsError(`Failed to list raw events: ${getErrorMessage(error)}`);
   }
+}
+
+export function listPullRequestTimeline(
+  database: DatabaseSync,
+  options: ListPullRequestTimelineOptions = {},
+): PullRequestTimeline {
+  const normalizedEventRepository =
+    options.normalizedEventRepository ?? new NormalizedEventRepository(database);
+  const pullRequestRepository = options.pullRequestRepository ?? new PullRequestRepository(database);
+  const pullRequests = [
+    ...pullRequestRepository.listTrackedPullRequests(),
+    ...pullRequestRepository.listInactivePullRequests(),
+  ];
+
+  return Object.fromEntries(
+    pullRequests.map((pullRequest) => [
+      String(pullRequest.githubPullRequestId),
+      normalizedEventRepository
+        .listNormalizedEventsForPullRequest(pullRequest.id)
+        .slice()
+        .reverse()
+        .map((event) => ({
+          id: event.id,
+          eventType: event.eventType,
+          occurredAt: event.occurredAt,
+          paragraph: buildNotificationParagraph(event),
+        })),
+    ]),
+  );
 }
 
 function readRawEventRows(

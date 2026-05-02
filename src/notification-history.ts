@@ -15,6 +15,7 @@ import {
 } from "./normalized-event-repository.js";
 import {
   NotificationRecordRepository,
+  type NotificationRecord,
   type NotificationDeliveryStatus,
 } from "./notification-record-repository.js";
 import {
@@ -94,47 +95,58 @@ export function listNotificationHistory(
         limit: pagination.limit,
         offset: pagination.offset,
       })
-      .map((record) => {
-        const events = resolveHistoryEvents(record, normalizedEventRepository);
-        const pullRequest = resolveHistoryPullRequest(events, pullRequestRepository);
-        const markup = pullRequest === undefined || events.length === 0
-          ? null
-          : renderNotificationMarkup(pullRequest, events);
-
-        return {
-          id: record.id,
-          title: record.title,
-          markupHeaderText: markup?.headerText ?? record.title,
-          body: record.body,
-          clickUrl: record.clickUrl,
-          deliveryStatus: record.deliveryStatus,
-          createdAt: record.createdAt,
-          deliveredAt: record.deliveredAt,
-          decisionStates: collectDecisionStates(events),
-          eventTypes: collectEventTypes(events),
-          actorClasses: collectActorClasses(events),
-          sourceKind: record.normalizedEventId === null ? "bundle" : "immediate",
-          repositoryKey: pullRequest ? formatRepositoryKey(pullRequest) : readRepositoryKeyFromUrl(record.clickUrl),
-          isTracked: pullRequest?.isTracked ?? null,
-          pullRequestStatus: pullRequest ? resolvePullRequestLifecycleState(pullRequest) : null,
-          pullRequestStateAssetUrlPath: pullRequest
-            ? resolvePullRequestStateAssetUrlPath(pullRequest)
-            : null,
-          author: pullRequest
-            ? {
-                login: pullRequest.authorLogin,
-                avatarUrl: pullRequest.authorAvatarUrl,
-              }
-            : null,
-          actors: collectActors(events),
-          summaryParagraphs:
-            markup === null ? events.map((event) => buildNotificationParagraph(event)) : [...markup.paragraphs],
-        };
-      }),
+      .map((record) => buildNotificationHistoryEntry(record, normalizedEventRepository, pullRequestRepository)),
     page: pagination.page,
     pageSize: pagination.pageSize,
     totalCount: pagination.totalCount,
     totalPages: pagination.totalPages,
+  };
+}
+
+function buildNotificationHistoryEntry(
+  record: NotificationRecord,
+  normalizedEventRepository: Pick<
+    NormalizedEventRepository,
+    "getNormalizedEventById" | "listNormalizedEventsForBundle"
+  >,
+  pullRequestRepository: Pick<PullRequestRepository, "getPullRequestById">,
+): NotificationHistoryEntry {
+  const events = resolveHistoryEvents(record, normalizedEventRepository);
+  const resolvedPullRequest = resolveHistoryPullRequest(events, pullRequestRepository);
+  const markup = resolvedPullRequest === undefined || events.length === 0
+    ? null
+    : renderNotificationMarkup(resolvedPullRequest, events);
+
+  return {
+    id: record.id,
+    title: record.title,
+    markupHeaderText: markup?.headerText ?? record.title,
+    body: record.body,
+    clickUrl: record.clickUrl,
+    deliveryStatus: record.deliveryStatus,
+    createdAt: record.createdAt,
+    deliveredAt: record.deliveredAt,
+    decisionStates: collectDecisionStates(events),
+    eventTypes: collectEventTypes(events),
+    actorClasses: collectActorClasses(events),
+    sourceKind: record.normalizedEventId === null ? "bundle" : "immediate",
+    repositoryKey: resolvedPullRequest
+      ? formatRepositoryKey(resolvedPullRequest)
+      : readRepositoryKeyFromUrl(record.clickUrl),
+    isTracked: resolvedPullRequest?.isTracked ?? null,
+    pullRequestStatus: resolvedPullRequest ? resolvePullRequestLifecycleState(resolvedPullRequest) : null,
+    pullRequestStateAssetUrlPath: resolvedPullRequest
+      ? resolvePullRequestStateAssetUrlPath(resolvedPullRequest)
+      : null,
+    author: resolvedPullRequest
+      ? {
+          login: resolvedPullRequest.authorLogin,
+          avatarUrl: resolvedPullRequest.authorAvatarUrl,
+        }
+      : null,
+    actors: collectActors(events),
+    summaryParagraphs:
+      markup === null ? events.map((event) => buildNotificationParagraph(event)) : [...markup.paragraphs],
   };
 }
 

@@ -20,7 +20,7 @@ import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request
 import { listNotificationHistory } from "./notification-history.js";
 import { resendNotificationRecord } from "./notification-dispatch.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
-import { listRawEvents } from "./raw-events.js";
+import { listPullRequestTimeline, listRawEvents } from "./raw-events.js";
 import { readServerOrigin, startServer } from "./server.js";
 import {
   startRecurringTrackedPullRequestPolling,
@@ -103,6 +103,7 @@ async function main(): Promise<void> {
     server = await startServer({
       listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
       listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
+      listPullRequestTimeline: async () => listPullRequestTimeline(currentDatabase),
       listNotificationHistory: async ({ filters, page, pageSize }) =>
         listNotificationHistory(currentDatabase, {
           ...(filters ? { filters } : {}),

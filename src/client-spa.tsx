@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import { createRoot } from "react-dom/client";
 import { Highlight, themes } from "prism-react-renderer";
@@ -15,7 +16,7 @@ import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
-import type { RawEventsEntry } from "./raw-events.js";
+import type { PullRequestTimeline, PullRequestTimelineEntry, RawEventsEntry } from "./raw-events.js";
 import {
   DEFAULT_UI_FILTERS,
   buildUiFilterOptions,
@@ -81,6 +82,10 @@ const HISTORY_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hourCycle: "h23",
   timeZoneName: "short",
 });
+const HISTORY_RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en-US", {
+  numeric: "auto",
+  style: "long",
+});
 const RAW_EVENT_JSON_THEME = {
   ...themes.oneDark,
   plain: {
@@ -106,6 +111,7 @@ function App() {
   const [trackedPullRequests, setTrackedPullRequests] = useState<PullRequestRecord[]>([]);
   const [inactivePullRequests, setInactivePullRequests] = useState<PullRequestRecord[]>([]);
   const [notificationHistory, setNotificationHistory] = useState<NotificationHistoryEntry[]>([]);
+  const [timelineByPullRequest, setTimelineByPullRequest] = useState<PullRequestTimeline>({});
   const [notificationHistoryPagination, setNotificationHistoryPagination] =
     useState<PaginationState>(EMPTY_PAGINATION_STATE);
   const [rawEvents, setRawEvents] = useState<RawEventsEntry[]>([]);
@@ -188,6 +194,14 @@ function App() {
     () => filterInactivePullRequests(inactivePullRequests, route.uiFilters),
     [inactivePullRequests, route.uiFilters],
   );
+  const sortedPullRequests = useMemo(
+    () =>
+      sortPullRequestsByLatestActivity(
+        [...filteredTrackedPullRequests, ...filteredInactivePullRequests],
+        timelineByPullRequest,
+      ),
+    [filteredTrackedPullRequests, filteredInactivePullRequests, timelineByPullRequest],
+  );
   const filteredNotificationHistory = useMemo(
     () => filterNotificationHistory(notificationHistory, route.uiFilters),
     [notificationHistory, route.uiFilters],
@@ -218,13 +232,15 @@ function App() {
   async function loadCurrentPageData(routeState: RouteState): Promise<void> {
     try {
       if (routeState.currentPage === "pull-requests") {
-        const [trackedResponse, inactiveResponse] = await Promise.all([
+        const [trackedResponse, inactiveResponse, pullRequestTimelineResponse] = await Promise.all([
           apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
           apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
+          apiFetch<{ timelineByPullRequest: PullRequestTimeline }>("/api/pull-request-timeline"),
         ]);
 
         setTrackedPullRequests(trackedResponse.pullRequests);
         setInactivePullRequests(inactiveResponse.pullRequests);
+        setTimelineByPullRequest(pullRequestTimelineResponse.timelineByPullRequest);
         return;
       }
 
@@ -444,7 +460,8 @@ function App() {
             <PullRequestList
               title="Pull Requests"
               emptyMessage={formatPullRequestEmptyMessage(route.uiFilters, hasActiveFilters)}
-              pullRequests={[...filteredTrackedPullRequests, ...filteredInactivePullRequests]}
+              pullRequests={sortedPullRequests}
+              timelineByPullRequest={timelineByPullRequest}
               onRefresh={handleBaseDataRefresh}
               headerAction={
                 <button
@@ -763,28 +780,7 @@ function NotificationHistoryPanel({
                   </span>
                 </div>
                 <div className="notification-history-preview-body">
-                  {entry.summaryParagraphs.length > 0 ? (
-                    <div className="notification-history-summary-list">
-                      {entry.summaryParagraphs.map((paragraph, index) => (
-                        <p key={`${entry.id}-summary-${index}`} className="notification-history-summary-line">
-                          {paragraph.actorLogin ? (
-                            <>
-                              <GitHubAvatar
-                                login={paragraph.actorLogin}
-                                avatarUrl={paragraph.actorAvatarUrl}
-                              />
-                              <span className="notification-history-summary-actor">
-                                {paragraph.actorLogin}
-                              </span>
-                            </>
-                          ) : null}
-                          <span className="notification-history-summary-text">{paragraph.text}</span>
-                        </p>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="notification-history-body">{entry.body}</p>
-                  )}
+                  <NotificationSummaryContent entry={entry} />
                 </div>
                 <div className="notification-history-meta-row">
                   <span className="history-pill">{formatSourceKindLabel(entry.sourceKind)}</span>
@@ -1137,6 +1133,7 @@ function PullRequestList({
   title,
   emptyMessage,
   pullRequests,
+  timelineByPullRequest,
   onRefresh,
   headerAction,
   renderAction,
@@ -1144,6 +1141,7 @@ function PullRequestList({
   title: string;
   emptyMessage: string;
   pullRequests: PullRequestRecord[];
+  timelineByPullRequest: PullRequestTimeline;
   onRefresh: () => void;
   headerAction?: ReactNode;
   renderAction?: (pullRequest: PullRequestRecord) => ReactNode;
@@ -1191,12 +1189,124 @@ function PullRequestList({
                   <span className="history-pill">@{pullRequest.authorLogin}</span>
                   {renderAction ? renderAction(pullRequest) : null}
                 </div>
+                <PullRequestTimelineDropdown
+                  entries={timelineByPullRequest[String(pullRequest.githubPullRequestId)] ?? []}
+                  pullRequestAuthorLogin={pullRequest.authorLogin}
+                  pullRequestAuthorAvatarUrl={pullRequest.authorAvatarUrl}
+                />
               </div>
             </li>
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+function NotificationSummaryContent({
+  entry,
+}: {
+  entry: Pick<NotificationHistoryEntry, "id" | "summaryParagraphs" | "body">;
+}) {
+  return entry.summaryParagraphs.length > 0 ? (
+    <div className="notification-history-summary-list">
+      {entry.summaryParagraphs.map((paragraph, index) => (
+        <p key={`${entry.id}-summary-${index}`} className="notification-history-summary-line">
+          {paragraph.actorLogin ? (
+            <>
+              <GitHubAvatar login={paragraph.actorLogin} avatarUrl={paragraph.actorAvatarUrl} />
+              <span className="notification-history-summary-actor">{paragraph.actorLogin}</span>
+            </>
+          ) : null}
+          <span className="notification-history-summary-text">{paragraph.text}</span>
+        </p>
+      ))}
+    </div>
+  ) : (
+    <p className="notification-history-body">{entry.body}</p>
+  );
+}
+
+function PullRequestTimelineDropdown({
+  entries,
+  pullRequestAuthorLogin,
+  pullRequestAuthorAvatarUrl,
+}: {
+  entries: PullRequestTimelineEntry[];
+  pullRequestAuthorLogin: string;
+  pullRequestAuthorAvatarUrl: string | null;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const displayEntries = entries.map((entry) => ({
+    entry,
+    exactTimestamp: formatHistoryTimestamp(entry.occurredAt),
+    relativeTimestamp: formatRelativeHistoryTimestamp(entry.occurredAt),
+    actorLogin: entry.paragraph.actorLogin ?? pullRequestAuthorLogin,
+    actorAvatarUrl: entry.paragraph.actorLogin ? entry.paragraph.actorAvatarUrl : pullRequestAuthorAvatarUrl,
+  }));
+  const timeColumnWidth = displayEntries.reduce(
+    (largestWidth, displayEntry) => Math.max(largestWidth, displayEntry.relativeTimestamp.length),
+    1,
+  );
+  const timelineListStyle: CSSProperties = {
+    ["--pull-request-timeline-time-width" as string]: `${timeColumnWidth}ch`,
+  };
+  const hiddenEntryCount = Math.max(displayEntries.length - 1, 0);
+  const visibleEntries = isExpanded ? displayEntries : displayEntries.slice(0, 1);
+
+  return (
+    <div className="pull-request-timeline">
+      {entries.length === 0 ? (
+        <p className="pull-request-timeline-empty">No activity yet.</p>
+      ) : (
+        <>
+          <ol className="pull-request-timeline-list" style={timelineListStyle}>
+            {visibleEntries.map(({ entry, exactTimestamp, relativeTimestamp, actorLogin, actorAvatarUrl }) => {
+              return (
+                <li key={entry.id} className="pull-request-timeline-item">
+                  <span className="pull-request-timeline-dot" aria-hidden="true" />
+                  <div className="pull-request-timeline-entry">
+                    <time
+                      className="pull-request-timeline-time"
+                      dateTime={normalizeHistoryTimestamp(entry.occurredAt)}
+                      title={exactTimestamp}
+                    >
+                      {relativeTimestamp}
+                    </time>
+                    <div className="pull-request-timeline-author">
+                      <GitHubAvatar login={actorLogin} avatarUrl={actorAvatarUrl} />
+                      <span className="pull-request-timeline-actor" title={actorLogin}>
+                        {actorLogin}
+                      </span>
+                    </div>
+                    <span className="pull-request-timeline-text">{entry.paragraph.text}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+          {!isExpanded && hiddenEntryCount > 0 ? (
+            <button
+              type="button"
+              className="pull-request-timeline-toggle pull-request-timeline-toggle-expand"
+              aria-label={`Show ${hiddenEntryCount} more timeline ${hiddenEntryCount === 1 ? "event" : "events"}`}
+              onClick={() => setIsExpanded(true)}
+            >
+              {hiddenEntryCount} more
+            </button>
+          ) : null}
+          {isExpanded && hiddenEntryCount > 0 ? (
+            <button
+              type="button"
+              className="pull-request-timeline-toggle pull-request-timeline-toggle-collapse"
+              onClick={() => setIsExpanded(false)}
+            >
+              Collapse
+            </button>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1622,10 +1732,9 @@ function formatDecisionStateLabel(
 }
 
 function formatHistoryTimestamp(timestamp: string): string {
-  const normalizedTimestamp = normalizeHistoryTimestamp(timestamp);
-  const parsedTimestamp = new Date(normalizedTimestamp);
+  const parsedTimestamp = parseHistoryTimestamp(timestamp);
 
-  if (Number.isNaN(parsedTimestamp.getTime())) {
+  if (parsedTimestamp === null) {
     return timestamp;
   }
 
@@ -1649,6 +1758,82 @@ function formatHistoryTimestamp(timestamp: string): string {
   }
 
   return HISTORY_TIMESTAMP_FORMATTER.format(parsedTimestamp);
+}
+
+function sortPullRequestsByLatestActivity(
+  pullRequests: PullRequestRecord[],
+  timelineByPullRequest: PullRequestTimeline,
+): PullRequestRecord[] {
+  return pullRequests
+    .slice()
+    .sort(
+      (left, right) =>
+        getPullRequestLatestActivitySortTime(right, timelineByPullRequest) -
+          getPullRequestLatestActivitySortTime(left, timelineByPullRequest) ||
+        right.id - left.id,
+    );
+}
+
+function getPullRequestLatestActivitySortTime(
+  pullRequest: PullRequestRecord,
+  timelineByPullRequest: PullRequestTimeline,
+): number {
+  const timelineEntries = timelineByPullRequest[String(pullRequest.githubPullRequestId)] ?? [];
+
+  for (const entry of timelineEntries) {
+    const parsedOccurredAt = parseHistoryTimestamp(entry.occurredAt);
+
+    if (parsedOccurredAt !== null) {
+      return parsedOccurredAt.getTime();
+    }
+  }
+
+  const fallbackTimestamp = parseHistoryTimestamp(pullRequest.updatedAt);
+  return fallbackTimestamp?.getTime() ?? 0;
+}
+
+function formatRelativeHistoryTimestamp(timestamp: string): string {
+  const parsedTimestamp = parseHistoryTimestamp(timestamp);
+
+  if (parsedTimestamp === null) {
+    return timestamp;
+  }
+
+  const elapsedMilliseconds = parsedTimestamp.getTime() - Date.now();
+  const absoluteElapsedMilliseconds = Math.abs(elapsedMilliseconds);
+
+  if (absoluteElapsedMilliseconds < 60_000) {
+    return HISTORY_RELATIVE_TIME_FORMATTER.format(Math.round(elapsedMilliseconds / 1_000), "second");
+  }
+
+  if (absoluteElapsedMilliseconds < 3_600_000) {
+    return HISTORY_RELATIVE_TIME_FORMATTER.format(Math.round(elapsedMilliseconds / 60_000), "minute");
+  }
+
+  if (absoluteElapsedMilliseconds < 86_400_000) {
+    return HISTORY_RELATIVE_TIME_FORMATTER.format(Math.round(elapsedMilliseconds / 3_600_000), "hour");
+  }
+
+  if (absoluteElapsedMilliseconds < 2_592_000_000) {
+    return HISTORY_RELATIVE_TIME_FORMATTER.format(Math.round(elapsedMilliseconds / 86_400_000), "day");
+  }
+
+  if (absoluteElapsedMilliseconds < 31_536_000_000) {
+    return HISTORY_RELATIVE_TIME_FORMATTER.format(Math.round(elapsedMilliseconds / 2_592_000_000), "month");
+  }
+
+  return HISTORY_RELATIVE_TIME_FORMATTER.format(Math.round(elapsedMilliseconds / 31_536_000_000), "year");
+}
+
+function parseHistoryTimestamp(timestamp: string): Date | null {
+  const normalizedTimestamp = normalizeHistoryTimestamp(timestamp);
+  const parsedTimestamp = new Date(normalizedTimestamp);
+
+  if (Number.isNaN(parsedTimestamp.getTime())) {
+    return null;
+  }
+
+  return parsedTimestamp;
 }
 
 function normalizeHistoryTimestamp(timestamp: string): string {
@@ -1772,7 +1957,6 @@ const APP_STYLES = `
     border-radius: 999px;
     background: rgba(56, 189, 248, 0.12);
     color: #7dd3fc;
-    font-size: 0.875rem;
   }
 
   h1 {
@@ -1824,7 +2008,6 @@ const APP_STYLES = `
     border-bottom: 2px solid transparent;
     background: transparent;
     color: #94a3b8;
-    font-size: 0.95rem;
     font-weight: 600;
     text-decoration: none;
     cursor: pointer;
@@ -1845,7 +2028,6 @@ const APP_STYLES = `
 
   .manual-track-description {
     margin: 8px 0 0;
-    font-size: 0.875rem;
     color: #94a3b8;
   }
 
@@ -1928,7 +2110,6 @@ const APP_STYLES = `
     display: inline-flex;
     align-items: center;
     border-radius: 999px;
-    font-size: 0.75rem;
     font-weight: 600;
   }
 
@@ -1995,7 +2176,6 @@ const APP_STYLES = `
 
   .pagination-status {
     color: #94a3b8;
-    font-size: 0.875rem;
     white-space: nowrap;
   }
 
@@ -2064,7 +2244,6 @@ const APP_STYLES = `
 
   .panel-description {
     margin-top: 4px;
-    font-size: 0.875rem;
   }
 
   .track-form-row {
@@ -2075,7 +2254,6 @@ const APP_STYLES = `
 
   .input-label {
     display: block;
-    font-size: 0.875rem;
     font-weight: 600;
     color: #cbd5e1;
   }
@@ -2101,7 +2279,6 @@ const APP_STYLES = `
   }
 
   .pull-request-link {
-    font-size: 0.9rem;
     color: #7dd3fc;
     text-decoration: none;
     word-break: break-word;
@@ -2138,7 +2315,6 @@ const APP_STYLES = `
   }
 
   .notification-history-preview-header .github-avatar-fallback {
-    font-size: 0.75rem;
   }
 
   .notification-history-preview-link,
@@ -2146,7 +2322,6 @@ const APP_STYLES = `
     display: block;
     min-width: 0;
     color: #f8fafc;
-    font-size: 0.95rem;
     font-weight: 600;
     line-height: 1.45;
     word-break: break-word;
@@ -2218,6 +2393,156 @@ const APP_STYLES = `
     font-variant-numeric: tabular-nums;
   }
 
+  .pull-request-timeline {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
+  }
+
+  .pull-request-timeline-empty {
+    margin: 0;
+    color: #94a3b8;
+  }
+
+  .pull-request-timeline-list {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .pull-request-timeline-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr);
+    gap: 10px;
+    padding: 6px 0;
+  }
+
+  .pull-request-timeline-item::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(148, 163, 184, 0.18);
+  }
+
+  .pull-request-timeline-item:first-child::before {
+    top: 9px;
+  }
+
+  .pull-request-timeline-item:last-child::before {
+    bottom: 9px;
+  }
+
+  .pull-request-timeline-dot {
+    position: relative;
+    z-index: 1;
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 999px;
+    background: #7dd3fc;
+    box-shadow: 0 0 0 3px rgba(15, 23, 42, 1);
+  }
+
+  .pull-request-timeline-entry {
+    display: grid;
+    grid-template-columns: var(--pull-request-timeline-time-width, max-content) minmax(0, 10rem) minmax(0, 1fr);
+    gap: 12px;
+    min-width: 0;
+    align-items: start;
+  }
+
+  .pull-request-timeline-author {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .pull-request-timeline-author .github-avatar {
+    width: 16px;
+    height: 16px;
+  }
+
+  .pull-request-timeline-author .github-avatar-fallback {
+  }
+
+  .pull-request-timeline-actor {
+    min-width: 0;
+    color: #f8fafc;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pull-request-timeline-text {
+    min-width: 0;
+    color: #dbe7f3;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .pull-request-timeline-time {
+    color: #94a3b8;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    align-self: start;
+  }
+
+  .pull-request-timeline-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    border: 1px dashed rgba(148, 163, 184, 0.22);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.36);
+    color: #cbd5e1;
+    font: inherit;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .pull-request-timeline-toggle:hover {
+    background: rgba(15, 23, 42, 0.36);
+    border-color: rgba(148, 163, 184, 0.3);
+    color: #e2e8f0;
+  }
+
+  .pull-request-timeline-toggle-expand::after,
+  .pull-request-timeline-toggle-collapse::after {
+    color: #7dd3fc;
+    line-height: 1;
+  }
+
+  .pull-request-timeline-toggle-expand::after {
+    content: "▾";
+  }
+
+  .pull-request-timeline-toggle-collapse::after {
+    content: "▴";
+  }
+
+  .pull-request-timeline-toggle:focus-visible {
+    outline: 2px solid rgba(56, 189, 248, 0.4);
+    outline-offset: 2px;
+  }
+
   .notification-history-resend-form {
     margin-left: auto;
   }
@@ -2241,7 +2566,6 @@ const APP_STYLES = `
     justify-content: center;
     padding: 5px 10px;
     border-radius: 999px;
-    font-size: 0.75rem;
     font-weight: 700;
     white-space: nowrap;
   }
@@ -2292,7 +2616,6 @@ const APP_STYLES = `
 
   .logs-entry-time {
     color: #94a3b8;
-    font-size: 0.875rem;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
@@ -2355,7 +2678,6 @@ const APP_STYLES = `
     margin: 6px 0 0;
     padding: 8px 10px;
     border-radius: 10px;
-    font-size: 0.75rem;
   }
 
   .raw-event-details {
@@ -2365,7 +2687,6 @@ const APP_STYLES = `
   .raw-event-details summary {
     cursor: pointer;
     color: #7dd3fc;
-    font-size: 0.875rem;
     user-select: none;
   }
 
@@ -2377,7 +2698,6 @@ const APP_STYLES = `
     background: rgba(23, 28, 35, 0.96);
     border: 1px solid rgba(148, 163, 184, 0.16);
     color: #cbd5e1;
-    font-size: 0.8rem;
     line-height: 1.5;
   }
 
@@ -2403,7 +2723,6 @@ const APP_STYLES = `
     align-items: center;
     border-radius: 999px;
     padding: 4px 8px;
-    font-size: 0.75rem;
     font-weight: 600;
     white-space: nowrap;
   }
@@ -2455,7 +2774,6 @@ const APP_STYLES = `
     align-items: center;
     justify-content: center;
     color: #7dd3fc;
-    font-size: 0.65rem;
     line-height: 1;
   }
 
@@ -2496,13 +2814,11 @@ const APP_STYLES = `
 
   .notification-history-time {
     color: #94a3b8;
-    font-size: 0.8rem;
   }
 
   .pull-request-subtle {
     display: block;
     margin-top: 6px;
-    font-size: 0.875rem;
     color: #94a3b8;
   }
 
@@ -2516,7 +2832,6 @@ const APP_STYLES = `
     background: rgba(25, 30, 38, 0.98);
     color: #e2e8f0;
     font: inherit;
-    font-size: 0.875rem;
     cursor: pointer;
     text-decoration: none;
   }
@@ -2550,7 +2865,6 @@ const APP_STYLES = `
 
   .clear-filters-link {
     padding: 4px 10px;
-    font-size: 0.75rem;
     font-weight: 600;
     color: #cbd5e1;
   }
@@ -2595,6 +2909,11 @@ const APP_STYLES = `
 
     .raw-events-header {
       flex-direction: column;
+    }
+
+    .pull-request-timeline-entry {
+      grid-template-columns: var(--pull-request-timeline-time-width, max-content) minmax(0, 7.5rem) minmax(0, 1fr);
+      gap: 10px;
     }
 
     .pagination-footer {

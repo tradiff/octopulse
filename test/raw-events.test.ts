@@ -16,7 +16,7 @@ import {
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
 import { RawEventRepository } from "../src/raw-event-repository.js";
-import { listRawEvents } from "../src/raw-events.js";
+import { listPullRequestTimeline, listRawEvents } from "../src/raw-events.js";
 
 const tempDirs: string[] = [];
 
@@ -147,6 +147,30 @@ describe("listRawEvents", () => {
           totalCount: 2,
           totalPages: 1,
         });
+        expect(listPullRequestTimeline(database)[String(pullRequest.githubPullRequestId)]).toEqual([
+          {
+            id: bundledEvent.id,
+            eventType: "issue_comment",
+            occurredAt: "2026-04-10T12:05:00.000Z",
+            paragraph: {
+              actorLogin: "ci-bot[bot]",
+              actorAvatarKey: "ci-bot[bot]",
+              actorAvatarUrl: null,
+              text: "💬 commented",
+            },
+          },
+          {
+            id: immediateEvent.id,
+            eventType: "review_changes_requested",
+            occurredAt: "2026-04-10T12:04:00.000Z",
+            paragraph: {
+              actorLogin: "alice",
+              actorAvatarKey: "alice",
+              actorAvatarUrl: null,
+              text: "❗ changes requested",
+            },
+          },
+        ]);
         expect(listRawEvents(database, { page: 2, pageSize: 1 })).toEqual({
           entries: [
             {

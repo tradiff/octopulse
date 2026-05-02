@@ -106,6 +106,38 @@ describe("startServer", () => {
     });
   });
 
+  it("serves pull request timeline API", async () => {
+    const timelineByPullRequest = {
+      101: [
+        {
+          id: 1,
+          eventType: "review_approved",
+          occurredAt: "2026-04-10T12:03:00.000Z",
+          paragraph: {
+            actorLogin: "alice",
+            actorAvatarKey: "alice",
+            actorAvatarUrl: "https://avatars.example.test/alice.png",
+            text: "✅ approved",
+          },
+        },
+      ],
+      202: [],
+    };
+    const server = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      listPullRequestTimeline: async () => timelineByPullRequest,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${readServerOrigin(server)}/api/pull-request-timeline`);
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as unknown).toEqual({
+      timelineByPullRequest,
+    });
+  });
+
   it("serves notification history, raw events, and logs APIs", async () => {
     let notificationHistoryOptions: unknown;
     let rawEventsOptions: unknown;
