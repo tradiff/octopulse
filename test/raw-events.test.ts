@@ -200,7 +200,7 @@ describe("listRawEvents", () => {
         expect(
           listRawEvents(database, {
             filters: {
-              pullRequestState: "tracked",
+              pullRequestStates: ["tracked"],
               repository: "acme/octopulse",
               actorClass: "human_other",
             },
@@ -228,7 +228,7 @@ describe("listRawEvents", () => {
         expect(
           listRawEvents(database, {
             filters: {
-              pullRequestState: "open",
+              pullRequestStates: ["open"],
               repository: "",
               actorClass: "",
             },

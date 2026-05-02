@@ -11,7 +11,12 @@ import {
 import { createRoot } from "react-dom/client";
 import { Highlight, themes } from "prism-react-renderer";
 
-import { DEFAULT_ACTIVITY_PAGE_SIZE } from "./activity-feed.js";
+import {
+  DEFAULT_ACTIVITY_PAGE_SIZE,
+  isAllPullRequestStateFilterSelection,
+  normalizePullRequestStateFilters,
+  type PullRequestStateFilter,
+} from "./activity-feed.js";
 import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
@@ -55,8 +60,15 @@ interface RouteState {
 type PageFilterField = keyof UiFilterValues;
 
 const ROOT = document.querySelector("#root");
-const PULL_REQUEST_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestState", "repository"];
-const ACTIVITY_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestState", "repository", "actorClass"];
+const PULL_REQUEST_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestStates", "repository"];
+const ACTIVITY_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestStates", "repository", "actorClass"];
+const PULL_REQUEST_FILTER_PILLS: readonly { value: PullRequestStateFilter; label: string }[] = [
+  { value: "tracked", label: "Tracked" },
+  { value: "inactive", label: "Untracked" },
+  { value: "open", label: "Open" },
+  { value: "merged", label: "Merged" },
+  { value: "closed", label: "Closed" },
+];
 const APP_PAGES: readonly AppPage[] = [
   "pull-requests",
   "notification-history",
@@ -403,7 +415,7 @@ function App() {
         return;
       }
 
-      searchParams.set(key, value);
+      searchParams.append(key, value);
     });
 
     const nextFilters = readUiFilterValues(searchParams);
@@ -582,6 +594,8 @@ function FilterPanel({
   const pagePath = formatPagePath(currentPage);
   const showsActivityFilters = currentPage !== "pull-requests";
   const showsLogFilters = currentPage === "logs";
+  const filtersGridClassName =
+    showsActivityFilters && !showsLogFilters ? "filters-grid filters-grid-activity" : "filters-grid";
 
   return (
     <section className="panel filters-panel">
@@ -609,7 +623,7 @@ function FilterPanel({
         className="filters-form"
         onChange={onFormChange}
       >
-        <div className="filters-grid">
+        <div className={filtersGridClassName}>
           {showsLogFilters ? (
             <label className="filter-field">
               <span className="input-label">Level</span>
@@ -623,17 +637,37 @@ function FilterPanel({
             </label>
           ) : (
             <>
-              <label className="filter-field">
+              <div className="filter-field">
                 <span className="input-label">Pull request filter</span>
-                <select name="pr-state" defaultValue={uiFilters.pullRequestState} className="text-input">
-                  <option value="all">All pull requests</option>
-                  <option value="tracked">Tracked only</option>
-                  <option value="inactive">Untracked only</option>
-                  <option value="open">Open only</option>
-                  <option value="merged">Merged only</option>
-                  <option value="closed">Closed only</option>
-                </select>
-              </label>
+                {uiFilters.pullRequestStates.map((filter) => (
+                  <input key={filter} type="hidden" name="pr-state" value={filter} />
+                ))}
+                <div className="filter-pill-group" role="group" aria-label="Pull request filter">
+                  {PULL_REQUEST_FILTER_PILLS.map((pill) => {
+                    const isActive = uiFilters.pullRequestStates.includes(pill.value);
+                    const nextFilters = {
+                      ...uiFilters,
+                      pullRequestStates: togglePullRequestStateSelection(
+                        uiFilters.pullRequestStates,
+                        pill.value,
+                      ),
+                    };
+                    const href = buildPageHref(currentPage, nextFilters, logLevelFilter);
+
+                    return (
+                      <button
+                        key={pill.value}
+                        type="button"
+                        className={`filter-pill-button ${isActive ? "filter-pill-button-active" : ""}`.trim()}
+                        aria-pressed={isActive}
+                        onClick={() => onNavigate(href)}
+                      >
+                        {pill.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <label className="filter-field">
                 <span className="input-label">Repository</span>
                 <select name="repo" defaultValue={uiFilters.repository} className="text-input">
@@ -649,7 +683,7 @@ function FilterPanel({
           )}
           {showsActivityFilters && !showsLogFilters ? (
             <>
-              <label className="filter-field">
+              <label className="filter-field filter-field-actor">
                 <span className="input-label">Actor type</span>
                 <select name="actor-type" defaultValue={uiFilters.actorClass} className="text-input">
                   <option value="">All actors</option>
@@ -1530,6 +1564,14 @@ function countActivePageFilters(filters: UiFilterValues, page: AppPage, logLevel
   let count = 0;
 
   for (const field of getPageFilterFields(page)) {
+    if (field === "pullRequestStates") {
+      if (!isAllPullRequestStateFilterSelection(filters.pullRequestStates)) {
+        count += 1;
+      }
+
+      continue;
+    }
+
     if (filters[field] !== DEFAULT_UI_FILTERS[field]) {
       count += 1;
     }
@@ -1594,13 +1636,15 @@ function buildLogViewerHref(logLevelFilter: LogLevelFilter): string {
 
 function formatFilterSearchParamKey(field: PageFilterField): string {
   switch (field) {
-    case "pullRequestState":
+    case "pullRequestStates":
       return "pr-state";
     case "repository":
       return "repo";
     case "actorClass":
       return "actor-type";
   }
+
+  throw new Error(`Unsupported filter field: ${field}`);
 }
 
 function appendUiFilters(
@@ -1609,11 +1653,21 @@ function appendUiFilters(
   uiFilters: UiFilterValues,
 ): void {
   for (const field of fields) {
-    if (uiFilters[field] === DEFAULT_UI_FILTERS[field]) {
+    if (field === "pullRequestStates") {
+      for (const filter of uiFilters.pullRequestStates) {
+        searchParams.append(formatFilterSearchParamKey(field), filter);
+      }
+
       continue;
     }
 
-    searchParams.set(formatFilterSearchParamKey(field), uiFilters[field]);
+    const value = uiFilters[field];
+
+    if (value === DEFAULT_UI_FILTERS[field]) {
+      continue;
+    }
+
+    searchParams.set(formatFilterSearchParamKey(field), value);
   }
 }
 
@@ -1646,27 +1700,44 @@ function formatPullRequestEmptyMessage(uiFilters: UiFilterValues, hasActiveFilte
     return "No pull requests yet.";
   }
 
-  if (uiFilters.pullRequestState === "tracked") {
+  const [selectedFilter] = uiFilters.pullRequestStates;
+
+  if (uiFilters.pullRequestStates.length !== 1 || selectedFilter === undefined) {
+    return "No pull requests match current filters.";
+  }
+
+  if (selectedFilter === "tracked") {
     return "No tracked pull requests match current filters.";
   }
 
-  if (uiFilters.pullRequestState === "inactive") {
+  if (selectedFilter === "inactive") {
     return "No untracked pull requests match current filters.";
   }
 
-  if (uiFilters.pullRequestState === "open") {
+  if (selectedFilter === "open") {
     return "No open pull requests match current filters.";
   }
 
-  if (uiFilters.pullRequestState === "merged") {
+  if (selectedFilter === "merged") {
     return "No merged pull requests match current filters.";
   }
 
-  if (uiFilters.pullRequestState === "closed") {
+  if (selectedFilter === "closed") {
     return "No closed pull requests match current filters.";
   }
 
   return "No pull requests match current filters.";
+}
+
+function togglePullRequestStateSelection(
+  selectedFilters: readonly PullRequestStateFilter[],
+  filter: PullRequestStateFilter,
+): PullRequestStateFilter[] {
+  return normalizePullRequestStateFilters(
+    selectedFilters.includes(filter)
+      ? selectedFilters.filter((value) => value !== filter)
+      : [...selectedFilters, filter],
+  );
 }
 
 function formatTrackingStateLabel(pullRequest: PullRequestRecord): string {
@@ -2237,9 +2308,17 @@ const APP_STYLES = `
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 
+  .filters-grid-activity {
+    grid-template-columns: 456px minmax(180px, 1fr) auto;
+  }
+
   .filter-field {
     display: grid;
     gap: 8px;
+  }
+
+  .filter-field-actor {
+    width: 132px;
   }
 
   .panel-description {
@@ -2276,6 +2355,60 @@ const APP_STYLES = `
   .text-input:focus {
     outline: 2px solid rgba(56, 189, 248, 0.4);
     outline-offset: 2px;
+  }
+
+  .filter-pill-group {
+    display: flex;
+    width: 100%;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: rgba(28, 32, 38, 0.9);
+    overflow: hidden;
+  }
+
+  .filter-pill-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 0 auto;
+    padding: 8px 12px;
+    border: 0;
+    border-right: 1px solid rgba(148, 163, 184, 0.16);
+    background: transparent;
+    color: #94a3b8;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .filter-pill-button:last-child {
+    border-right: 0;
+  }
+
+  .filter-pill-button:hover {
+    background: rgba(58, 66, 76, 0.5);
+    color: #e2e8f0;
+  }
+
+  .filter-pill-button-active {
+    background: rgba(56, 189, 248, 0.16);
+    color: #bae6fd;
+  }
+
+  .filter-pill-button-active:hover {
+    background: rgba(56, 189, 248, 0.22);
+    color: #e0f2fe;
+  }
+
+  .filter-pill-button:focus-visible {
+    position: relative;
+    outline: 2px solid rgba(56, 189, 248, 0.45);
+    outline-offset: -2px;
   }
 
   .pull-request-link {
@@ -2883,6 +3016,16 @@ const APP_STYLES = `
   .flash-error {
     background: rgba(248, 113, 113, 0.12);
     color: #fca5a5;
+  }
+
+  @media (max-width: 900px) {
+    .filters-grid-activity {
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+
+    .filter-field-actor {
+      width: auto;
+    }
   }
 
   @media (max-width: 640px) {

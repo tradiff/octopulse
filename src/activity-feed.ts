@@ -1,10 +1,21 @@
 import type { ActorClass } from "./normalized-event-repository.js";
 import type { PullRequestLifecycleState } from "./pull-request-state.js";
 
-export type PullRequestStateFilter = "all" | "tracked" | "inactive" | PullRequestLifecycleState;
+export type PullRequestTrackingFilter = "tracked" | "inactive";
+export type PullRequestStateFilter = "tracked" | "inactive" | PullRequestLifecycleState;
+
+const TRACKING_FILTER_VALUES = ["tracked", "inactive"] satisfies PullRequestTrackingFilter[];
+const LIFECYCLE_FILTER_VALUES = ["open", "merged", "closed"] satisfies PullRequestLifecycleState[];
+export const PULL_REQUEST_STATE_FILTER_VALUES = [
+  "tracked",
+  "inactive",
+  "open",
+  "merged",
+  "closed",
+] satisfies PullRequestStateFilter[];
 
 export interface ActivityFeedFilters {
-  pullRequestState: PullRequestStateFilter;
+  pullRequestStates: PullRequestStateFilter[];
   repository: string;
   actorClass: "" | ActorClass;
 }
@@ -44,7 +55,7 @@ export interface PaginationWindow {
 }
 
 export const DEFAULT_ACTIVITY_FEED_FILTERS: ActivityFeedFilters = {
-  pullRequestState: "all",
+  pullRequestStates: [],
   repository: "",
   actorClass: "",
 };
@@ -55,10 +66,6 @@ export function matchesPullRequestStateFilter(
   filter: PullRequestStateFilter,
   input: PullRequestStateFilterMatchInput,
 ): boolean {
-  if (filter === "all") {
-    return true;
-  }
-
   if (filter === "tracked" || filter === "inactive") {
     if (input.isTracked === null) {
       return false;
@@ -70,40 +77,141 @@ export function matchesPullRequestStateFilter(
   return input.pullRequestStatus === filter;
 }
 
+export function matchesPullRequestStateFilters(
+  filters: readonly PullRequestStateFilter[],
+  input: PullRequestStateFilterMatchInput,
+): boolean {
+  const { trackingFilters, lifecycleFilters } = splitPullRequestStateFilters(filters);
+
+  return (
+    matchesPullRequestStateFilterCategory(trackingFilters, TRACKING_FILTER_VALUES, input)
+    && matchesPullRequestStateFilterCategory(lifecycleFilters, LIFECYCLE_FILTER_VALUES, input)
+  );
+}
+
 export function buildPullRequestStateSqlFilter(
-  filter: PullRequestStateFilter,
+  filters: readonly PullRequestStateFilter[],
   columns: PullRequestStateSqlColumns,
 ): { clauses: string[]; parameters: Array<number | string> } {
-  if (filter === "all") {
+  if (isAllPullRequestStateFilterSelection(filters)) {
     return {
       clauses: [],
       parameters: [],
     };
   }
 
+  const { trackingFilters, lifecycleFilters } = splitPullRequestStateFilters(filters);
+  const clauses: string[] = [];
+  const parameters: Array<number | string> = [];
+
+  appendPullRequestStateSqlClause(clauses, parameters, trackingFilters, TRACKING_FILTER_VALUES, columns);
+  appendPullRequestStateSqlClause(clauses, parameters, lifecycleFilters, LIFECYCLE_FILTER_VALUES, columns);
+
+  return {
+    clauses,
+    parameters,
+  };
+}
+
+export function normalizePullRequestStateFilters(
+  filters: readonly PullRequestStateFilter[],
+): PullRequestStateFilter[] {
+  const selectedFilters = new Set(filters);
+
+  return PULL_REQUEST_STATE_FILTER_VALUES.filter((filter) => selectedFilters.has(filter));
+}
+
+export function isAllPullRequestStateFilterSelection(
+  filters: readonly PullRequestStateFilter[],
+): boolean {
+  const { trackingFilters, lifecycleFilters } = splitPullRequestStateFilters(filters);
+
+  return (
+    isPullRequestStateFilterCategoryNoOp(trackingFilters, TRACKING_FILTER_VALUES)
+    && isPullRequestStateFilterCategoryNoOp(lifecycleFilters, LIFECYCLE_FILTER_VALUES)
+  );
+}
+
+function splitPullRequestStateFilters(filters: readonly PullRequestStateFilter[]): {
+  trackingFilters: PullRequestTrackingFilter[];
+  lifecycleFilters: PullRequestLifecycleState[];
+} {
+  const normalizedFilters = normalizePullRequestStateFilters(filters);
+
+  return {
+    trackingFilters: normalizedFilters.filter(isPullRequestTrackingFilter),
+    lifecycleFilters: normalizedFilters.filter(
+      (filter): filter is PullRequestLifecycleState => !isPullRequestTrackingFilter(filter),
+    ),
+  };
+}
+
+function matchesPullRequestStateFilterCategory<TFilter extends PullRequestStateFilter>(
+  filters: readonly TFilter[],
+  allFilters: readonly TFilter[],
+  input: PullRequestStateFilterMatchInput,
+): boolean {
+  return (
+    isPullRequestStateFilterCategoryNoOp(filters, allFilters)
+    || filters.some((filter) => matchesPullRequestStateFilter(filter, input))
+  );
+}
+
+function appendPullRequestStateSqlClause<TFilter extends PullRequestStateFilter>(
+  clauses: string[],
+  parameters: Array<number | string>,
+  filters: readonly TFilter[],
+  allFilters: readonly TFilter[],
+  columns: PullRequestStateSqlColumns,
+): void {
+  if (isPullRequestStateFilterCategoryNoOp(filters, allFilters)) {
+    return;
+  }
+
+  const conditions = filters.map((filter) => buildPullRequestStateSqlCondition(filter, columns));
+
+  clauses.push(`(${conditions.map(({ clause }) => `(${clause})`).join(" OR ")})`);
+  parameters.push(...conditions.flatMap((condition) => condition.parameters));
+}
+
+function isPullRequestStateFilterCategoryNoOp<TFilter extends PullRequestStateFilter>(
+  filters: readonly TFilter[],
+  allFilters: readonly TFilter[],
+): boolean {
+  return filters.length === 0 || filters.length === allFilters.length;
+}
+
+function isPullRequestTrackingFilter(filter: PullRequestStateFilter): filter is PullRequestTrackingFilter {
+  return filter === "tracked" || filter === "inactive";
+}
+
+function buildPullRequestStateSqlCondition(
+  filter: PullRequestStateFilter,
+  columns: PullRequestStateSqlColumns,
+): { clause: string; parameters: Array<number | string> } {
   if (filter === "tracked" || filter === "inactive") {
     return {
-      clauses: [`${columns.tracked} = ?`],
+      clause: `${columns.tracked} = ?`,
       parameters: [filter === "tracked" ? 1 : 0],
     };
   }
 
   if (filter === "merged") {
     return {
-      clauses: [`${columns.mergedAt} IS NOT NULL`],
+      clause: `${columns.mergedAt} IS NOT NULL`,
       parameters: [],
     };
   }
 
   if (filter === "closed") {
     return {
-      clauses: [`${columns.mergedAt} IS NULL`, `LOWER(${columns.state}) = 'closed'`],
+      clause: `${columns.mergedAt} IS NULL AND LOWER(${columns.state}) = 'closed'`,
       parameters: [],
     };
   }
 
   return {
-    clauses: [`${columns.mergedAt} IS NULL`, `LOWER(${columns.state}) <> 'closed'`],
+    clause: `${columns.mergedAt} IS NULL AND LOWER(${columns.state}) <> 'closed'`,
     parameters: [],
   };
 }

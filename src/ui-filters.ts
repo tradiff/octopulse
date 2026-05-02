@@ -1,6 +1,9 @@
 import {
   DEFAULT_ACTIVITY_FEED_FILTERS,
-  matchesPullRequestStateFilter,
+  isAllPullRequestStateFilterSelection,
+  matchesPullRequestStateFilters,
+  normalizePullRequestStateFilters,
+  PULL_REQUEST_STATE_FILTER_VALUES,
   type ActivityFeedFilters,
   type PullRequestStateFilter,
 } from "./activity-feed.js";
@@ -24,27 +27,20 @@ export interface BuildUiFilterOptionsInput {
   rawEvents: RawEventsEntry[];
 }
 
-export const DEFAULT_UI_FILTERS: UiFilterValues = { ...DEFAULT_ACTIVITY_FEED_FILTERS };
+export const DEFAULT_UI_FILTERS: UiFilterValues = {
+  ...DEFAULT_ACTIVITY_FEED_FILTERS,
+  pullRequestStates: [],
+};
 
-const PULL_REQUEST_STATE_FILTERS = new Set<PullRequestStateFilter>([
-  "all",
-  "tracked",
-  "inactive",
-  "open",
-  "merged",
-  "closed",
-]);
+const PULL_REQUEST_STATE_FILTERS = new Set<PullRequestStateFilter>(PULL_REQUEST_STATE_FILTER_VALUES);
 const ACTOR_CLASSES = new Set<ActorClass>(["self", "human_other", "bot"]);
 const ALL_ACTIVITY_ACTOR_CLASSES = ["self", "human_other", "bot"] satisfies ActorClass[];
 
 export function readUiFilterValues(searchParams: URLSearchParams): UiFilterValues {
-  const pullRequestState = searchParams.get("pr-state");
   const actorClass = searchParams.get("actor-type");
 
   return {
-    pullRequestState: PULL_REQUEST_STATE_FILTERS.has(pullRequestState as PullRequestStateFilter)
-      ? (pullRequestState as PullRequestStateFilter)
-      : DEFAULT_UI_FILTERS.pullRequestState,
+    pullRequestStates: readPullRequestStateFilters(searchParams),
     repository: readTrimmedSearchParam(searchParams, "repo"),
     actorClass: ACTOR_CLASSES.has(actorClass as ActorClass)
       ? (actorClass as ActorClass)
@@ -88,7 +84,7 @@ export function filterNotificationHistory(
 ): NotificationHistoryEntry[] {
   return entries.filter((entry) => {
     if (
-      !matchesPullRequestStateFilter(filters.pullRequestState, {
+      !matchesPullRequestStateFilters(filters.pullRequestStates, {
         isTracked: entry.isTracked,
         pullRequestStatus: entry.pullRequestStatus,
       })
@@ -111,7 +107,7 @@ export function filterNotificationHistory(
 export function filterRawEvents(entries: RawEventsEntry[], filters: UiFilterValues): RawEventsEntry[] {
   return entries.filter((entry) => {
     if (
-      !matchesPullRequestStateFilter(filters.pullRequestState, {
+      !matchesPullRequestStateFilters(filters.pullRequestStates, {
         isTracked: entry.isTracked,
         pullRequestStatus: entry.pullRequestStatus,
       })
@@ -134,10 +130,16 @@ export function filterRawEvents(entries: RawEventsEntry[], filters: UiFilterValu
 export function countActiveUiFilters(filters: UiFilterValues): number {
   let count = 0;
 
-  for (const value of Object.values(filters)) {
-    if (value !== "" && value !== "all") {
-      count += 1;
-    }
+  if (!isAllPullRequestStateFilterSelection(filters.pullRequestStates)) {
+    count += 1;
+  }
+
+  if (filters.repository.length > 0) {
+    count += 1;
+  }
+
+  if (filters.actorClass.length > 0) {
+    count += 1;
   }
 
   return count;
@@ -149,7 +151,7 @@ function filterPullRequests(
 ): PullRequestRecord[] {
   return pullRequests.filter((pullRequest) => {
     if (
-      !matchesPullRequestStateFilter(filters.pullRequestState, {
+      !matchesPullRequestStateFilters(filters.pullRequestStates, {
         isTracked: pullRequest.isTracked,
         pullRequestStatus: resolvePullRequestLifecycleState(pullRequest),
       })
@@ -175,6 +177,24 @@ function matchesMultiValue(values: readonly string[], filterValue: string): bool
 
 function readTrimmedSearchParam(searchParams: URLSearchParams, key: string): string {
   return searchParams.get(key)?.trim() ?? "";
+}
+
+function readPullRequestStateFilters(searchParams: URLSearchParams): PullRequestStateFilter[] {
+  const filters: PullRequestStateFilter[] = [];
+
+  for (const rawValue of searchParams.getAll("pr-state")) {
+    const value = rawValue.trim();
+
+    if (value.length === 0 || value === "all") {
+      continue;
+    }
+
+    if (PULL_REQUEST_STATE_FILTERS.has(value as PullRequestStateFilter)) {
+      filters.push(value as PullRequestStateFilter);
+    }
+  }
+
+  return normalizePullRequestStateFilters(filters);
 }
 
 function formatRepositoryKey(pullRequest: Pick<PullRequestRecord, "repositoryOwner" | "repositoryName">): string {

@@ -197,7 +197,7 @@ function buildRawEventsFilterClause(filters: ActivityFeedFilters): {
 } {
   const clauses: string[] = [];
   const parameters: Array<number | string> = [];
-  const pullRequestStateFilter = buildPullRequestStateSqlFilter(filters.pullRequestState, {
+  const pullRequestStateFilter = buildPullRequestStateSqlFilter(filters.pullRequestStates, {
     tracked: "pull_request.is_tracked",
     state: "pull_request.state",
     mergedAt: "pull_request.merged_at",

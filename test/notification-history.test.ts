@@ -186,7 +186,7 @@ describe("listNotificationHistory", () => {
         expect(
           listNotificationHistory(database, {
             filters: {
-              pullRequestState: "tracked",
+              pullRequestStates: ["tracked"],
               repository: "acme/octopulse",
               actorClass: "human_other",
             },
@@ -200,7 +200,7 @@ describe("listNotificationHistory", () => {
         expect(
           listNotificationHistory(database, {
             filters: {
-              pullRequestState: "open",
+              pullRequestStates: ["open"],
               repository: "",
               actorClass: "",
             },

@@ -245,10 +245,10 @@ describe("startServer", () => {
     servers.push(server);
 
     const historyResponse = await fetch(
-      `${readServerOrigin(server)}/api/notification-history?pr-state=tracked&repo=acme%2Foctopulse&actor-type=human_other&page=2`,
+      `${readServerOrigin(server)}/api/notification-history?pr-state=tracked&pr-state=merged&repo=acme%2Foctopulse&actor-type=human_other&page=2`,
     );
     const rawEventsResponse = await fetch(
-      `${readServerOrigin(server)}/api/raw-events?pr-state=tracked&repo=acme%2Foctopulse&actor-type=human_other&page=2`,
+      `${readServerOrigin(server)}/api/raw-events?pr-state=tracked&pr-state=merged&repo=acme%2Foctopulse&actor-type=human_other&page=2`,
     );
     const logsResponse = await fetch(`${readServerOrigin(server)}/api/logs?level=warn`);
 
@@ -258,7 +258,7 @@ describe("startServer", () => {
 
     expect(notificationHistoryOptions).toEqual({
       filters: {
-        pullRequestState: "tracked",
+        pullRequestStates: ["tracked", "merged"],
         repository: "acme/octopulse",
         actorClass: "human_other",
       },
@@ -267,7 +267,7 @@ describe("startServer", () => {
     });
     expect(rawEventsOptions).toEqual({
       filters: {
-        pullRequestState: "tracked",
+        pullRequestStates: ["tracked", "merged"],
         repository: "acme/octopulse",
         actorClass: "human_other",
       },
