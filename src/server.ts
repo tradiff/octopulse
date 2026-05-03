@@ -27,7 +27,7 @@ import {
   resolvePullRequestStateAssetFilePathByFilename,
 } from "./pull-request-state-assets.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
-import type { PullRequestTimeline } from "./raw-events.js";
+import type { PullRequestTimeline, PullRequestTimelineResult } from "./raw-events.js";
 import { readUiFilterValues } from "./ui-filters.js";
 
 const CLIENT_BUNDLE_PATH = new URL("../dist/public/app.js", import.meta.url);
@@ -58,7 +58,7 @@ export interface StartServerOptions {
   port?: number;
   listTrackedPullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
   listInactivePullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
-  listPullRequestTimeline?: () => SyncOrPromise<PullRequestTimeline>;
+  listPullRequestTimeline?: () => SyncOrPromise<PullRequestTimelineResult>;
   listNotificationHistory?: (
     options: ListActivityFeedOptions,
   ) => SyncOrPromise<PaginatedEntries<NotificationHistoryEntry>>;
@@ -516,14 +516,14 @@ async function handlePullRequestTimelineRequest(
     return;
   }
 
-  const timelineByPullRequest = await listPullRequestTimeline();
+  const result = await listPullRequestTimeline();
 
   respond(
     response,
     request.method,
     200,
     "application/json; charset=utf-8",
-    JSON.stringify({ timelineByPullRequest }),
+    JSON.stringify(result),
   );
 }
 

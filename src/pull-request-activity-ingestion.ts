@@ -4,6 +4,10 @@ import { Octokit } from "octokit";
 
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import {
+  PullRequestReviewStateRepository,
+  type ReviewState,
+} from "./pull-request-review-state-repository.js";
+import {
   RawEventRepository,
   type InsertRawEventInput,
 } from "./raw-event-repository.js";
@@ -33,6 +37,7 @@ type ActivityFetchCursorSource =
 
 export interface IngestPullRequestActivityOptions<TClient = Octokit> {
   rawEventRepository?: Pick<RawEventRepository, "insertRawEvent">;
+  pullRequestReviewStateRepository?: Pick<PullRequestReviewStateRepository, "upsertReviewState">;
   fetchIssueComments?: (
     client: TClient,
     pullRequest: PullRequestRecord,
@@ -77,6 +82,8 @@ export async function ingestPullRequestActivity<TClient>(
   options: IngestPullRequestActivityOptions<TClient> = {},
 ): Promise<IngestPullRequestActivityResult> {
   const rawEventRepository = options.rawEventRepository ?? new RawEventRepository(database);
+  const pullRequestReviewStateRepository =
+    options.pullRequestReviewStateRepository ?? new PullRequestReviewStateRepository(database);
   const issueCommentCursor = readActivityFetchCursor(
     database,
     pullRequest.id,
@@ -180,6 +187,8 @@ export async function ingestPullRequestActivity<TClient>(
         duplicateCount += 1;
       }
     }
+
+    persistCurrentReviewStates(pullRequestReviewStateRepository, reviews, pullRequest.id);
 
     if (nextIssueCommentCursor !== undefined && nextIssueCommentCursor !== issueCommentCursor) {
       writeActivityFetchCursor(
@@ -356,6 +365,66 @@ async function loadActivity(
       `Failed to fetch ${description} for ${formatPullRequestLabel(pullRequest)}: ${getErrorMessage(error)}`,
     );
   }
+}
+
+function persistCurrentReviewStates(
+  repository: Pick<PullRequestReviewStateRepository, "upsertReviewState">,
+  reviews: unknown[],
+  pullRequestId: number,
+): void {
+  // Reviews arrive in chronological order from GitHub. Process in order so that
+  // the final upsert per reviewer reflects their most-recent review state.
+  for (const review of reviews) {
+    const value = requireRecord(review, "pull request review");
+    const state = (typeof value.state === "string" ? value.state : null)?.trim().toUpperCase();
+
+    if (!state || state === "PENDING") {
+      continue;
+    }
+
+    const reviewerLogin = readNullableLogin(value.user, "pull request review.user");
+
+    if (reviewerLogin === null) {
+      continue;
+    }
+
+    const avatarUrl = readAvatarUrlFromUserRecord(value.user);
+    const reviewState = normalizeReviewState(state);
+
+    if (reviewState === null) {
+      continue;
+    }
+
+    repository.upsertReviewState({
+      pullRequestId,
+      reviewerLogin,
+      reviewerAvatarUrl: avatarUrl,
+      reviewState,
+    });
+  }
+}
+
+function normalizeReviewState(state: string): ReviewState | null {
+  if (
+    state === "APPROVED" ||
+    state === "CHANGES_REQUESTED" ||
+    state === "DISMISSED" ||
+    state === "COMMENTED"
+  ) {
+    return state;
+  }
+
+  return null;
+}
+
+function readAvatarUrlFromUserRecord(user: unknown): string | null {
+  if (typeof user !== "object" || user === null || Array.isArray(user)) {
+    return null;
+  }
+
+  const record = user as Record<string, unknown>;
+  const avatarUrl = record.avatar_url;
+  return typeof avatarUrl === "string" && avatarUrl.length > 0 ? avatarUrl : null;
 }
 
 function mapIssueCommentRawEvent(data: unknown, pullRequestId: number): InsertRawEventInput {

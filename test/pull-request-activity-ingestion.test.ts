@@ -12,6 +12,7 @@ import {
   type PullRequestRecord,
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
+import { PullRequestReviewStateRepository } from "../src/pull-request-review-state-repository.js";
 import { RawEventRepository } from "../src/raw-event-repository.js";
 import {
   createCommittedTimelineEventFixture,
@@ -226,6 +227,19 @@ describe("ingestPullRequestActivity", () => {
         head_sha: "abc123",
         conclusion: "success",
       });
+
+      const reviewStateRepository = new PullRequestReviewStateRepository(database);
+      const reviewStates = reviewStateRepository.listReviewStatesForPullRequest(pullRequest.id);
+
+      expect(
+        reviewStates.map((s) => ({ reviewerLogin: s.reviewerLogin, reviewState: s.reviewState })),
+      ).toEqual(
+        expect.arrayContaining([
+          { reviewerLogin: "bob", reviewState: "APPROVED" },
+          { reviewerLogin: "carol", reviewState: "COMMENTED" },
+        ]),
+      );
+      expect(reviewStates.find((s) => s.reviewerLogin === "pending-reviewer")).toBeUndefined();
     } finally {
       database.close();
     }
@@ -353,6 +367,66 @@ describe("ingestPullRequestActivity", () => {
           }),
         },
       ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("updates stored review state when reviewer changes their decision", async () => {
+    const { database, pullRequest } = createPullRequest();
+    const reviewStateRepository = new PullRequestReviewStateRepository(database);
+
+    try {
+      await ingestPullRequestActivity(database, { kind: "fake-client" }, pullRequest, {
+        fetchIssueComments: async () => [],
+        fetchPullRequestReviews: async () => [
+          createReviewFixture({
+            id: 3001,
+            actorLogin: "bob",
+            state: "CHANGES_REQUESTED",
+            submittedAt: "2026-04-10T12:01:00.000Z",
+            body: "",
+          }),
+        ],
+        fetchPullRequestReviewComments: async () => [],
+        fetchPullRequestTimeline: async () => [],
+        fetchWorkflowRuns: async () => [],
+      });
+
+      expect(
+        reviewStateRepository
+          .listReviewStatesForPullRequest(pullRequest.id)
+          .find((s) => s.reviewerLogin === "bob")?.reviewState,
+      ).toBe("CHANGES_REQUESTED");
+
+      await ingestPullRequestActivity(database, { kind: "fake-client" }, pullRequest, {
+        fetchIssueComments: async () => [],
+        fetchPullRequestReviews: async () => [
+          createReviewFixture({
+            id: 3001,
+            actorLogin: "bob",
+            state: "CHANGES_REQUESTED",
+            submittedAt: "2026-04-10T12:01:00.000Z",
+            body: "",
+          }),
+          createReviewFixture({
+            id: 3002,
+            actorLogin: "bob",
+            state: "DISMISSED",
+            submittedAt: "2026-04-10T12:10:00.000Z",
+            body: "",
+          }),
+        ],
+        fetchPullRequestReviewComments: async () => [],
+        fetchPullRequestTimeline: async () => [],
+        fetchWorkflowRuns: async () => [],
+      });
+
+      expect(
+        reviewStateRepository
+          .listReviewStatesForPullRequest(pullRequest.id)
+          .find((s) => s.reviewerLogin === "bob")?.reviewState,
+      ).toBe("DISMISSED");
     } finally {
       database.close();
     }

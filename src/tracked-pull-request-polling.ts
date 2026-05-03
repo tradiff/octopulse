@@ -23,6 +23,7 @@ import {
   PullRequestRepository,
   type PullRequestRecord,
 } from "./pull-request-repository.js";
+import { PullRequestReviewStateRepository } from "./pull-request-review-state-repository.js";
 
 const GITHUB_API_HEADERS = {
   "X-GitHub-Api-Version": "2022-11-28",
@@ -94,7 +95,7 @@ export async function pollTrackedPullRequests<TClient>(
         pullRequestRepository,
       );
       const activityIngestionOptions = skipActivityFanout
-        ? buildSkippedPullRequestActivityFetchOptions<TClient>()
+        ? buildSkippedPullRequestActivityFetchOptions<TClient>(database, refreshedPullRequest.id)
         : undefined;
 
       await ingestPullRequestActivity(
@@ -307,10 +308,16 @@ async function refreshPullRequestForPolling<TClient>(
   };
 }
 
-function buildSkippedPullRequestActivityFetchOptions<TClient>(): IngestPullRequestActivityOptions<TClient> {
+function buildSkippedPullRequestActivityFetchOptions<TClient>(
+  database: DatabaseSync,
+  pullRequestId: number,
+): IngestPullRequestActivityOptions<TClient> {
+  const reviewStateRepository = new PullRequestReviewStateRepository(database);
+  const hasReviewStates = reviewStateRepository.hasReviewStatesForPullRequest(pullRequestId);
+
   return {
     fetchIssueComments: async () => [],
-    fetchPullRequestReviews: async () => [],
+    ...(hasReviewStates ? { fetchPullRequestReviews: async () => [] } : {}),
     fetchPullRequestReviewComments: async () => [],
     fetchPullRequestTimeline: async () => [],
   };

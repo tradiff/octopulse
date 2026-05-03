@@ -19,6 +19,7 @@ import {
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
 import { RawEventRepository } from "../src/raw-event-repository.js";
+import { PullRequestReviewStateRepository } from "../src/pull-request-review-state-repository.js";
 import {
   createIssueCommentFixture,
   createReviewCommentFixture,
@@ -412,6 +413,13 @@ describe("pollTrackedPullRequests", () => {
     try {
       const pullRequest = repository.upsertPullRequest(createPullRequestInput());
       writePullRequestDetailEtag(database, pullRequest.id, 'W/"acme-octopulse-7-v1"');
+
+      const reviewStateRepository = new PullRequestReviewStateRepository(database);
+      reviewStateRepository.upsertReviewState({
+        pullRequestId: pullRequest.id,
+        reviewerLogin: "bob",
+        reviewState: "APPROVED",
+      });
 
       await expect(
         pollTrackedPullRequests(

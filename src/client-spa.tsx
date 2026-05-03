@@ -22,7 +22,8 @@ import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
-import type { PullRequestTimeline, PullRequestTimelineEntry } from "./raw-events.js";
+import type { PullRequestReviewStateRecord, ReviewState } from "./pull-request-review-state-repository.js";
+import type { PullRequestTimeline, PullRequestTimelineEntry, PullRequestReviewStatesByPullRequest } from "./raw-events.js";
 import {
   DEFAULT_UI_FILTERS,
   buildUiFilterOptions,
@@ -109,7 +110,6 @@ const RAW_EVENT_JSON_THEME = {
     color: "#cbd5e1",
   },
 };
-const PULL_REQUEST_APPROVER_EVENT_TYPES = new Set(["review_approved"]);
 const PULL_REQUEST_COMMENTER_EVENT_TYPES = new Set([
   "issue_comment",
   "review_inline_comment",
@@ -117,7 +117,6 @@ const PULL_REQUEST_COMMENTER_EVENT_TYPES = new Set([
   "review_approved",
   "review_changes_requested",
 ]);
-const PULL_REQUEST_DECLINER_EVENT_TYPES = new Set(["review_changes_requested"]);
 
 type PullRequestInteractionGroupKind = "approvers" | "commenters" | "decliners";
 
@@ -148,6 +147,7 @@ function App() {
   const [inactivePullRequests, setInactivePullRequests] = useState<PullRequestRecord[]>([]);
   const [notificationHistory, setNotificationHistory] = useState<NotificationHistoryEntry[]>([]);
   const [timelineByPullRequest, setTimelineByPullRequest] = useState<PullRequestTimeline>({});
+  const [reviewStatesByPullRequest, setReviewStatesByPullRequest] = useState<PullRequestReviewStatesByPullRequest>({});
   const [notificationHistoryPagination, setNotificationHistoryPagination] =
     useState<PaginationState>(EMPTY_PAGINATION_STATE);
   const [recentLogs, setRecentLogs] = useState<RecentLogEntry[]>([]);
@@ -285,12 +285,13 @@ function App() {
         const [trackedResponse, inactiveResponse, pullRequestTimelineResponse] = await Promise.all([
           apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
           apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
-          apiFetch<{ timelineByPullRequest: PullRequestTimeline }>("/api/pull-request-timeline"),
+          apiFetch<{ timelineByPullRequest: PullRequestTimeline; reviewStatesByPullRequest: PullRequestReviewStatesByPullRequest }>("/api/pull-request-timeline"),
         ]);
 
         setTrackedPullRequests(trackedResponse.pullRequests);
         setInactivePullRequests(inactiveResponse.pullRequests);
         setTimelineByPullRequest(pullRequestTimelineResponse.timelineByPullRequest);
+        setReviewStatesByPullRequest(pullRequestTimelineResponse.reviewStatesByPullRequest);
         return;
       }
 
@@ -507,6 +508,7 @@ function App() {
               emptyMessage={formatPullRequestEmptyMessage(route.uiFilters, hasActiveFilters)}
               pullRequests={subTabPullRequests}
               timelineByPullRequest={timelineByPullRequest}
+              reviewStatesByPullRequest={reviewStatesByPullRequest}
               onRefresh={handleBaseDataRefresh}
               prSubTab={route.prSubTab}
               uiFilters={route.uiFilters}
@@ -1021,6 +1023,7 @@ function PullRequestList({
   emptyMessage,
   pullRequests,
   timelineByPullRequest,
+  reviewStatesByPullRequest,
   onRefresh,
   prSubTab,
   uiFilters,
@@ -1034,6 +1037,7 @@ function PullRequestList({
   emptyMessage: string;
   pullRequests: PullRequestRecord[];
   timelineByPullRequest: PullRequestTimeline;
+  reviewStatesByPullRequest: PullRequestReviewStatesByPullRequest;
   onRefresh: () => void;
   prSubTab: PrSubTab;
   uiFilters: UiFilterValues;
@@ -1096,6 +1100,7 @@ function PullRequestList({
                 key={pullRequest.id}
                 pullRequest={pullRequest}
                 timelineEntries={timelineEntries}
+                reviewStates={reviewStatesByPullRequest[String(pullRequest.githubPullRequestId)] ?? []}
                 renderAction={renderAction}
               />
             );
@@ -1109,10 +1114,12 @@ function PullRequestList({
 function PullRequestListItem({
   pullRequest,
   timelineEntries,
+  reviewStates,
   renderAction,
 }: {
   pullRequest: PullRequestRecord;
   timelineEntries: PullRequestTimelineEntry[];
+  reviewStates: PullRequestReviewStateRecord[];
   renderAction: ((pullRequest: PullRequestRecord) => ReactNode) | undefined;
 }) {
   const [isTimelineExpanded, setIsTimelineExpanded] = useState(false);
@@ -1196,7 +1203,7 @@ function PullRequestListItem({
             {pullRequest.title}
           </a>
         </div>
-        <PullRequestInteractionGroups entries={timelineEntries} />
+        <PullRequestInteractionGroups entries={timelineEntries} reviewStates={reviewStates} />
         <span className="pull-request-timeline-summary">
           {formatPullRequestTimelineSummaryLabel(timelineEntries.length)}
           {timelineEntries[0] ? (
@@ -1232,8 +1239,14 @@ function formatPullRequestTimelineSummaryLabel(eventCount: number): string {
   return `${eventCount} ${eventCount === 1 ? "event" : "events"}`;
 }
 
-function PullRequestInteractionGroups({ entries }: { entries: PullRequestTimelineEntry[] }) {
-  const groups = buildPullRequestInteractionGroups(entries);
+function PullRequestInteractionGroups({
+  entries,
+  reviewStates,
+}: {
+  entries: PullRequestTimelineEntry[];
+  reviewStates: PullRequestReviewStateRecord[];
+}) {
+  const groups = buildPullRequestInteractionGroups(entries, reviewStates);
 
   if (groups.length === 0) {
     return null;
@@ -1272,10 +1285,22 @@ function PullRequestInteractionGroups({ entries }: { entries: PullRequestTimelin
 
 function buildPullRequestInteractionGroups(
   entries: PullRequestTimelineEntry[],
+  reviewStates: PullRequestReviewStateRecord[],
 ): PullRequestInteractionGroup[] {
-  const approvers = collectPullRequestInteractionActors(entries, PULL_REQUEST_APPROVER_EVENT_TYPES);
-  const commenters = collectPullRequestInteractionActors(entries, PULL_REQUEST_COMMENTER_EVENT_TYPES);
-  const decliners = collectPullRequestInteractionActors(entries, PULL_REQUEST_DECLINER_EVENT_TYPES);
+  const approvers = collectActorsWithReviewState(reviewStates, "APPROVED");
+  const decliners = collectActorsWithReviewState(reviewStates, "CHANGES_REQUESTED");
+
+  const formalReviewerLogins = new Set([
+    ...approvers.map((a) => a.login),
+    ...decliners.map((d) => d.login),
+  ]);
+
+  const commenters = collectPullRequestInteractionActors(
+    entries,
+    PULL_REQUEST_COMMENTER_EVENT_TYPES,
+    formalReviewerLogins,
+  );
+
   const groups: PullRequestInteractionGroup[] = [];
 
   if (approvers.length > 0) {
@@ -1293,16 +1318,26 @@ function buildPullRequestInteractionGroups(
   return groups;
 }
 
+function collectActorsWithReviewState(
+  reviewStates: PullRequestReviewStateRecord[],
+  state: ReviewState,
+): PullRequestInteractionActor[] {
+  return reviewStates
+    .filter((r) => r.reviewState === state && !isBotActorLogin(r.reviewerLogin))
+    .map((r) => ({ login: r.reviewerLogin, avatarUrl: r.reviewerAvatarUrl }));
+}
+
 function collectPullRequestInteractionActors(
   entries: PullRequestTimelineEntry[],
   eventTypes: ReadonlySet<string>,
+  excludeLogins: ReadonlySet<string> = new Set(),
 ): PullRequestInteractionActor[] {
   const actors = new Map<string, PullRequestInteractionActor>();
 
   for (const entry of entries) {
     const actorLogin = entry.paragraph.actorLogin;
 
-    if (actorLogin === null || !eventTypes.has(entry.eventType) || isBotActorLogin(actorLogin)) {
+    if (actorLogin === null || !eventTypes.has(entry.eventType) || isBotActorLogin(actorLogin) || excludeLogins.has(actorLogin)) {
       continue;
     }
 

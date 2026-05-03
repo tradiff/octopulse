@@ -123,10 +123,23 @@ describe("startServer", () => {
       ],
       202: [],
     };
+    const reviewStatesByPullRequest = {
+      101: [
+        {
+          id: 1,
+          pullRequestId: 10,
+          reviewerLogin: "alice",
+          reviewerAvatarUrl: "https://avatars.example.test/alice.png",
+          reviewState: "APPROVED" as const,
+          updatedAt: "2026-04-10T12:03:00.000Z",
+        },
+      ],
+      202: [],
+    };
     const server = await startServer({
       host: "127.0.0.1",
       port: 0,
-      listPullRequestTimeline: async () => timelineByPullRequest,
+      listPullRequestTimeline: async () => ({ timelineByPullRequest, reviewStatesByPullRequest }),
     });
     servers.push(server);
 
@@ -135,6 +148,7 @@ describe("startServer", () => {
     expect(response.status).toBe(200);
     expect((await response.json()) as unknown).toEqual({
       timelineByPullRequest,
+      reviewStatesByPullRequest,
     });
   });
 

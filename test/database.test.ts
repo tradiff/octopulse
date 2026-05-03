@@ -30,6 +30,7 @@ describe("initializeDatabase", () => {
         "NormalizedEvent",
         "NotificationRecord",
         "PullRequest",
+        "PullRequestReviewState",
         "RawEvent",
         "SchemaMigration",
       ]);
