@@ -27,7 +27,7 @@ import {
   resolvePullRequestStateAssetFilePathByFilename,
 } from "./pull-request-state-assets.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
-import type { PullRequestTimeline, RawEventsEntry } from "./raw-events.js";
+import type { PullRequestTimeline } from "./raw-events.js";
 import { readUiFilterValues } from "./ui-filters.js";
 
 const CLIENT_BUNDLE_PATH = new URL("../dist/public/app.js", import.meta.url);
@@ -51,7 +51,7 @@ export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_PORT = 3000;
 
 type SyncOrPromise<T> = T | Promise<T>;
-type AppPage = "pull-requests" | "logs" | "notification-history" | "raw-events";
+type AppPage = "pull-requests" | "logs" | "notification-history";
 
 export interface StartServerOptions {
   host?: string;
@@ -66,7 +66,6 @@ export interface StartServerOptions {
     level?: LogLevel;
     limit?: number;
   }) => SyncOrPromise<RecentLogEntry[]>;
-  listRawEvents?: (options: ListActivityFeedOptions) => SyncOrPromise<PaginatedEntries<RawEventsEntry>>;
   manualTrackPullRequestByUrl?: (pullRequestUrl: string) => Promise<TrackPullRequestByUrlResult>;
   manualUntrackPullRequest?: (
     githubPullRequestId: number,
@@ -188,11 +187,6 @@ async function handleRequest(
       options.listNotificationHistory,
       searchParams,
     );
-    return;
-  }
-
-  if (request.method === "GET" && pathname === "/api/raw-events") {
-    await handleRawEventsRequest(request, response, options.listRawEvents, searchParams);
     return;
   }
 
@@ -526,40 +520,6 @@ async function handlePullRequestTimelineRequest(
   );
 }
 
-async function handleRawEventsRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-  listRawEvents: StartServerOptions["listRawEvents"],
-  searchParams: URLSearchParams,
-): Promise<void> {
-  if (!listRawEvents) {
-    respond(
-      response,
-      request.method,
-      503,
-      "application/json; charset=utf-8",
-      JSON.stringify({ error: "Raw event listing is not configured" }),
-    );
-    return;
-  }
-
-  const rawEventsPage = await listRawEvents({
-    filters: readUiFilterValues(searchParams),
-    page: readActivityPage(searchParams),
-    pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
-  });
-  respond(
-    response,
-    request.method,
-    200,
-    "application/json; charset=utf-8",
-    JSON.stringify({
-      rawEvents: rawEventsPage.entries,
-      pagination: formatPaginationResponse(rawEventsPage),
-    }),
-  );
-}
-
 async function handleLogsRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -652,10 +612,6 @@ function readDocumentPage(pathname: string): AppPage | undefined {
 
   if (pathname === "/notification-history") {
     return "notification-history";
-  }
-
-  if (pathname === "/raw-events") {
-    return "raw-events";
   }
 
   return undefined;

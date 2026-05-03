@@ -138,9 +138,8 @@ describe("startServer", () => {
     });
   });
 
-  it("serves notification history, raw events, and logs APIs", async () => {
+  it("serves notification history and logs APIs", async () => {
     let notificationHistoryOptions: unknown;
-    let rawEventsOptions: unknown;
 
     const server = await startServer({
       host: "127.0.0.1",
@@ -193,36 +192,6 @@ describe("startServer", () => {
           totalPages: 3,
         };
       },
-      listRawEvents: async (options) => {
-        rawEventsOptions = options;
-
-        return {
-          entries: [
-            {
-               id: 17,
-               repositoryKey: "acme/octopulse",
-               isTracked: true,
-               pullRequestStatus: "open" as const,
-               pullRequestLabel: "acme/octopulse #7",
-               pullRequestTitle: "Add pull request polling",
-              pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
-              eventType: "review_changes_requested",
-              actorLogin: "alice",
-              actorClass: "human_other" as const,
-              decisionState: "notified" as const,
-              notificationTiming: "immediate" as const,
-              occurredAt: "2026-04-10T12:04:00.000Z",
-              rawPayloadJson: "{\"state\":\"CHANGES_REQUESTED\"}",
-              notificationSourceKind: "immediate" as const,
-              notificationDeliveryStatus: "sent" as const,
-            },
-          ],
-          page: 2,
-          pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
-          totalCount: 4,
-          totalPages: 4,
-        };
-      },
       listRecentLogs: async ({ level }) =>
         level === "warn"
           ? [
@@ -247,25 +216,12 @@ describe("startServer", () => {
     const historyResponse = await fetch(
       `${readServerOrigin(server)}/api/notification-history?pr-state=tracked&pr-state=merged&repo=acme%2Foctopulse&actor-type=human_other&page=2`,
     );
-    const rawEventsResponse = await fetch(
-      `${readServerOrigin(server)}/api/raw-events?pr-state=tracked&pr-state=merged&repo=acme%2Foctopulse&actor-type=human_other&page=2`,
-    );
     const logsResponse = await fetch(`${readServerOrigin(server)}/api/logs?level=warn`);
 
     expect(historyResponse.status).toBe(200);
-    expect(rawEventsResponse.status).toBe(200);
     expect(logsResponse.status).toBe(200);
 
     expect(notificationHistoryOptions).toEqual({
-      filters: {
-        pullRequestStates: ["tracked", "merged"],
-        repository: "acme/octopulse",
-        actorClass: "human_other",
-      },
-      page: 2,
-      pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
-    });
-    expect(rawEventsOptions).toEqual({
       filters: {
         pullRequestStates: ["tracked", "merged"],
         repository: "acme/octopulse",
@@ -318,34 +274,6 @@ describe("startServer", () => {
         pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
         totalCount: 3,
         totalPages: 3,
-      },
-    });
-    expect((await rawEventsResponse.json()) as unknown).toEqual({
-      rawEvents: [
-        {
-           id: 17,
-           repositoryKey: "acme/octopulse",
-           isTracked: true,
-           pullRequestStatus: "open",
-           pullRequestLabel: "acme/octopulse #7",
-           pullRequestTitle: "Add pull request polling",
-          pullRequestUrl: "https://github.com/acme/octopulse/pull/7",
-          eventType: "review_changes_requested",
-          actorLogin: "alice",
-          actorClass: "human_other",
-          decisionState: "notified",
-          notificationTiming: "immediate",
-          occurredAt: "2026-04-10T12:04:00.000Z",
-          rawPayloadJson: "{\"state\":\"CHANGES_REQUESTED\"}",
-          notificationSourceKind: "immediate",
-          notificationDeliveryStatus: "sent",
-        },
-      ],
-      pagination: {
-        page: 2,
-        pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
-        totalCount: 4,
-        totalPages: 4,
       },
     });
     expect((await logsResponse.json()) as unknown).toEqual({

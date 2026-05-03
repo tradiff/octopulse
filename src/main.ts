@@ -20,7 +20,7 @@ import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request
 import { listNotificationHistory } from "./notification-history.js";
 import { resendNotificationRecord } from "./notification-dispatch.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
-import { listPullRequestTimeline, listRawEvents } from "./raw-events.js";
+import { listPullRequestTimeline } from "./raw-events.js";
 import { readServerOrigin, startServer } from "./server.js";
 import {
   startRecurringTrackedPullRequestPolling,
@@ -115,12 +115,6 @@ async function main(): Promise<void> {
           logsDirPath: config.paths.logsDirPath,
           ...(level ? { level } : {}),
           ...(limit ? { limit } : {}),
-        }),
-      listRawEvents: async ({ filters, page, pageSize }) =>
-        listRawEvents(currentDatabase, {
-          ...(filters ? { filters } : {}),
-          ...(page ? { page } : {}),
-          ...(pageSize ? { pageSize } : {}),
         }),
       manualTrackPullRequestByUrl: (pullRequestUrl: string) =>
         trackPullRequestByUrl(currentDatabase, githubAuth, pullRequestUrl, {

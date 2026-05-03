@@ -11,7 +11,6 @@ import type { NotificationHistoryEntry } from "./notification-history.js";
 import type { ActorClass } from "./normalized-event-repository.js";
 import { resolvePullRequestLifecycleState } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
-import type { RawEventsEntry } from "./raw-events.js";
 
 export type UiFilterValues = ActivityFeedFilters;
 
@@ -24,7 +23,6 @@ export interface BuildUiFilterOptionsInput {
   trackedPullRequests: PullRequestRecord[];
   inactivePullRequests: PullRequestRecord[];
   notificationHistory: NotificationHistoryEntry[];
-  rawEvents: RawEventsEntry[];
 }
 
 export const DEFAULT_UI_FILTERS: UiFilterValues = {
@@ -54,12 +52,10 @@ export function buildUiFilterOptions(input: BuildUiFilterOptionsInput): UiFilter
       ...input.trackedPullRequests.map((pullRequest) => formatRepositoryKey(pullRequest)),
       ...input.inactivePullRequests.map((pullRequest) => formatRepositoryKey(pullRequest)),
       ...input.notificationHistory.flatMap((entry) => (entry.repositoryKey ? [entry.repositoryKey] : [])),
-      ...input.rawEvents.map((entry) => entry.repositoryKey),
     ]),
     actorClasses: sortStrings([
       ...ALL_ACTIVITY_ACTOR_CLASSES,
       ...input.notificationHistory.flatMap((entry) => entry.actorClasses),
-      ...input.rawEvents.flatMap((entry) => (entry.actorClass ? [entry.actorClass] : [])),
     ]) as ActorClass[],
   };
 }
@@ -97,29 +93,6 @@ export function filterNotificationHistory(
     }
 
     if (!matchesMultiValue(entry.actorClasses, filters.actorClass)) {
-      return false;
-    }
-
-    return true;
-  });
-}
-
-export function filterRawEvents(entries: RawEventsEntry[], filters: UiFilterValues): RawEventsEntry[] {
-  return entries.filter((entry) => {
-    if (
-      !matchesPullRequestStateFilters(filters.pullRequestStates, {
-        isTracked: entry.isTracked,
-        pullRequestStatus: entry.pullRequestStatus,
-      })
-    ) {
-      return false;
-    }
-
-    if (!matchesRepository(entry.repositoryKey, filters.repository)) {
-      return false;
-    }
-
-    if (!matchesOptionalValue(entry.actorClass, filters.actorClass)) {
       return false;
     }
 
@@ -165,10 +138,6 @@ function filterPullRequests(
 
 function matchesRepository(repositoryKey: string | null, filterValue: string): boolean {
   return filterValue.length === 0 || repositoryKey === filterValue;
-}
-
-function matchesOptionalValue(value: string | null, filterValue: string): boolean {
-  return filterValue.length === 0 || value === filterValue;
 }
 
 function matchesMultiValue(values: readonly string[], filterValue: string): boolean {

@@ -21,13 +21,12 @@ import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
-import type { PullRequestTimeline, PullRequestTimelineEntry, RawEventsEntry } from "./raw-events.js";
+import type { PullRequestTimeline, PullRequestTimelineEntry } from "./raw-events.js";
 import {
   DEFAULT_UI_FILTERS,
   buildUiFilterOptions,
   filterInactivePullRequests,
   filterNotificationHistory,
-  filterRawEvents,
   filterTrackedPullRequests,
   readUiFilterValues,
   type UiFilterOptions,
@@ -48,7 +47,7 @@ interface PaginationState {
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 type LogLevelFilter = "all" | LogLevel;
-type AppPage = "pull-requests" | "logs" | "notification-history" | "raw-events";
+type AppPage = "pull-requests" | "logs" | "notification-history";
 
 interface RouteState {
   currentPage: AppPage;
@@ -72,7 +71,6 @@ const PULL_REQUEST_FILTER_PILLS: readonly { value: PullRequestStateFilter; label
 const APP_PAGES: readonly AppPage[] = [
   "pull-requests",
   "notification-history",
-  "raw-events",
   "logs",
 ];
 const DEFAULT_ACTIVITY_PAGE = 1;
@@ -148,8 +146,6 @@ function App() {
   const [timelineByPullRequest, setTimelineByPullRequest] = useState<PullRequestTimeline>({});
   const [notificationHistoryPagination, setNotificationHistoryPagination] =
     useState<PaginationState>(EMPTY_PAGINATION_STATE);
-  const [rawEvents, setRawEvents] = useState<RawEventsEntry[]>([]);
-  const [rawEventsPagination, setRawEventsPagination] = useState<PaginationState>(EMPTY_PAGINATION_STATE);
   const [recentLogs, setRecentLogs] = useState<RecentLogEntry[]>([]);
   const manualTrackDialogRef = useRef<HTMLDialogElement | null>(null);
   const [trackFormUrl, setTrackFormUrl] = useState("");
@@ -215,9 +211,8 @@ function App() {
         trackedPullRequests,
         inactivePullRequests,
         notificationHistory,
-        rawEvents,
       }),
-    [trackedPullRequests, inactivePullRequests, notificationHistory, rawEvents],
+    [trackedPullRequests, inactivePullRequests, notificationHistory],
   );
 
   const filteredTrackedPullRequests = useMemo(
@@ -239,10 +234,6 @@ function App() {
   const filteredNotificationHistory = useMemo(
     () => filterNotificationHistory(notificationHistory, route.uiFilters),
     [notificationHistory, route.uiFilters],
-  );
-  const filteredRawEvents = useMemo(
-    () => filterRawEvents(rawEvents, route.uiFilters),
-    [rawEvents, route.uiFilters],
   );
 
   const hasActiveFilters = countActivePageFilters(route.uiFilters, route.currentPage, route.logLevelFilter) > 0;
@@ -294,18 +285,13 @@ function App() {
         return;
       }
 
-      const [trackedResponse, inactiveResponse, rawEventsResponse] = await Promise.all([
+      const [trackedResponse, inactiveResponse] = await Promise.all([
         apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
         apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
-        apiFetch<{ rawEvents: RawEventsEntry[]; pagination: PaginationState }>(
-          buildActivityApiPath("/api/raw-events", routeState.uiFilters, routeState.activityPage),
-        ),
       ]);
 
       setTrackedPullRequests(trackedResponse.pullRequests);
       setInactivePullRequests(inactiveResponse.pullRequests);
-      setRawEvents(rawEventsResponse.rawEvents);
-      setRawEventsPagination(rawEventsResponse.pagination);
     } catch (error) {
       setFlashMessage({
         kind: "error",
@@ -521,16 +507,6 @@ function App() {
               hasActiveFilters={hasActiveFilters}
               uiFilters={route.uiFilters}
               onResend={handleResendNotificationRecord}
-              onNavigate={navigateToHref}
-              onRefresh={handleBaseDataRefresh}
-            />
-          ) : null}
-          {route.currentPage === "raw-events" ? (
-            <RawEventsPanel
-              rawEvents={filteredRawEvents}
-              pagination={rawEventsPagination}
-              hasActiveFilters={hasActiveFilters}
-              uiFilters={route.uiFilters}
               onNavigate={navigateToHref}
               onRefresh={handleBaseDataRefresh}
             />
@@ -880,101 +856,6 @@ function NotificationHistoryPanel({
   );
 }
 
-function RawEventsPanel({
-  rawEvents,
-  pagination,
-  hasActiveFilters,
-  uiFilters,
-  onNavigate,
-  onRefresh,
-}: {
-  rawEvents: RawEventsEntry[];
-  pagination: PaginationState;
-  hasActiveFilters: boolean;
-  uiFilters: UiFilterValues;
-  onNavigate: (href: string) => void;
-  onRefresh: () => void;
-}) {
-  return (
-    <section className="panel raw-events-panel">
-      <div className="panel-header">
-        <h2>Raw Events</h2>
-        <div className="panel-header-actions">
-          <RefreshButton label="Refresh raw events" onClick={onRefresh} />
-          <span className="count">{pagination.totalCount}</span>
-        </div>
-      </div>
-      <ActivityPagination
-        currentPage="raw-events"
-        uiFilters={uiFilters}
-        pagination={pagination}
-        onNavigate={onNavigate}
-        position="top"
-      />
-      {rawEvents.length === 0 ? (
-        <p>
-          {hasActiveFilters
-            ? "No normalized events match current filters."
-            : "No normalized events yet."}
-        </p>
-      ) : (
-        <ul className="raw-events-list">
-          {rawEvents.map((entry) => (
-            <li key={entry.id} className="raw-events-item">
-              <div className="raw-events-header">
-                <a href={entry.pullRequestUrl} className="pull-request-link">
-                  {entry.pullRequestLabel}
-                </a>
-                <span className="notification-history-time">
-                  {formatHistoryTimestamp(entry.occurredAt)}
-                </span>
-              </div>
-              <strong>{formatEventTypeLabel(entry.eventType)}</strong>
-              <span className="pull-request-subtle">{entry.pullRequestTitle}</span>
-              <div className="notification-history-meta-row raw-events-meta-row">
-                {entry.actorLogin ? (
-                  <GitHubIdentityPill
-                    label="Actor"
-                    login={entry.actorLogin}
-                    avatarUrl={readRawEventActorAvatarUrl(entry.rawPayloadJson)}
-                  />
-                ) : null}
-                {entry.actorClass ? (
-                  <span className="history-pill">{formatActorClassLabel(entry.actorClass)}</span>
-                ) : null}
-                {entry.decisionState ? (
-                  <span className="history-pill">{formatDecisionStateLabel(entry.decisionState)}</span>
-                ) : null}
-                {entry.notificationTiming ? (
-                  <span className="history-pill">
-                    {formatNotificationTimingLabel(entry.notificationTiming)}
-                  </span>
-                ) : null}
-                {entry.notificationSourceKind ? (
-                  <span className="history-pill">{formatSourceKindLabel(entry.notificationSourceKind)}</span>
-                ) : null}
-                {entry.notificationDeliveryStatus ? (
-                  <span className={`delivery-pill delivery-${entry.notificationDeliveryStatus}`}>
-                    {formatDeliveryStatusLabel(entry.notificationDeliveryStatus)}
-                  </span>
-                ) : null}
-              </div>
-              <RawEventJsonDetails rawPayloadJson={entry.rawPayloadJson} />
-            </li>
-          ))}
-        </ul>
-      )}
-      <ActivityPagination
-        currentPage="raw-events"
-        uiFilters={uiFilters}
-        pagination={pagination}
-        onNavigate={onNavigate}
-        position="bottom"
-      />
-    </section>
-  );
-}
-
 function ActivityPagination({
   currentPage,
   uiFilters,
@@ -982,7 +863,7 @@ function ActivityPagination({
   onNavigate,
   position = "bottom",
 }: {
-  currentPage: "notification-history" | "raw-events";
+  currentPage: "notification-history";
   uiFilters: UiFilterValues;
   pagination: PaginationState;
   onNavigate: (href: string) => void;
@@ -1027,36 +908,6 @@ function ActivityPagination({
   );
 }
 
-function RawEventJsonDetails({ rawPayloadJson }: { rawPayloadJson: string | null }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <details
-      className="raw-event-details"
-      onToggle={(event) => {
-        setIsOpen(event.currentTarget.open);
-      }}
-    >
-      <summary>Raw JSON</summary>
-      {isOpen ? <RawEventJsonBlock rawPayloadJson={rawPayloadJson} /> : null}
-    </details>
-  );
-}
-
-function RawEventJsonBlock({ rawPayloadJson }: { rawPayloadJson: string | null }) {
-  if (rawPayloadJson === null) {
-    return <pre className="raw-event-json">No stored raw payload.</pre>;
-  }
-
-  const formattedJson = formatJsonForDisplay(rawPayloadJson);
-
-  if (formattedJson === null) {
-    return <pre className="raw-event-json">{rawPayloadJson}</pre>;
-  }
-
-  return <HighlightedJsonBlock code={formattedJson} className="raw-event-json" />;
-}
-
 function HighlightedJsonBlock({
   code,
   className,
@@ -1089,26 +940,6 @@ function HighlightedJsonBlock({
 function formatJsonForDisplay(rawJson: string): string | null {
   try {
     return JSON.stringify(JSON.parse(rawJson), null, 2);
-  } catch {
-    return null;
-  }
-}
-
-function readRawEventActorAvatarUrl(rawPayloadJson: string | null): string | null {
-  if (rawPayloadJson === null) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(rawPayloadJson) as unknown;
-
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-      return null;
-    }
-
-    const actorAvatarUrl = (payload as Record<string, unknown>).actorAvatarUrl;
-
-    return typeof actorAvatarUrl === "string" && actorAvatarUrl.length > 0 ? actorAvatarUrl : null;
   } catch {
     return null;
   }
@@ -1701,10 +1532,6 @@ function readDocumentPage(pathname: string): AppPage {
     return "notification-history";
   }
 
-  if (pathname === "/raw-events") {
-    return "raw-events";
-  }
-
   return "pull-requests";
 }
 
@@ -1782,7 +1609,7 @@ function buildPageHref(page: AppPage, uiFilters: UiFilterValues, logLevelFilter:
 }
 
 function buildActivityPageHref(
-  page: "notification-history" | "raw-events",
+  page: "notification-history",
   uiFilters: UiFilterValues,
   activityPage: number,
 ): string {
@@ -1866,7 +1693,7 @@ function formatPageLabel(page: AppPage): string {
     return "Notification History";
   }
 
-  return "Raw Events";
+  return "Logs";
 }
 
 function formatPullRequestEmptyMessage(uiFilters: UiFilterValues, hasActiveFilters: boolean): string {
@@ -2380,14 +2207,6 @@ const APP_STYLES = `
     list-style: none;
   }
 
-  .raw-events-list {
-    display: grid;
-    gap: 12px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
   .logs-list {
     margin: 12px 0 0;
     padding: 0;
@@ -2431,8 +2250,7 @@ const APP_STYLES = `
     border: 1px solid rgba(148, 163, 184, 0.16);
   }
 
-  .notification-history-item,
-  .raw-events-item {
+  .notification-history-item {
     padding: 14px;
     border-radius: 12px;
     background: rgba(39, 46, 56, 0.78);
@@ -2452,10 +2270,6 @@ const APP_STYLES = `
   }
 
   .notification-history-panel {
-    grid-column: 1 / -1;
-  }
-
-  .raw-events-panel {
     grid-column: 1 / -1;
   }
 
@@ -2646,13 +2460,6 @@ const APP_STYLES = `
     margin-top: 14px;
     padding-top: 14px;
     border-top: 1px solid rgba(148, 163, 184, 0.14);
-  }
-
-  .raw-events-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
   }
 
   .notification-history-body {
@@ -2997,10 +2804,6 @@ const APP_STYLES = `
     outline-offset: 2px;
   }
 
-  .raw-events-meta-row {
-    margin-bottom: 12px;
-  }
-
   .logs-entry-time {
     color: #94a3b8;
     white-space: nowrap;
@@ -3065,16 +2868,6 @@ const APP_STYLES = `
     margin: 6px 0 0;
     padding: 8px 10px;
     border-radius: 10px;
-  }
-
-  .raw-event-details {
-    margin-top: 10px;
-  }
-
-  .raw-event-details summary {
-    cursor: pointer;
-    color: #7dd3fc;
-    user-select: none;
   }
 
   .raw-event-json {
@@ -3301,10 +3094,6 @@ const APP_STYLES = `
     }
 
     .notification-history-preview-header-row {
-      flex-direction: column;
-    }
-
-    .raw-events-header {
       flex-direction: column;
     }
 
