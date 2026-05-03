@@ -130,6 +130,7 @@ async function main(): Promise<void> {
           currentUserLogin: githubAuth.currentUserLogin,
           notificationDispatcher,
         }),
+      getCurrentUserLogin: () => githubAuth.currentUserLogin,
     });
     const serverOrigin = readServerOrigin(server);
     trayIcon = await startTrayIcon({

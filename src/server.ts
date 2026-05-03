@@ -71,6 +71,7 @@ export interface StartServerOptions {
     githubPullRequestId: number,
   ) => Promise<UntrackPullRequestResult>;
   resendNotificationRecord?: (notificationRecordId: number) => Promise<void>;
+  getCurrentUserLogin?: () => string;
 }
 
 export class ServerError extends Error {
@@ -152,6 +153,12 @@ async function handleRequest(
 
   if (request.method === "GET" && pathname.startsWith("/assets/")) {
     handleAssetRequest(request, response, pathname.slice("/assets/".length));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/me") {
+    const login = options.getCurrentUserLogin?.() ?? null;
+    respond(response, request.method, 200, "application/json; charset=utf-8", JSON.stringify({ login }));
     return;
   }
 

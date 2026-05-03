@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type CSSProperties,
@@ -49,11 +50,14 @@ type LogLevel = "debug" | "info" | "warn" | "error";
 type LogLevelFilter = "all" | LogLevel;
 type AppPage = "pull-requests" | "logs" | "notification-history";
 
+type PrSubTab = "my-prs" | "review-requested";
+
 interface RouteState {
   currentPage: AppPage;
   uiFilters: UiFilterValues;
   logLevelFilter: LogLevelFilter;
   activityPage: number;
+  prSubTab: PrSubTab;
 }
 
 type PageFilterField = keyof UiFilterValues;
@@ -152,6 +156,13 @@ function App() {
   const [isManualTrackDialogOpen, setIsManualTrackDialogOpen] = useState(false);
   const [trackFormMessage, setTrackFormMessage] = useState<AppFlashMessage | undefined>(undefined);
   const [flashMessage, setFlashMessage] = useState<AppFlashMessage | undefined>(undefined);
+  const [currentUserLogin, setCurrentUserLogin] = useState<string | null>(null);
+
+  useEffect(() => {
+    void apiFetch<{ login: string | null }>("/api/me").then((res) => {
+      setCurrentUserLogin(res.login);
+    });
+  }, []);
 
   useEffect(() => {
     const handlePopState = (): void => {
@@ -231,6 +242,20 @@ function App() {
       ),
     [filteredTrackedPullRequests, filteredInactivePullRequests, timelineByPullRequest],
   );
+  const subTabPullRequests = useMemo(() => {
+    if (currentUserLogin === null) return sortedPullRequests;
+    if (route.prSubTab === "review-requested") {
+      return sortedPullRequests.filter((pr) => pr.authorLogin !== currentUserLogin);
+    }
+    return sortedPullRequests.filter((pr) => pr.authorLogin === currentUserLogin);
+  }, [sortedPullRequests, route.prSubTab, currentUserLogin]);
+  const subTabCounts = useMemo<Record<PrSubTab, number>>(() => {
+    if (currentUserLogin === null) return { "my-prs": sortedPullRequests.length, "review-requested": 0 };
+    return {
+      "my-prs": sortedPullRequests.filter((pr) => pr.authorLogin === currentUserLogin).length,
+      "review-requested": sortedPullRequests.filter((pr) => pr.authorLogin !== currentUserLogin).length,
+    };
+  }, [sortedPullRequests, currentUserLogin]);
   const filteredNotificationHistory = useMemo(
     () => filterNotificationHistory(notificationHistory, route.uiFilters),
     [notificationHistory, route.uiFilters],
@@ -466,32 +491,29 @@ function App() {
           onNavigate={navigateToHref}
         />
         {showTopFlashMessage ? <FlashMessage message={flashMessage} /> : null}
-        <FilterPanel
-          currentPage={route.currentPage}
-          uiFilters={route.uiFilters}
-          uiFilterOptions={uiFilterOptions}
-          logLevelFilter={route.logLevelFilter}
-          formKey={buildPageHref(route.currentPage, route.uiFilters, route.logLevelFilter)}
-          onFormChange={route.currentPage === "logs" ? handleLogsFilterChange : handleFilterChange}
-          onNavigate={navigateToHref}
-        />
-        <div className="page-content">
+        <div className="page-content panel">
+          <FilterPanel
+            currentPage={route.currentPage}
+            uiFilters={route.uiFilters}
+            uiFilterOptions={uiFilterOptions}
+            logLevelFilter={route.logLevelFilter}
+            formKey={buildPageHref(route.currentPage, route.uiFilters, route.logLevelFilter)}
+            onFormChange={route.currentPage === "logs" ? handleLogsFilterChange : handleFilterChange}
+            onNavigate={navigateToHref}
+          />
           {route.currentPage === "pull-requests" ? (
             <PullRequestList
               title="Pull Requests"
               emptyMessage={formatPullRequestEmptyMessage(route.uiFilters, hasActiveFilters)}
-              pullRequests={sortedPullRequests}
+              pullRequests={subTabPullRequests}
               timelineByPullRequest={timelineByPullRequest}
               onRefresh={handleBaseDataRefresh}
-              headerAction={
-                <button
-                  type="button"
-                  className="action-button primary-button"
-                  onClick={openManualTrackDialog}
-                >
-                  Add
-                </button>
-              }
+              prSubTab={route.prSubTab}
+              uiFilters={route.uiFilters}
+              logLevelFilter={route.logLevelFilter}
+              onNavigate={navigateToHref}
+              onAddClick={openManualTrackDialog}
+              subTabCounts={subTabCounts}
               renderAction={(pullRequest) =>
                 renderPullRequestAction(pullRequest, {
                   onUntrack: handleUntrack,
@@ -588,7 +610,6 @@ function FilterPanel({
   onFormChange: (event: FormEvent<HTMLFormElement>) => void;
   onNavigate: (href: string) => void;
 }) {
-  const activeFilterCount = countActivePageFilters(uiFilters, currentPage, logLevelFilter);
   const pagePath = formatPagePath(currentPage);
   const showsActivityFilters = currentPage !== "pull-requests";
   const showsLogFilters = currentPage === "logs";
@@ -596,24 +617,7 @@ function FilterPanel({
     showsActivityFilters && !showsLogFilters ? "filters-grid filters-grid-activity" : "filters-grid";
 
   return (
-    <section className="panel filters-panel">
-      <div className="panel-header">
-        <div>
-          <h2>Filters</h2>
-        </div>
-        <div className="panel-header-actions">
-          {activeFilterCount > 0 ? (
-            <a
-              href={pagePath}
-              className="action-button clear-filters-link"
-              onClick={(event) => handleClientNavigation(event, pagePath, onNavigate)}
-            >
-              Clear
-            </a>
-          ) : null}
-          <span className="count">{activeFilterCount}</span>
-        </div>
-      </div>
+    <section className="filters-panel">
       <form
         key={formKey}
         method="get"
@@ -753,19 +757,13 @@ function NotificationHistoryPanel({
   onRefresh: () => void;
 }) {
   return (
-    <section className="panel notification-history-panel">
-      <div className="panel-header">
-        <h2>Notification History</h2>
-        <div className="panel-header-actions">
-          <RefreshButton label="Refresh notification history" onClick={onRefresh} />
-          <span className="count">{pagination.totalCount}</span>
-        </div>
-      </div>
+    <section className="notification-history-panel">
       <ActivityPagination
         currentPage="notification-history"
         uiFilters={uiFilters}
         pagination={pagination}
         onNavigate={onNavigate}
+        onRefresh={onRefresh}
         position="top"
       />
       {notificationHistory.length === 0 ? (
@@ -861,12 +859,14 @@ function ActivityPagination({
   uiFilters,
   pagination,
   onNavigate,
+  onRefresh,
   position = "bottom",
 }: {
   currentPage: "notification-history";
   uiFilters: UiFilterValues;
   pagination: PaginationState;
   onNavigate: (href: string) => void;
+  onRefresh?: () => void;
   position?: "top" | "bottom";
 }) {
   if (pagination.totalCount === 0) {
@@ -881,27 +881,32 @@ function ActivityPagination({
       <p className="panel-description pagination-summary">
         Showing {rangeStart}-{rangeEnd} of {pagination.totalCount}
       </p>
-      {pagination.totalPages > 1 ? (
+      {pagination.totalPages > 1 || onRefresh ? (
         <div className="pagination-controls" aria-label="Activity pagination">
-          <button
-            type="button"
-            className="action-button pagination-button"
-            disabled={pagination.page <= 1}
-            onClick={() => onNavigate(buildActivityPageHref(currentPage, uiFilters, pagination.page - 1))}
-          >
-            Previous
-          </button>
-          <span className="pagination-status">
-            Page {pagination.page} of {pagination.totalPages}
-          </span>
-          <button
-            type="button"
-            className="action-button pagination-button"
-            disabled={pagination.page >= pagination.totalPages}
-            onClick={() => onNavigate(buildActivityPageHref(currentPage, uiFilters, pagination.page + 1))}
-          >
-            Next
-          </button>
+          {pagination.totalPages > 1 ? (
+            <>
+              <button
+                type="button"
+                className="action-button pagination-button"
+                disabled={pagination.page <= 1}
+                onClick={() => onNavigate(buildActivityPageHref(currentPage, uiFilters, pagination.page - 1))}
+              >
+                Previous
+              </button>
+              <span className="pagination-status">
+                Page {pagination.page} of {pagination.totalPages}
+              </span>
+              <button
+                type="button"
+                className="action-button pagination-button"
+                disabled={pagination.page >= pagination.totalPages}
+                onClick={() => onNavigate(buildActivityPageHref(currentPage, uiFilters, pagination.page + 1))}
+              >
+                Next
+              </button>
+            </>
+          ) : null}
+          {onRefresh ? <RefreshButton label="Refresh notification history" onClick={onRefresh} /> : null}
         </div>
       ) : null}
     </div>
@@ -955,15 +960,10 @@ function LogsPanel({
   onRefresh: () => void;
 }) {
   return (
-    <section className="panel logs-panel">
+    <section className="logs-panel">
       <div className="panel-header">
-        <div>
-          <h2>Logs</h2>
-          <p className="panel-description">Recent flat-file logs from local runtime.</p>
-        </div>
         <div className="panel-header-actions">
           <RefreshButton label="Refresh logs" onClick={onRefresh} />
-          <span className="count">{recentLogs.length}</span>
         </div>
       </div>
       {recentLogs.length === 0 ? (
@@ -1022,7 +1022,12 @@ function PullRequestList({
   pullRequests,
   timelineByPullRequest,
   onRefresh,
-  headerAction,
+  prSubTab,
+  uiFilters,
+  logLevelFilter,
+  onNavigate,
+  onAddClick,
+  subTabCounts,
   renderAction,
 }: {
   title: string;
@@ -1030,70 +1035,201 @@ function PullRequestList({
   pullRequests: PullRequestRecord[];
   timelineByPullRequest: PullRequestTimeline;
   onRefresh: () => void;
-  headerAction?: ReactNode;
+  prSubTab: PrSubTab;
+  uiFilters: UiFilterValues;
+  logLevelFilter: LogLevelFilter;
+  onNavigate: (href: string) => void;
+  onAddClick: () => void;
+  subTabCounts: Record<PrSubTab, number>;
   renderAction?: (pullRequest: PullRequestRecord) => ReactNode;
 }) {
+  const subTabs: { id: PrSubTab; label: string }[] = [
+    { id: "my-prs", label: "My PRs" },
+    { id: "review-requested", label: "Review Requests" },
+  ];
+
   return (
-    <section className="panel pull-request-panel">
-      <div className="panel-header">
-        <h2>{title}</h2>
-        <div className="panel-header-actions">
-          {headerAction}
+    <section className="pull-request-panel">
+      <div className="pr-sub-tab-bar" role="tablist" aria-label="Pull request view">
+        {subTabs.map((tab) => {
+          const isActive = prSubTab === tab.id;
+          const href = buildPageHref("pull-requests", uiFilters, logLevelFilter, tab.id);
+          return (
+            <a
+              key={tab.id}
+              role="tab"
+              aria-selected={isActive}
+              className={`pr-sub-tab${isActive ? " pr-sub-tab-active" : ""}`}
+              href={href}
+              onClick={(e) => handleClientNavigation(e, href, onNavigate)}
+            >
+              {tab.label}
+              <span className="pr-sub-tab-count">{subTabCounts[tab.id]}</span>
+            </a>
+          );
+        })}
+        <div className="pr-sub-tab-bar-actions">
+          <button
+            type="button"
+            className="action-button add-pr-button"
+            onClick={onAddClick}
+            title="Track a pull request by URL"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="8" y1="2" x2="8" y2="14" />
+              <line x1="2" y1="8" x2="14" y2="8" />
+            </svg>
+            Track PR
+          </button>
           <RefreshButton label="Refresh pull requests" onClick={onRefresh} />
-          <span className="count">{pullRequests.length}</span>
         </div>
       </div>
       {pullRequests.length === 0 ? (
         <p>{emptyMessage}</p>
       ) : (
         <ul className="pull-request-list">
-          {pullRequests.map((pullRequest) => (
-            <li key={pullRequest.id} className="pull-request-item">
-              <div className="notification-history-preview">
-                <div className="notification-history-preview-header-row">
-                  <div className="notification-history-preview-header">
-                    <GitHubAvatar
-                      login={pullRequest.authorLogin}
-                      avatarUrl={pullRequest.authorAvatarUrl}
-                      title={`@${pullRequest.authorLogin}`}
-                    />
-                    <img
-                      className="state-pill-icon"
-                      src={resolvePullRequestStateAssetUrlPath(pullRequest)}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <a
-                      href={pullRequest.url}
-                      className="notification-history-preview-link"
-                      title={`${pullRequest.repositoryOwner}/${pullRequest.repositoryName} #${pullRequest.number}`}
-                    >
-                      [{pullRequest.repositoryName}] {pullRequest.title}
-                    </a>
-                  </div>
-                </div>
-                <div className="notification-history-meta-row">
-                  <span className="history-pill">
-                    {pullRequest.repositoryOwner}/{pullRequest.repositoryName} #{pullRequest.number}
-                  </span>
-                  <PullRequestInteractionGroups
-                    entries={timelineByPullRequest[String(pullRequest.githubPullRequestId)] ?? []}
-                  />
-                  {renderAction ? renderAction(pullRequest) : null}
-                </div>
-                <PullRequestTimelineDropdown
-                  entries={timelineByPullRequest[String(pullRequest.githubPullRequestId)] ?? []}
-                  pullRequestAuthorLogin={pullRequest.authorLogin}
-                  pullRequestAuthorAvatarUrl={pullRequest.authorAvatarUrl}
-                />
-              </div>
-            </li>
-          ))}
+          {pullRequests.map((pullRequest) => {
+            const timelineEntries = timelineByPullRequest[String(pullRequest.githubPullRequestId)] ?? [];
+
+            return (
+              <PullRequestListItem
+                key={pullRequest.id}
+                pullRequest={pullRequest}
+                timelineEntries={timelineEntries}
+                renderAction={renderAction}
+              />
+            );
+          })}
         </ul>
       )}
     </section>
   );
+}
+
+function PullRequestListItem({
+  pullRequest,
+  timelineEntries,
+  renderAction,
+}: {
+  pullRequest: PullRequestRecord;
+  timelineEntries: PullRequestTimelineEntry[];
+  renderAction: ((pullRequest: PullRequestRecord) => ReactNode) | undefined;
+}) {
+  const [isTimelineExpanded, setIsTimelineExpanded] = useState(false);
+  const timelineSectionId = `pull-request-timeline-${pullRequest.githubPullRequestId}`;
+
+  const toggleTimeline = (): void => {
+    setIsTimelineExpanded((currentValue) => !currentValue);
+  };
+
+  const handleRowClick = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    const target = event.target;
+
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (target.closest("a, button, input, select, textarea, label, form, summary")) {
+      return;
+    }
+
+    toggleTimeline();
+  };
+
+  const handleRowKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const target = event.target;
+
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (target.closest("a, button, input, select, textarea, label, form, summary") && target !== event.currentTarget) {
+      return;
+    }
+
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    toggleTimeline();
+  };
+
+  return (
+    <li className={`pull-request-item ${isTimelineExpanded ? "pull-request-item-expanded" : ""}`.trim()}>
+      <div
+        className="pull-request-row pull-request-row-expandable"
+        role="button"
+        tabIndex={0}
+        aria-expanded={isTimelineExpanded}
+        aria-controls={timelineSectionId}
+        onClick={handleRowClick}
+        onKeyDown={handleRowKeyDown}
+      >
+        <span
+          className={`pull-request-expander ${isTimelineExpanded ? "pull-request-expander-expanded" : ""}`.trim()}
+          aria-hidden="true"
+        />
+        <GitHubAvatar
+          login={pullRequest.authorLogin}
+          avatarUrl={pullRequest.authorAvatarUrl}
+          title={`@${pullRequest.authorLogin}`}
+        />
+        <img
+          className="state-pill-icon"
+          src={resolvePullRequestStateAssetUrlPath(pullRequest)}
+          alt=""
+          loading="lazy"
+          decoding="async"
+        />
+        <span className="pull-request-repo-pill">
+          {pullRequest.repositoryOwner}/{pullRequest.repositoryName} #{pullRequest.number}
+        </span>
+        <div className="pull-request-title">
+          <a
+            href={pullRequest.url}
+            className="pull-request-title-link"
+            title={pullRequest.title}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {pullRequest.title}
+          </a>
+        </div>
+        <PullRequestInteractionGroups entries={timelineEntries} />
+        <span className="pull-request-timeline-summary">
+          {formatPullRequestTimelineSummaryLabel(timelineEntries.length)}
+          {timelineEntries[0] ? (
+            <time
+              className="pull-request-timeline-summary-age"
+              dateTime={normalizeHistoryTimestamp(timelineEntries[0].occurredAt)}
+              title={formatHistoryTimestamp(timelineEntries[0].occurredAt)}
+            >
+              {formatRelativeHistoryTimestamp(timelineEntries[0].occurredAt)}
+            </time>
+          ) : null}
+        </span>
+      </div>
+      {isTimelineExpanded ? (
+        <div id={timelineSectionId} className="pull-request-timeline-section">
+          {renderAction ? <div className="pull-request-expanded-actions">{renderAction(pullRequest)}</div> : null}
+          <PullRequestTimelineContent
+            entries={timelineEntries}
+            pullRequestAuthorLogin={pullRequest.authorLogin}
+            pullRequestAuthorAvatarUrl={pullRequest.authorAvatarUrl}
+          />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function formatPullRequestTimelineSummaryLabel(eventCount: number): string {
+  if (eventCount === 0) {
+    return "No activity";
+  }
+
+  return `${eventCount} ${eventCount === 1 ? "event" : "events"}`;
 }
 
 function PullRequestInteractionGroups({ entries }: { entries: PullRequestTimelineEntry[] }) {
@@ -1258,7 +1394,7 @@ function NotificationSummaryContent({
   );
 }
 
-function PullRequestTimelineDropdown({
+function PullRequestTimelineContent({
   entries,
   pullRequestAuthorLogin,
   pullRequestAuthorAvatarUrl,
@@ -1267,7 +1403,6 @@ function PullRequestTimelineDropdown({
   pullRequestAuthorLogin: string;
   pullRequestAuthorAvatarUrl: string | null;
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
   const displayEntries = entries.map((entry) => ({
     entry,
     exactTimestamp: formatHistoryTimestamp(entry.occurredAt),
@@ -1282,68 +1417,46 @@ function PullRequestTimelineDropdown({
   const timelineListStyle: CSSProperties = {
     ["--pull-request-timeline-time-width" as string]: `${timeColumnWidth}ch`,
   };
-  const hiddenEntryCount = Math.max(displayEntries.length - 1, 0);
-  const visibleEntries = isExpanded ? displayEntries : displayEntries.slice(0, 1);
 
   return (
     <div className="pull-request-timeline">
       {entries.length === 0 ? (
         <p className="pull-request-timeline-empty">No activity yet.</p>
-      ) : (
-        <>
-          <ol className="pull-request-timeline-list" style={timelineListStyle}>
-            {visibleEntries.map(({ entry, exactTimestamp, relativeTimestamp, actorLogin, actorAvatarUrl }) => {
-              return (
-                <li key={entry.id} className="pull-request-timeline-item">
-                  <span className="pull-request-timeline-dot" aria-hidden="true" />
-                  <div className="pull-request-timeline-entry">
-                    <time
-                      className="pull-request-timeline-time"
-                      dateTime={normalizeHistoryTimestamp(entry.occurredAt)}
-                      title={exactTimestamp}
-                    >
-                      {relativeTimestamp}
-                    </time>
-                    <div className="pull-request-timeline-author">
-                      <GitHubAvatar login={actorLogin} avatarUrl={actorAvatarUrl} />
-                      <span className="pull-request-timeline-actor" title={actorLogin}>
-                        {actorLogin}
-                      </span>
-                    </div>
-                    <span className="pull-request-timeline-text">{entry.paragraph.text}</span>
+      ) : null}
+      {entries.length > 0 ? (
+        <ol className="pull-request-timeline-list" style={timelineListStyle}>
+          {displayEntries.map(({ entry, exactTimestamp, relativeTimestamp, actorLogin, actorAvatarUrl }) => {
+            return (
+              <li key={entry.id} className="pull-request-timeline-item">
+                <span className="pull-request-timeline-dot" aria-hidden="true" />
+                <div className="pull-request-timeline-entry">
+                  <time
+                    className="pull-request-timeline-time"
+                    dateTime={normalizeHistoryTimestamp(entry.occurredAt)}
+                    title={exactTimestamp}
+                  >
+                    {relativeTimestamp}
+                  </time>
+                  <div className="pull-request-timeline-author">
+                    <GitHubAvatar login={actorLogin} avatarUrl={actorAvatarUrl} />
+                    <span className="pull-request-timeline-actor" title={actorLogin}>
+                      {actorLogin}
+                    </span>
                   </div>
-                </li>
-              );
-            })}
-          </ol>
-          {!isExpanded && hiddenEntryCount > 0 ? (
-            <button
-              type="button"
-              className="pull-request-timeline-toggle pull-request-timeline-toggle-expand"
-              aria-label={`Show ${hiddenEntryCount} more timeline ${hiddenEntryCount === 1 ? "event" : "events"}`}
-              onClick={() => setIsExpanded(true)}
-            >
-              {hiddenEntryCount} more
-            </button>
-          ) : null}
-          {isExpanded && hiddenEntryCount > 0 ? (
-            <button
-              type="button"
-              className="pull-request-timeline-toggle pull-request-timeline-toggle-collapse"
-              onClick={() => setIsExpanded(false)}
-            >
-              Collapse
-            </button>
-          ) : null}
-        </>
-      )}
+                  <span className="pull-request-timeline-text">{entry.paragraph.text}</span>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
     </div>
   );
 }
 
 function RefreshButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button type="button" className="action-button icon-button" aria-label={label} title={label} onClick={onClick}>
+    <button type="button" className="action-button" aria-label={label} title={label} onClick={onClick}>
       <svg viewBox="0 0 20 20" className="icon-button-svg" aria-hidden="true">
         <path
           d="M16.25 10A6.25 6.25 0 1 1 14.42 5.58M16.25 3.75v4.17h-4.17"
@@ -1353,7 +1466,7 @@ function RefreshButton({ label, onClick }: { label: string; onClick: () => void 
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-      </svg>
+      </svg>&nbsp;
     </button>
   );
 }
@@ -1431,50 +1544,44 @@ function PullRequestTrackingControl({
   };
 }) {
   const statusLabel = formatTrackingStateLabel(pullRequest);
+  const isTracked = pullRequest.isTracked;
+  const actionLabel = isTracked ? "Untrack" : "Track again";
+  const formAction = isTracked
+    ? `/tracked-pull-requests/${pullRequest.githubPullRequestId}/untrack`
+    : "/inactive-pull-requests/retrack";
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
 
-  if (pullRequest.isTracked) {
-    return (
-      <form
-        className="pull-request-tracking-control-form"
-        method="post"
-        action={`/tracked-pull-requests/${pullRequest.githubPullRequestId}/untrack`}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void handlers.onUntrack(pullRequest.githubPullRequestId);
-        }}
-      >
-        <div className="tracking-control tracking-control-tracked">
-          <span className="tracking-control-segment tracking-control-segment-active">{statusLabel}</span>
-          <button
-            type="submit"
-            className="tracking-control-button tracking-control-segment tracking-control-segment-inactive"
-          >
-            Untrack
-          </button>
-        </div>
-      </form>
-    );
-  }
+    if (isTracked) {
+      void handlers.onUntrack(pullRequest.githubPullRequestId);
+      return;
+    }
+
+    void handlers.onRetrack(pullRequest.url);
+  };
 
   return (
     <form
       className="pull-request-tracking-control-form"
       method="post"
-      action="/inactive-pull-requests/retrack"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void handlers.onRetrack(pullRequest.url);
-      }}
+      action={formAction}
+      onSubmit={handleSubmit}
     >
       <input type="hidden" name="url" value={pullRequest.url} />
-      <div className="tracking-control tracking-control-untracked">
+      <div className={`tracking-toggle ${isTracked ? "tracking-toggle-tracked" : "tracking-toggle-untracked"}`.trim()}>
+        <span className="tracking-toggle-label">Tracked</span>
         <button
           type="submit"
-          className="tracking-control-button tracking-control-segment tracking-control-segment-inactive"
+          className="tracking-toggle-button"
+          role="switch"
+          aria-checked={isTracked}
+          aria-label={`${statusLabel} (${actionLabel})`}
+          title={`${statusLabel} · ${actionLabel}`}
         >
-          Track Again
+          <span className="tracking-toggle-track" aria-hidden="true">
+            <span className="tracking-toggle-thumb" />
+          </span>
         </button>
-        <span className="tracking-control-segment tracking-control-segment-active">{statusLabel}</span>
       </div>
     </form>
   );
@@ -1496,12 +1603,17 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+function readPrSubTab(searchParams: URLSearchParams): PrSubTab {
+  return searchParams.get("tab") === "review-requested" ? "review-requested" : "my-prs";
+}
+
 function readRouteState(url: URL): RouteState {
   return {
     currentPage: readDocumentPage(url.pathname),
     uiFilters: readUiFilterValues(url.searchParams),
     logLevelFilter: readLogLevelFilter(url.searchParams),
     activityPage: readActivityPage(url.searchParams),
+    prSubTab: readPrSubTab(url.searchParams),
   };
 }
 
@@ -1593,7 +1705,7 @@ function getPageFilterFields(page: AppPage): readonly PageFilterField[] {
   return ACTIVITY_FILTER_FIELDS;
 }
 
-function buildPageHref(page: AppPage, uiFilters: UiFilterValues, logLevelFilter: LogLevelFilter): string {
+function buildPageHref(page: AppPage, uiFilters: UiFilterValues, logLevelFilter: LogLevelFilter, prSubTab?: PrSubTab): string {
   if (page === "logs") {
     return buildLogViewerHref(logLevelFilter);
   }
@@ -1601,6 +1713,10 @@ function buildPageHref(page: AppPage, uiFilters: UiFilterValues, logLevelFilter:
   const searchParams = new URLSearchParams();
 
   appendUiFilters(searchParams, getPageFilterFields(page), uiFilters);
+
+  if (page === "pull-requests" && prSubTab && prSubTab !== "my-prs") {
+    searchParams.set("tab", prSubTab);
+  }
 
   const pagePath = formatPagePath(page);
   const search = searchParams.toString();
@@ -1997,19 +2113,45 @@ function handleClientNavigation(
 }
 
 const APP_STYLES = `
-  @import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&display=swap");
-
   :root {
     color-scheme: dark;
-    font-family: Inter, system-ui, sans-serif;
+    --bg: #0a0a0a;
+    --bg-elevated: #0f0f0f;
+    --surface: #111111;
+    --surface-hover: #161616;
+    --border: #1f1f1f;
+    --border-strong: #2a2a2a;
+    --text: #ededed;
+    --text-secondary: #a1a1a1;
+    --text-muted: #6b6b6b;
+    --accent: #5b8bf0;
+    --accent-soft: rgba(91, 139, 240, 0.12);
+    --timeline-line: rgba(91, 139, 240, 0.22);
+    --timeline-dot: var(--accent);
+    --success: #4ade80;
+    --warn: #facc15;
+    --danger: #f87171;
+    --pr-approved: #4ade80;
+    --pr-changes-requested: #f87171;
+    --pr-commented: #7aa4f0;
+    font-family:
+      "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+      Arial, sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    box-sizing: border-box;
   }
 
   body {
     margin: 0;
-    background:
-      radial-gradient(circle at top, rgba(56, 189, 248, 0.08), transparent 32%),
-      linear-gradient(180deg, #222a33 0%, #141a20 100%);
-    color: #e2e8f0;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.5;
   }
 
   #app {
@@ -2017,105 +2159,107 @@ const APP_STYLES = `
   }
 
   main {
-    max-width: 960px;
+    max-width: 1440px;
     margin: 0 auto;
-    padding: 0 24px 64px;
-  }
-
-  .eyebrow {
-    display: inline-block;
-    margin-bottom: 16px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(56, 189, 248, 0.12);
-    color: #7dd3fc;
+    padding: 32px 32px 64px;
   }
 
   h1 {
-    margin: 0 0 12px;
-    font-size: clamp(2rem, 5vw, 3rem);
+    margin: 0 0 24px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
   }
 
   .app-title {
     display: inline-block;
-    margin-bottom: 16px;
-    font-family: "Orbitron", "Segoe UI", sans-serif;
-    font-size: clamp(2.75rem, 6vw, 3.5rem);
-    font-weight: 800;
-    letter-spacing: 0.18em;
+    margin: 0 0 24px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    background: linear-gradient(90deg, #2af5c8 0%, #22d3ee 54%, #38bdf8 100%);
-    color: transparent;
-    -webkit-background-clip: text;
-    background-clip: text;
-    text-shadow: none;
-    filter:
-      drop-shadow(0 0 2px rgba(42, 245, 200, 0.18))
-      drop-shadow(0 0 6px rgba(34, 211, 238, 0.1));
+    color: var(--text);
   }
 
   p {
     margin: 0;
-    line-height: 1.6;
-    color: #cbd5e1;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  a {
+    color: inherit;
   }
 
   .page-nav {
-    margin-top: 0;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    margin: 0 0 24px;
+    border-bottom: 1px solid var(--border);
   }
 
   .page-nav-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 20px;
+    gap: 4px;
   }
 
   .page-nav-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 0 12px;
+    padding: 8px 12px;
+    margin-bottom: -1px;
     border: 0;
-    border-bottom: 2px solid transparent;
+    border-bottom: 1px solid transparent;
     background: transparent;
-    color: #94a3b8;
-    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.9375rem;
+    font-weight: 500;
     text-decoration: none;
     cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease;
   }
 
   .page-nav-link:hover {
-    color: #e2e8f0;
+    color: var(--text);
   }
 
   .page-nav-link-current {
-    border-bottom-color: #38bdf8;
-    color: #e2e8f0;
+    border-bottom-color: var(--accent);
+    color: #cdddff;
   }
 
   .page-content {
-    margin-top: 32px;
+    display: flex;
+    flex-direction: column;
+    margin-top: 24px;
+    padding: 0;
+    overflow: hidden;
   }
 
+  .filters-panel {
+    padding: 16px 20px;
+  }
+
+
   .manual-track-description {
-    margin: 8px 0 0;
-    color: #94a3b8;
+    margin: 6px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
   }
 
   .manual-track-dialog {
-    width: min(560px, calc(100vw - 32px));
+    width: min(520px, calc(100vw - 32px));
     padding: 0;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 18px;
-    background: rgba(28, 34, 42, 0.98);
-    color: #e2e8f0;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
   }
 
   .manual-track-dialog::backdrop {
-    background: rgba(9, 12, 16, 0.7);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(2px);
   }
 
   .manual-track-dialog-header {
@@ -2128,7 +2272,8 @@ const APP_STYLES = `
 
   .manual-track-dialog-title {
     margin: 0;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
+    font-weight: 600;
   }
 
   .manual-track-dialog-close-button {
@@ -2136,64 +2281,68 @@ const APP_STYLES = `
   }
 
   .filters-panel {
-    margin-top: 32px;
   }
 
   .panel {
-    padding: 18px;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 16px;
-    background: rgba(28, 34, 42, 0.92);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
   }
 
   h2 {
-    margin: 0 0 8px;
-    font-size: 1rem;
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text);
+    text-transform: uppercase;
   }
 
   strong {
-    display: block;
-    margin-top: 8px;
-    font-size: 1rem;
-    line-height: 1.4;
-  }
-
-  a {
-    color: inherit;
+    font-weight: 600;
+    color: var(--text);
   }
 
   .panel-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
-    margin-bottom: 12px;
+    margin-bottom: 0;
   }
 
   .panel-header-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
-  }
-
-  .count,
-  .state-pill {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    font-weight: 600;
+    gap: 8px;
+    margin-left: auto;
   }
 
   .count {
-    padding: 4px 10px;
-    background: rgba(56, 189, 248, 0.16);
-    color: #7dd3fc;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .state-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 4px;
+    font-weight: 500;
   }
 
   .pull-request-list {
     display: grid;
-    gap: 12px;
+    gap: 0;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -2201,14 +2350,14 @@ const APP_STYLES = `
 
   .notification-history-list {
     display: grid;
-    gap: 12px;
+    gap: 8px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
   .logs-list {
-    margin: 12px 0 0;
+    margin: 8px 0 0;
     padding: 0;
     list-style: none;
   }
@@ -2220,41 +2369,232 @@ const APP_STYLES = `
     gap: 12px;
   }
 
-  .pagination-footer-top {
-    margin: 12px 0 16px;
-  }
-
   .pagination-footer-bottom {
     margin-top: 16px;
   }
 
   .pagination-summary {
     margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
   }
 
   .pagination-controls {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
 
   .pagination-status {
-    color: #94a3b8;
+    color: var(--text-muted);
+    font-size: 0.9375rem;
     white-space: nowrap;
   }
 
+  .pull-request-panel {
+    grid-column: 1 / -1;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .pull-request-panel > .panel-header {
+    padding: 14px 20px;
+    border-bottom: none;
+  }
+
+  .pr-sub-tab-bar {
+    display: flex;
+    align-items: center;
+    padding: 0 12px 0 20px;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pr-sub-tab-bar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  .pr-sub-tab {
+    padding: 8px 14px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 100ms ease, border-color 100ms ease;
+    white-space: nowrap;
+  }
+
+  .pr-sub-tab:hover {
+    color: var(--text);
+  }
+
+  .pr-sub-tab-active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+
+  .pr-sub-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    padding: 0 5px;
+    height: 16px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    line-height: 1;
+    margin-left: 6px;
+  }
+
+  .pr-sub-tab-active .pr-sub-tab-count {
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--text-muted);
+  }
+
+  .action-button.add-pr-button svg {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+  }
+
+  .pull-request-panel > p {
+    padding: 24px 20px;
+    color: var(--text-secondary);
+  }
+
   .pull-request-item {
-    padding: 14px;
-    border-radius: 12px;
-    background: rgba(39, 46, 56, 0.78);
-    border: 1px solid rgba(148, 163, 184, 0.16);
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    border-radius: 0;
+    transition: background-color 100ms ease;
+  }
+
+  .pull-request-item:last-child {
+    border-bottom: 0;
+  }
+
+  .pull-request-item:hover {
+    background: var(--surface-hover);
+  }
+
+  .pull-request-item-expanded {
+    background: var(--surface-hover);
+  }
+
+  .pull-request-row {
+    display: grid;
+    grid-template-columns: 12px auto auto auto minmax(0, 1fr) 180px 128px;
+    grid-template-areas: "expander avatar state repo title interactions timeline";
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    min-width: 0;
+  }
+
+  .pull-request-row-expandable {
+    cursor: pointer;
+  }
+
+  .pull-request-row-expandable:focus-visible {
+    outline: 1px solid var(--border-strong);
+    outline-offset: -1px;
+  }
+
+  .pull-request-expander {
+    grid-area: expander;
+    width: 0;
+    height: 0;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 6px solid var(--text-muted);
+    transition: transform 100ms ease, border-left-color 100ms ease;
+  }
+
+  .pull-request-row-expandable:hover .pull-request-expander,
+  .pull-request-item-expanded .pull-request-expander {
+    border-left-color: var(--text);
+  }
+
+  .pull-request-expander-expanded {
+    transform: rotate(90deg);
+  }
+
+  .pull-request-row > .github-avatar {
+    grid-area: avatar;
+    width: 24px;
+    height: 24px;
+  }
+
+  .pull-request-row > .state-pill-icon {
+    grid-area: state;
+    width: 18px;
+    height: 18px;
+  }
+
+  .pull-request-title {
+    grid-area: title;
+    min-width: 0;
+  }
+
+  .pull-request-title-link {
+    display: inline-flex;
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 1rem;
+    line-height: 1.4;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pull-request-title-link:hover {
+    color: var(--accent);
+  }
+
+  .pull-request-repo-pill {
+    grid-area: repo;
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 9px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .pull-request-timeline-section {
+    display: flow-root;
+    padding: 8px 20px 14px;
+    border-top: 1px solid var(--border);
+  }
+
+  .pull-request-expanded-actions {
+    float: right;
+    margin: 0 0 8px 16px;
   }
 
   .notification-history-item {
-    padding: 14px;
-    border-radius: 12px;
-    background: rgba(39, 46, 56, 0.78);
-    border: 1px solid rgba(148, 163, 184, 0.16);
+    padding: 14px 16px;
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
   }
 
   .logs-item {
@@ -2266,19 +2606,17 @@ const APP_STYLES = `
   }
 
   .logs-item + .logs-item {
-    border-top: 1px solid rgba(148, 163, 184, 0.14);
+    border-top: 1px solid var(--border);
   }
 
   .notification-history-panel {
     grid-column: 1 / -1;
+    padding: 16px 20px;
   }
 
   .logs-panel {
     grid-column: 1 / -1;
-  }
-
-  .pull-request-panel {
-    grid-column: 1 / -1;
+    padding: 16px 20px;
   }
 
   .track-form {
@@ -2287,13 +2625,13 @@ const APP_STYLES = `
   }
 
   .filters-form {
-    margin-top: 16px;
+    margin-top: 12px;
   }
 
   .filters-grid {
     display: grid;
     gap: 12px;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   }
 
   .filters-grid-activity {
@@ -2302,7 +2640,7 @@ const APP_STYLES = `
 
   .filter-field {
     display: grid;
-    gap: 8px;
+    gap: 6px;
   }
 
   .filter-field-actor {
@@ -2310,47 +2648,55 @@ const APP_STYLES = `
   }
 
   .panel-description {
-    margin-top: 4px;
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
   }
 
   .track-form-row {
     display: flex;
-    gap: 12px;
+    gap: 8px;
     margin-top: 8px;
   }
 
   .input-label {
     display: block;
-    font-weight: 600;
-    color: #cbd5e1;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .text-input {
     flex: 1;
     min-width: 0;
-    padding: 12px 14px;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 12px;
-    background: rgba(23, 28, 35, 0.96);
-    color: #e2e8f0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
     font: inherit;
+    font-size: 0.9375rem;
+    transition: border-color 120ms ease;
   }
 
   .text-input::placeholder {
-    color: #7b8797;
+    color: var(--text-muted);
   }
 
   .text-input:focus {
-    outline: 2px solid rgba(56, 189, 248, 0.4);
-    outline-offset: 2px;
+    outline: none;
+    border-color: rgba(91, 139, 240, 0.55);
+    box-shadow: 0 0 0 1px rgba(91, 139, 240, 0.2);
   }
 
   .filter-pill-group {
     display: flex;
     width: 100%;
-    border-radius: 14px;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    background: rgba(28, 32, 38, 0.9);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: rgba(6, 8, 12, 0.9);
     overflow: hidden;
   }
 
@@ -2361,17 +2707,15 @@ const APP_STYLES = `
     flex: 1 0 auto;
     padding: 8px 12px;
     border: 0;
-    border-right: 1px solid rgba(148, 163, 184, 0.16);
+    border-right: 1px solid var(--border);
     background: transparent;
-    color: #94a3b8;
+    color: #676d7b;
     font: inherit;
-    font-size: 0.8rem;
-    font-weight: 700;
+    font-size: 0.875rem;
+    font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
-    transition:
-      background-color 120ms ease,
-      color 120ms ease;
+    transition: background-color 100ms ease, color 100ms ease, box-shadow 100ms ease;
   }
 
   .filter-pill-button:last-child {
@@ -2379,34 +2723,37 @@ const APP_STYLES = `
   }
 
   .filter-pill-button:hover {
-    background: rgba(58, 66, 76, 0.5);
-    color: #e2e8f0;
+    background: rgba(91, 139, 240, 0.14);
+    color: #d7e3ff;
   }
 
   .filter-pill-button-active {
-    background: rgba(56, 189, 248, 0.16);
-    color: #bae6fd;
+    background: rgba(91, 139, 240, 0.72);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow:
+      inset 0 0 0 1px rgba(222, 233, 255, 0.34),
+      0 0 0 1px rgba(91, 139, 240, 0.18);
   }
 
   .filter-pill-button-active:hover {
-    background: rgba(56, 189, 248, 0.22);
-    color: #e0f2fe;
+    background: rgba(91, 139, 240, 0.82);
   }
 
   .filter-pill-button:focus-visible {
     position: relative;
-    outline: 2px solid rgba(56, 189, 248, 0.45);
-    outline-offset: -2px;
+    outline: 1px solid rgba(91, 139, 240, 0.6);
+    outline-offset: -1px;
   }
 
   .pull-request-link {
-    color: #7dd3fc;
+    color: var(--text);
     text-decoration: none;
     word-break: break-word;
   }
 
   .pull-request-link:hover {
-    text-decoration: underline;
+    color: var(--accent);
   }
 
   .notification-history-preview {
@@ -2431,20 +2778,18 @@ const APP_STYLES = `
   }
 
   .notification-history-preview-header .github-avatar {
-    width: 24px;
-    height: 24px;
-  }
-
-  .notification-history-preview-header .github-avatar-fallback {
+    width: 22px;
+    height: 22px;
   }
 
   .notification-history-preview-link,
   .notification-history-preview-title {
     display: block;
     min-width: 0;
-    color: #f8fafc;
-    font-weight: 600;
-    line-height: 1.45;
+    color: var(--text);
+    font-weight: 500;
+    font-size: 0.875rem;
+    line-height: 1.4;
     word-break: break-word;
   }
 
@@ -2453,45 +2798,45 @@ const APP_STYLES = `
   }
 
   .notification-history-preview-link:hover {
-    text-decoration: underline;
+    color: var(--accent);
   }
 
   .notification-history-preview-body {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid rgba(148, 163, 184, 0.14);
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
   }
 
   .notification-history-body {
     margin: 0;
-    color: #e2e8f0;
+    color: var(--text-secondary);
     line-height: 1.5;
     white-space: pre-line;
   }
 
   .notification-history-summary-list {
     display: grid;
-    gap: 10px;
+    gap: 8px;
     margin: 0;
   }
 
   .notification-history-summary-line {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
+    gap: 8px;
     margin: 0;
   }
 
   .notification-history-summary-actor {
     flex-shrink: 0;
-    color: #f8fafc;
-    font-weight: 600;
+    color: var(--text);
+    font-weight: 500;
   }
 
   .notification-history-summary-text {
     flex: 1 1 auto;
     min-width: 0;
-    color: #dbe7f3;
+    color: var(--text-secondary);
     line-height: 1.5;
     word-break: break-word;
   }
@@ -2499,72 +2844,61 @@ const APP_STYLES = `
   .notification-history-meta-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
     margin-top: 12px;
   }
 
   .pull-request-interaction-groups {
+    grid-area: interactions;
     display: inline-flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-wrap: nowrap;
+    gap: 6px;
     min-width: 0;
+    width: 100%;
+    justify-content: flex-end;
+    justify-self: stretch;
   }
 
   .pull-request-interaction-group {
-    --interaction-group-accent: #7dd3fc;
-    --interaction-group-background: rgba(14, 116, 144, 0.18);
-    --interaction-group-border: rgba(56, 189, 248, 0.24);
+    --interaction-group-accent: var(--text-secondary);
+    --interaction-group-border: color-mix(in srgb, var(--interaction-group-accent) 30%, var(--border));
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 4px 10px 4px 6px;
-    border: 1px solid var(--interaction-group-border);
+    gap: 5px;
+    padding: 2px 2px 2px 7px;
+    border: 1.5px solid var(--interaction-group-border);
     border-radius: 999px;
-    background: var(--interaction-group-background);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.04),
-      inset 0 -1px 0 rgba(2, 6, 23, 0.16);
+    background: var(--bg);
   }
 
   .pull-request-interaction-group-approvers {
-    --interaction-group-accent: #86efac;
-    --interaction-group-background: rgba(21, 128, 61, 0.16);
-    --interaction-group-border: rgba(74, 222, 128, 0.24);
+    --interaction-group-accent: var(--pr-approved);
   }
 
   .pull-request-interaction-group-commenters {
-    --interaction-group-accent: #7dd3fc;
-    --interaction-group-background: rgba(14, 116, 144, 0.18);
-    --interaction-group-border: rgba(56, 189, 248, 0.24);
+    --interaction-group-accent: var(--pr-commented);
   }
 
   .pull-request-interaction-group-decliners {
-    --interaction-group-accent: #fda4af;
-    --interaction-group-background: rgba(190, 24, 93, 0.14);
-    --interaction-group-border: rgba(244, 63, 94, 0.24);
+    --interaction-group-accent: var(--pr-changes-requested);
   }
 
   .pull-request-interaction-group-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 999px;
-    background: rgba(2, 6, 23, 0.22);
     color: var(--interaction-group-accent);
     flex: 0 0 auto;
   }
 
   .pull-request-interaction-group-icon svg {
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
   }
 
   .pull-request-interaction-avatar-stack {
     display: inline-flex;
     align-items: center;
-    padding-right: 2px;
   }
 
   .pull-request-interaction-avatar-stack-item {
@@ -2572,15 +2906,34 @@ const APP_STYLES = `
   }
 
   .pull-request-interaction-avatar-stack-item + .pull-request-interaction-avatar-stack-item {
-    margin-left: -6px;
+    margin-left: -8px;
   }
 
   .pull-request-interaction-avatar-stack .github-avatar {
-    width: 22px;
-    height: 22px;
-    border: 2px solid rgba(15, 23, 42, 0.94);
-    box-shadow: 0 0 0 1px var(--interaction-group-border);
-    background: rgba(15, 23, 42, 0.82);
+    width: 24px;
+    height: 24px;
+    border: 1.5px solid var(--bg);
+    background: var(--surface);
+  }
+
+  .pull-request-timeline-summary {
+    grid-area: timeline;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    justify-self: end;
+    color: #93a6d6;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .pull-request-timeline-summary-age {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 400;
+    white-space: nowrap;
   }
 
   .notification-history-time-pill {
@@ -2588,19 +2941,17 @@ const APP_STYLES = `
   }
 
   .pull-request-timeline {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid rgba(148, 163, 184, 0.14);
+    padding-top: 0;
   }
 
   .pull-request-timeline-empty {
     margin: 0;
-    color: #94a3b8;
+    color: var(--text-muted);
+    font-size: 0.9375rem;
   }
 
   .pull-request-timeline-list {
-    display: grid;
-    gap: 0;
+    display: block;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -2611,7 +2962,7 @@ const APP_STYLES = `
     display: grid;
     grid-template-columns: 12px minmax(0, 1fr);
     gap: 10px;
-    padding: 6px 0;
+    padding: 4px 0;
   }
 
   .pull-request-timeline-item::before {
@@ -2621,7 +2972,7 @@ const APP_STYLES = `
     top: 0;
     bottom: 0;
     width: 1px;
-    background: rgba(148, 163, 184, 0.18);
+    background: var(--timeline-line);
   }
 
   .pull-request-timeline-item:first-child::before {
@@ -2635,12 +2986,17 @@ const APP_STYLES = `
   .pull-request-timeline-dot {
     position: relative;
     z-index: 1;
-    width: 8px;
-    height: 8px;
-    margin-top: 6px;
+    width: 6px;
+    height: 6px;
+    margin-top: 7px;
+    margin-left: 1px;
     border-radius: 999px;
-    background: #7dd3fc;
-    box-shadow: 0 0 0 3px rgba(15, 23, 42, 1);
+    background: var(--timeline-dot);
+    box-shadow: 0 0 0 2px var(--surface);
+  }
+
+  .pull-request-item:hover .pull-request-timeline-dot {
+    box-shadow: 0 0 0 2px var(--surface-hover);
   }
 
   .pull-request-timeline-entry {
@@ -2649,12 +3005,13 @@ const APP_STYLES = `
     gap: 12px;
     min-width: 0;
     align-items: start;
+    font-size: 0.9375rem;
   }
 
   .pull-request-timeline-author {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
   }
 
@@ -2663,13 +3020,10 @@ const APP_STYLES = `
     height: 16px;
   }
 
-  .pull-request-timeline-author .github-avatar-fallback {
-  }
-
   .pull-request-timeline-actor {
     min-width: 0;
-    color: #f8fafc;
-    font-weight: 600;
+    color: var(--text);
+    font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2677,64 +3031,16 @@ const APP_STYLES = `
 
   .pull-request-timeline-text {
     min-width: 0;
-    color: #dbe7f3;
-    line-height: 1.35;
+    color: var(--text-secondary);
+    line-height: 1.4;
     overflow-wrap: anywhere;
   }
 
   .pull-request-timeline-time {
-    color: #94a3b8;
+    color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     align-self: start;
-  }
-
-  .pull-request-timeline-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    box-sizing: border-box;
-    width: 100%;
-    margin: 8px 0 0;
-    padding: 8px 12px;
-    border: 1px dashed rgba(148, 163, 184, 0.22);
-    border-radius: 10px;
-    background: rgba(15, 23, 42, 0.36);
-    color: #cbd5e1;
-    font: inherit;
-    font-weight: 600;
-    line-height: 1.2;
-    cursor: pointer;
-    transition:
-      background-color 120ms ease,
-      border-color 120ms ease,
-      color 120ms ease;
-  }
-
-  .pull-request-timeline-toggle:hover {
-    background: rgba(15, 23, 42, 0.36);
-    border-color: rgba(148, 163, 184, 0.3);
-    color: #e2e8f0;
-  }
-
-  .pull-request-timeline-toggle-expand::after,
-  .pull-request-timeline-toggle-collapse::after {
-    color: #7dd3fc;
-    line-height: 1;
-  }
-
-  .pull-request-timeline-toggle-expand::after {
-    content: "▾";
-  }
-
-  .pull-request-timeline-toggle-collapse::after {
-    content: "▴";
-  }
-
-  .pull-request-timeline-toggle:focus-visible {
-    outline: 2px solid rgba(56, 189, 248, 0.4);
-    outline-offset: 2px;
   }
 
   .notification-history-resend-form {
@@ -2742,77 +3048,100 @@ const APP_STYLES = `
   }
 
   .pull-request-tracking-control-form {
-    margin-left: auto;
+    margin: 0;
   }
 
-  .tracking-control {
-    display: inline-flex;
-    gap: 4px;
-    padding: 3px;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.75);
-    border: 1px solid rgba(148, 163, 184, 0.22);
-  }
-
-  .tracking-control-segment {
+  .tracking-toggle {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    padding: 5px 10px;
-    border-radius: 999px;
-    font-weight: 700;
+    gap: 10px;
+  }
+
+  .tracking-toggle-label {
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-weight: 500;
     white-space: nowrap;
   }
 
-  .tracking-control-segment-active {
-    cursor: default;
-  }
-
-  .tracking-control-segment-inactive {
-    color: #94a3b8;
-  }
-
-  .tracking-control-tracked .tracking-control-segment-active {
-    background: rgba(34, 197, 94, 0.12);
-    color: #86efac;
-  }
-
-  .tracking-control-untracked .tracking-control-segment-active {
-    background: rgba(250, 204, 21, 0.14);
-    color: #fde68a;
-  }
-
-  .tracking-control-button {
+  .tracking-toggle-button {
+    display: inline-flex;
+    align-items: center;
+    padding: 0;
     border: 0;
     background: transparent;
+    color: var(--text-secondary);
     cursor: pointer;
-    color: inherit;
-    font-family: inherit;
-    line-height: inherit;
+    font: inherit;
   }
 
-  .tracking-control-tracked .tracking-control-button:hover {
-    color: #bbf7d0;
+  .tracking-toggle-button:hover {
+    color: var(--text);
   }
 
-  .tracking-control-untracked .tracking-control-button:hover {
-    color: #fef08a;
+  .tracking-toggle-button:focus-visible {
+    outline: 1px solid rgba(91, 139, 240, 0.6);
+    outline-offset: 4px;
+    border-radius: 999px;
   }
 
-  .tracking-control-button:focus-visible {
-    outline: 2px solid rgba(56, 189, 248, 0.4);
-    outline-offset: 2px;
+  .tracking-toggle-track {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 34px;
+    height: 20px;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    transition: background-color 100ms ease, border-color 100ms ease;
+  }
+
+  .tracking-toggle-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: var(--text-muted);
+    transition: transform 100ms ease, background-color 100ms ease;
+  }
+
+  .tracking-toggle-tracked .tracking-toggle-track {
+    border-color: rgba(91, 139, 240, 0.45);
+    background: rgba(91, 139, 240, 0.18);
+  }
+
+  .tracking-toggle-tracked .tracking-toggle-thumb {
+    transform: translateX(14px);
+    background: var(--accent);
+  }
+
+  .tracking-toggle-untracked .tracking-toggle-track {
+    border-color: rgba(120, 127, 143, 0.35);
+    background: rgba(120, 127, 143, 0.12);
+  }
+
+  .tracking-toggle-untracked .tracking-toggle-thumb {
+    background: #80879a;
+  }
+
+  .tracking-toggle-tracked .tracking-toggle-label {
+    color: #dfe8ff;
+  }
+
+  .tracking-toggle-untracked .tracking-toggle-label {
+    color: var(--text-secondary);
   }
 
   .logs-entry-time {
-    color: #94a3b8;
+    color: var(--text-muted);
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
 
   .logs-entry-message {
     min-width: 0;
-    font-size: 1rem;
+    font-size: 0.9375rem;
     font-weight: 400;
     line-height: 1.5;
     word-break: break-word;
@@ -2846,8 +3175,8 @@ const APP_STYLES = `
     align-items: center;
     justify-content: center;
     width: 32px;
-    color: #94a3b8;
-    font-size: 1rem;
+    color: var(--text-muted);
+    font-size: 0.875rem;
     line-height: 1.2;
   }
 
@@ -2867,18 +3196,19 @@ const APP_STYLES = `
     grid-column: 2 / -1;
     margin: 6px 0 0;
     padding: 8px 10px;
-    border-radius: 10px;
+    border-radius: 6px;
   }
 
   .raw-event-json {
     overflow-x: auto;
     margin: 12px 0 0;
     padding: 12px;
-    border-radius: 12px;
-    background: rgba(23, 28, 35, 0.96);
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    color: #cbd5e1;
+    border-radius: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
     line-height: 1.5;
+    font-size: 0.8125rem;
   }
 
   .raw-event-json code {
@@ -2901,29 +3231,30 @@ const APP_STYLES = `
   .log-level-pill {
     display: inline-flex;
     align-items: center;
-    border-radius: 999px;
-    padding: 4px 8px;
-    font-weight: 600;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 7px;
+    background: var(--bg);
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-weight: 500;
     white-space: nowrap;
   }
 
   .history-pill {
-    background: rgba(148, 163, 184, 0.14);
-    color: #cbd5e1;
+    color: var(--text-secondary);
   }
 
   .github-identity-pill {
     gap: 6px;
-    background: rgba(148, 163, 184, 0.14);
-    color: #cbd5e1;
   }
 
   .github-identity-label {
-    color: #94a3b8;
+    color: var(--text-muted);
   }
 
   .github-identity-login {
-    color: #e2e8f0;
+    color: var(--text);
   }
 
   .github-avatar {
@@ -2934,7 +3265,7 @@ const APP_STYLES = `
     height: 18px;
     overflow: hidden;
     border-radius: 999px;
-    background: rgba(56, 189, 248, 0.14);
+    background: var(--surface);
     flex-shrink: 0;
   }
 
@@ -2953,119 +3284,143 @@ const APP_STYLES = `
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #7dd3fc;
+    color: var(--text-muted);
     line-height: 1;
+    font-size: 0.7rem;
+    font-weight: 600;
   }
 
   .log-level-debug {
-    background: rgba(148, 163, 184, 0.14);
-    color: #cbd5e1;
+    color: var(--text-muted);
   }
 
   .log-level-info {
-    background: rgba(56, 189, 248, 0.16);
-    color: #7dd3fc;
+    color: var(--accent);
   }
 
   .log-level-warn {
-    background: rgba(250, 204, 21, 0.14);
-    color: #fde68a;
+    color: var(--warn);
   }
 
   .log-level-error {
-    background: rgba(248, 113, 113, 0.12);
-    color: #fca5a5;
+    color: var(--danger);
   }
 
   .delivery-pending {
-    background: rgba(250, 204, 21, 0.14);
-    color: #fde68a;
+    color: var(--warn);
   }
 
   .delivery-sent {
-    background: rgba(34, 197, 94, 0.12);
-    color: #86efac;
+    color: var(--success);
   }
 
   .delivery-failed {
-    background: rgba(248, 113, 113, 0.12);
-    color: #fca5a5;
+    color: var(--danger);
   }
 
   .notification-history-time {
-    color: #94a3b8;
+    color: var(--text-muted);
   }
 
   .pull-request-subtle {
     display: block;
-    margin-top: 6px;
-    color: #94a3b8;
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
   }
 
   .action-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 8px 12px;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 999px;
-    background: rgba(25, 30, 38, 0.98);
-    color: #e2e8f0;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
     font: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
     cursor: pointer;
     text-decoration: none;
+    transition: background-color 100ms ease, border-color 100ms ease;
+  }
+
+  .action-button:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-strong);
   }
 
   .action-button:disabled {
-    opacity: 0.45;
+    opacity: 0.4;
     cursor: default;
   }
 
   .pagination-button {
-    min-width: 88px;
-  }
-
-  .icon-button {
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    color: #cbd5e1;
+    min-width: 72px;
   }
 
   .icon-button-svg {
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
   }
 
   .primary-button {
-    border-color: rgba(56, 189, 248, 0.4);
-    background: rgba(20, 40, 54, 0.94);
-    color: #7dd3fc;
+    border-color: rgba(91, 139, 240, 0.5);
+    background: rgba(91, 139, 240, 0.18);
+    color: #dfe8ff;
+  }
+
+  .primary-button:hover {
+    background: rgba(91, 139, 240, 0.24);
+    border-color: rgba(91, 139, 240, 0.7);
   }
 
   .clear-filters-link {
     padding: 4px 10px;
-    font-weight: 600;
-    color: #cbd5e1;
+    color: var(--text-secondary);
   }
 
   .flash-message {
-    margin-top: 14px;
-    padding: 12px 14px;
-    border-radius: 12px;
+    margin-top: 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9375rem;
   }
 
   .flash-success {
-    background: rgba(34, 197, 94, 0.12);
-    color: #86efac;
+    border-color: rgba(74, 222, 128, 0.3);
+    background: rgba(74, 222, 128, 0.05);
+    color: var(--success);
   }
 
   .flash-error {
-    background: rgba(248, 113, 113, 0.12);
-    color: #fca5a5;
+    border-color: rgba(248, 113, 113, 0.3);
+    background: rgba(248, 113, 113, 0.05);
+    color: var(--danger);
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 1024px) {
+    .pull-request-row {
+      grid-template-columns: 12px auto auto auto minmax(0, 1fr);
+      grid-template-areas:
+        "expander avatar state repo title"
+        "interactions interactions interactions timeline timeline";
+      row-gap: 8px;
+    }
+    .pull-request-row > .pull-request-expander { grid-area: expander; }
+    .pull-request-row > .github-avatar { grid-area: avatar; }
+    .pull-request-row > .state-pill-icon { grid-area: state; }
+    .pull-request-row > .pull-request-repo-pill { grid-area: repo; }
+    .pull-request-row > .pull-request-title { grid-area: title; }
+    .pull-request-row > .pull-request-interaction-groups { grid-area: interactions; }
+    .pull-request-row > .pull-request-timeline-summary { grid-area: timeline; justify-self: start; align-items: flex-start; }
+
+    .pull-request-timeline-section {
+      padding: 8px 16px 14px;
+    }
+
     .filters-grid-activity {
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     }
@@ -3077,7 +3432,34 @@ const APP_STYLES = `
 
   @media (max-width: 640px) {
     main {
-      padding: 32px 16px 48px;
+      padding: 24px 16px 48px;
+    }
+
+    .pull-request-row {
+      grid-template-columns: 12px auto auto minmax(0, 1fr);
+      grid-template-areas:
+        "expander avatar state title"
+        "repo repo repo repo"
+        "interactions interactions timeline timeline";
+      align-items: start;
+      padding: 12px 16px;
+    }
+
+    .pull-request-row > .pull-request-repo-pill {
+      grid-area: repo;
+      justify-self: start;
+    }
+
+    .pull-request-row > .pull-request-interaction-groups {
+      justify-self: start;
+    }
+
+    .pull-request-title-link {
+      white-space: normal;
+    }
+
+    .pull-request-panel > .panel-header {
+      padding: 12px 16px;
     }
 
     .track-form-row {
