@@ -110,6 +110,7 @@ export async function trackPullRequestByUrl<TClient>(
         mergedAt: pullRequest.mergedAt,
         graceUntil: null,
         lastSeenHeadSha: pullRequest.lastSeenHeadSha,
+        baseBranch: pullRequest.baseBranch,
         tracking: {
           isTracked: true,
           trackingReason: MANUAL_TRACKING_REASON,

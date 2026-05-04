@@ -251,6 +251,7 @@ describe("pollTrackedPullRequests", () => {
           {
             pullRequestRepository: repository,
             observedAt: OBSERVED_AT,
+            fetchJobsForWorkflowRun: async () => [],
           },
         ),
       ).resolves.toEqual({
@@ -433,6 +434,7 @@ describe("pollTrackedPullRequests", () => {
           {
             pullRequestRepository: repository,
             observedAt: OBSERVED_AT,
+            fetchJobsForWorkflowRun: async () => [],
           },
         ),
       ).resolves.toEqual({
@@ -682,6 +684,7 @@ describe("pollTrackedPullRequests", () => {
           {
             pullRequestRepository: repository,
             observedAt: OBSERVED_AT,
+            fetchJobsForWorkflowRun: async () => [],
           },
         ),
       ).resolves.toEqual({
@@ -702,6 +705,7 @@ describe("pollTrackedPullRequests", () => {
           {
             pullRequestRepository: repository,
             observedAt: OBSERVED_AT,
+            fetchJobsForWorkflowRun: async () => [],
           },
         ),
       ).resolves.toEqual({
@@ -885,6 +889,7 @@ describe("pollTrackedPullRequests", () => {
           {
             pullRequestRepository: repository,
             observedAt: OBSERVED_AT,
+            fetchJobsForWorkflowRun: async () => [],
           },
         ),
       ).resolves.toEqual({
@@ -1183,6 +1188,7 @@ describe("pollTrackedPullRequests", () => {
             pullRequestRepository: repository,
             observedAt: OBSERVED_AT,
             botActivityClassifier,
+            fetchJobsForWorkflowRun: async () => [],
           },
         ),
       ).resolves.toEqual({
@@ -1708,6 +1714,9 @@ function createPullRequestDetailResponse(
       merged_at: overrides.mergedAt ?? null,
       head: {
         sha: overrides.headSha ?? "abc123",
+      },
+      base: {
+        ref: "main",
       },
     },
   };

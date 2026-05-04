@@ -2,6 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 
 import { Octokit } from "octokit";
 
+import {
+  PullRequestCiJobStateRepository,
+} from "./pull-request-ci-job-state-repository.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import {
   PullRequestReviewStateRepository,
@@ -11,6 +14,7 @@ import {
   RawEventRepository,
   type InsertRawEventInput,
 } from "./raw-event-repository.js";
+import type { RequiredChecksCache } from "./required-checks-cache.js";
 
 const GITHUB_API_HEADERS = {
   "X-GitHub-Api-Version": "2022-11-28",
@@ -38,6 +42,8 @@ type ActivityFetchCursorSource =
 export interface IngestPullRequestActivityOptions<TClient = Octokit> {
   rawEventRepository?: Pick<RawEventRepository, "insertRawEvent">;
   pullRequestReviewStateRepository?: Pick<PullRequestReviewStateRepository, "upsertReviewState">;
+  ciJobStateRepository?: Pick<PullRequestCiJobStateRepository, "upsertCiJobState" | "hasJobsForWorkflowRun">;
+  requiredChecksCache?: Pick<RequiredChecksCache, "getRequiredChecks">;
   fetchIssueComments?: (
     client: TClient,
     pullRequest: PullRequestRecord,
@@ -59,6 +65,11 @@ export interface IngestPullRequestActivityOptions<TClient = Octokit> {
   fetchWorkflowRuns?: (
     client: TClient,
     pullRequest: PullRequestRecord,
+  ) => Promise<unknown[]>;
+  fetchJobsForWorkflowRun?: (
+    client: TClient,
+    pullRequest: PullRequestRecord,
+    workflowRunId: string,
   ) => Promise<unknown[]>;
 }
 
@@ -84,6 +95,8 @@ export async function ingestPullRequestActivity<TClient>(
   const rawEventRepository = options.rawEventRepository ?? new RawEventRepository(database);
   const pullRequestReviewStateRepository =
     options.pullRequestReviewStateRepository ?? new PullRequestReviewStateRepository(database);
+  const ciJobStateRepository =
+    options.ciJobStateRepository ?? new PullRequestCiJobStateRepository(database);
   const issueCommentCursor = readActivityFetchCursor(
     database,
     pullRequest.id,
@@ -130,6 +143,14 @@ export async function ingestPullRequestActivity<TClient>(
       fetchWorkflowRunsFromGitHub(
         client as unknown as Octokit,
         pullRequest,
+      ) as Promise<unknown[]>);
+  const fetchJobsForWorkflowRun =
+    options.fetchJobsForWorkflowRun ??
+    ((client: TClient, pullRequest: PullRequestRecord, workflowRunId: string) =>
+      fetchJobsForWorkflowRunFromGitHub(
+        client as unknown as Octokit,
+        pullRequest,
+        workflowRunId,
       ) as Promise<unknown[]>);
   const headSha = pullRequest.lastSeenHeadSha;
   const workflowRunsPromise =
@@ -189,6 +210,15 @@ export async function ingestPullRequestActivity<TClient>(
     }
 
     persistCurrentReviewStates(pullRequestReviewStateRepository, reviews, pullRequest.id);
+
+    await persistCurrentCiJobStates(
+      ciJobStateRepository,
+      options.requiredChecksCache ?? null,
+      client,
+      pullRequest,
+      workflowRuns,
+      fetchJobsForWorkflowRun,
+    );
 
     if (nextIssueCommentCursor !== undefined && nextIssueCommentCursor !== issueCommentCursor) {
       writeActivityFetchCursor(
@@ -325,6 +355,34 @@ async function fetchWorkflowRunsFromGitHub(
   }
 }
 
+async function fetchJobsForWorkflowRunFromGitHub(
+  client: Octokit,
+  pullRequest: Pick<PullRequestRecord, "repositoryOwner" | "repositoryName">,
+  workflowRunId: string,
+): Promise<unknown[]> {
+  const items: unknown[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const response = await client.request(
+      "GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
+      {
+        owner: pullRequest.repositoryOwner,
+        repo: pullRequest.repositoryName,
+        run_id: Number(workflowRunId),
+        per_page: GITHUB_PAGE_SIZE,
+        page,
+        headers: GITHUB_API_HEADERS,
+      },
+    );
+    const pageItems = readWorkflowRunJobsResponse(response.data as unknown);
+    items.push(...pageItems);
+
+    if (pageItems.length < GITHUB_PAGE_SIZE) {
+      return items;
+    }
+  }
+}
+
 async function fetchAllPagesFromGitHub(
   client: Octokit,
   route: string,
@@ -402,6 +460,65 @@ function persistCurrentReviewStates(
       reviewState,
     });
   }
+}
+
+async function persistCurrentCiJobStates<TClient>(
+  repository: Pick<PullRequestCiJobStateRepository, "upsertCiJobState" | "hasJobsForWorkflowRun">,
+  requiredChecksCache: Pick<RequiredChecksCache, "getRequiredChecks"> | null,
+  client: TClient,
+  pullRequest: PullRequestRecord,
+  workflowRuns: unknown[],
+  fetchJobs: (client: TClient, pullRequest: PullRequestRecord, workflowRunId: string) => Promise<unknown[]>,
+): Promise<void> {
+  await Promise.all(
+    workflowRuns.map(async (run) => {
+      const runRecord = requireRecord(run, "workflow run");
+      const runId = readSourceId(runRecord, "workflow run");
+      const runName = readString(runRecord.name, "workflow run.name");
+      const runUpdatedAt = readString(runRecord.updated_at, "workflow run.updated_at");
+
+      if (repository.hasJobsForWorkflowRun(pullRequest.id, runId, runUpdatedAt)) {
+        return;
+      }
+
+      const [jobs, requiredChecks] = await Promise.all([
+        fetchJobs(client, pullRequest, runId),
+        requiredChecksCache !== null && pullRequest.baseBranch !== null
+          ? requiredChecksCache.getRequiredChecks(
+              pullRequest.repositoryOwner,
+              pullRequest.repositoryName,
+              pullRequest.baseBranch,
+            )
+          : Promise.resolve(null),
+      ]);
+
+      for (const job of jobs) {
+        const jobRecord = requireRecord(job, "workflow run job");
+        const jobId = readSourceId(jobRecord, "workflow run job");
+        const jobName = readString(jobRecord.name, "workflow run job.name");
+        const jobStatus = readString(jobRecord.status, "workflow run job.status");
+        const jobConclusion =
+          jobRecord.conclusion === null || jobRecord.conclusion === undefined
+            ? null
+            : readString(jobRecord.conclusion, "workflow run job.conclusion");
+
+        const isBlockingMerge =
+          requiredChecks === null ? null : requiredChecks.requiredCheckNames.has(jobName);
+
+        repository.upsertCiJobState({
+          pullRequestId: pullRequest.id,
+          workflowRunId: runId,
+          workflowRunName: runName,
+          workflowRunUpdatedAt: runUpdatedAt,
+          jobId,
+          jobName,
+          jobStatus,
+          jobConclusion,
+          isBlockingMerge,
+        });
+      }
+    }),
+  );
 }
 
 function normalizeReviewState(state: string): ReviewState | null {
@@ -594,6 +711,11 @@ function readArray(value: unknown, fieldName: string): unknown[] {
 function readWorkflowRunsResponse(value: unknown): unknown[] {
   const response = requireRecord(value, "workflow runs response");
   return readArray(response.workflow_runs, "workflow runs response.workflow_runs");
+}
+
+function readWorkflowRunJobsResponse(value: unknown): unknown[] {
+  const response = requireRecord(value, "workflow run jobs response");
+  return readArray(response.jobs, "workflow run jobs response.jobs");
 }
 
 function requireRecord(value: unknown, fieldName: string): Record<string, unknown> {

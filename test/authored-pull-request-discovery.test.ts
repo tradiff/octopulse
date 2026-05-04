@@ -589,6 +589,7 @@ function createDiscoveredPullRequest(
     closedAt: null,
     mergedAt: null,
     lastSeenHeadSha: coordinates.number === 42 ? "xyz789" : "abc123",
+    baseBranch: "main",
     ...overrides,
   };
 }

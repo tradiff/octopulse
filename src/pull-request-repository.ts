@@ -22,6 +22,7 @@ export interface PullRequestRecord {
   mergedAt: string | null;
   graceUntil: string | null;
   lastSeenHeadSha: string | null;
+  baseBranch: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +49,7 @@ export interface UpsertPullRequestInput {
   mergedAt?: string | null;
   graceUntil?: string | null;
   lastSeenHeadSha?: string | null;
+  baseBranch?: string | null;
   tracking?: PullRequestTrackingState;
 }
 
@@ -106,6 +108,7 @@ export class PullRequestRepository {
                     merged_at = ?,
                     grace_until = ?,
                     last_seen_head_sha = ?,
+                    base_branch = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
               `,
@@ -129,6 +132,7 @@ export class PullRequestRepository {
               resolveNullableField(input.mergedAt, existing.mergedAt),
               resolveNullableField(input.graceUntil, existing.graceUntil),
               resolveNullableField(input.lastSeenHeadSha, existing.lastSeenHeadSha),
+              resolveNullableField(input.baseBranch, existing.baseBranch),
               existing.id,
             );
 
@@ -156,8 +160,9 @@ export class PullRequestRepository {
                 closed_at,
                 merged_at,
                 grace_until,
-                last_seen_head_sha
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_seen_head_sha,
+                base_branch
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
           )
           .run(
@@ -179,6 +184,7 @@ export class PullRequestRepository {
             input.mergedAt ?? null,
             input.graceUntil ?? null,
             input.lastSeenHeadSha ?? null,
+            input.baseBranch ?? null,
           );
 
         return this.requirePullRequestById(readInteger(result.lastInsertRowid, "lastInsertRowid"));
@@ -386,6 +392,7 @@ function mapPullRequestRow(row: unknown): PullRequestRecord {
       value.last_seen_head_sha,
       "PullRequest.last_seen_head_sha",
     ),
+    baseBranch: readNullableString(value.base_branch, "PullRequest.base_branch"),
     createdAt: readString(value.created_at, "PullRequest.created_at"),
     updatedAt: readString(value.updated_at, "PullRequest.updated_at"),
   };

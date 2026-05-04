@@ -43,6 +43,7 @@ export interface DiscoveredPullRequest extends PullRequestCoordinates {
   closedAt: string | null;
   mergedAt: string | null;
   lastSeenHeadSha: string | null;
+  baseBranch: string | null;
 }
 
 export interface DiscoverOpenAuthoredPullRequestsOptions<TClient = Octokit> {
@@ -276,6 +277,7 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
         mergedAt: pullRequest.mergedAt,
         graceUntil: null,
         lastSeenHeadSha: pullRequest.lastSeenHeadSha,
+        baseBranch: pullRequest.baseBranch,
       });
 
       if (
@@ -496,6 +498,7 @@ function mapPullRequestDetail(
   const value = requireRecord(data, "pull request response");
   const user = requireRecord(value.user, "pull request response.user");
   const head = requireRecord(value.head, "pull request response.head");
+  const base = requireRecord(value.base, "pull request response.base");
   const number = readInteger(value.number, "pull request response.number");
 
   if (number !== coordinates.number) {
@@ -518,6 +521,7 @@ function mapPullRequestDetail(
     closedAt: readNullableString(value.closed_at, "pull request response.closed_at"),
     mergedAt: readNullableString(value.merged_at, "pull request response.merged_at"),
     lastSeenHeadSha: readNullableString(head.sha, "pull request response.head.sha"),
+    baseBranch: readNullableString(base.ref, "pull request response.base.ref"),
   };
 }
 

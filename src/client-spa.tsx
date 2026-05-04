@@ -23,7 +23,8 @@ import type { NotificationHistoryEntry } from "./notification-history.js";
 import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { PullRequestReviewStateRecord, ReviewState } from "./pull-request-review-state-repository.js";
-import type { PullRequestTimeline, PullRequestTimelineEntry, PullRequestReviewStatesByPullRequest } from "./raw-events.js";
+import type { PullRequestCiJobStateRecord } from "./pull-request-ci-job-state-repository.js";
+import type { PullRequestTimeline, PullRequestTimelineEntry, PullRequestReviewStatesByPullRequest, PullRequestCiJobStatesByPullRequest } from "./raw-events.js";
 import {
   DEFAULT_UI_FILTERS,
   buildUiFilterOptions,
@@ -148,6 +149,7 @@ function App() {
   const [notificationHistory, setNotificationHistory] = useState<NotificationHistoryEntry[]>([]);
   const [timelineByPullRequest, setTimelineByPullRequest] = useState<PullRequestTimeline>({});
   const [reviewStatesByPullRequest, setReviewStatesByPullRequest] = useState<PullRequestReviewStatesByPullRequest>({});
+  const [ciJobStatesByPullRequest, setCiJobStatesByPullRequest] = useState<PullRequestCiJobStatesByPullRequest>({});
   const [notificationHistoryPagination, setNotificationHistoryPagination] =
     useState<PaginationState>(EMPTY_PAGINATION_STATE);
   const [recentLogs, setRecentLogs] = useState<RecentLogEntry[]>([]);
@@ -285,13 +287,14 @@ function App() {
         const [trackedResponse, inactiveResponse, pullRequestTimelineResponse] = await Promise.all([
           apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
           apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
-          apiFetch<{ timelineByPullRequest: PullRequestTimeline; reviewStatesByPullRequest: PullRequestReviewStatesByPullRequest }>("/api/pull-request-timeline"),
+          apiFetch<{ timelineByPullRequest: PullRequestTimeline; reviewStatesByPullRequest: PullRequestReviewStatesByPullRequest; ciJobStatesByPullRequest: PullRequestCiJobStatesByPullRequest }>("/api/pull-request-timeline"),
         ]);
 
         setTrackedPullRequests(trackedResponse.pullRequests);
         setInactivePullRequests(inactiveResponse.pullRequests);
         setTimelineByPullRequest(pullRequestTimelineResponse.timelineByPullRequest);
         setReviewStatesByPullRequest(pullRequestTimelineResponse.reviewStatesByPullRequest);
+        setCiJobStatesByPullRequest(pullRequestTimelineResponse.ciJobStatesByPullRequest);
         return;
       }
 
@@ -509,6 +512,7 @@ function App() {
               pullRequests={subTabPullRequests}
               timelineByPullRequest={timelineByPullRequest}
               reviewStatesByPullRequest={reviewStatesByPullRequest}
+              ciJobStatesByPullRequest={ciJobStatesByPullRequest}
               onRefresh={handleBaseDataRefresh}
               prSubTab={route.prSubTab}
               uiFilters={route.uiFilters}
@@ -1024,6 +1028,7 @@ function PullRequestList({
   pullRequests,
   timelineByPullRequest,
   reviewStatesByPullRequest,
+  ciJobStatesByPullRequest,
   onRefresh,
   prSubTab,
   uiFilters,
@@ -1038,6 +1043,7 @@ function PullRequestList({
   pullRequests: PullRequestRecord[];
   timelineByPullRequest: PullRequestTimeline;
   reviewStatesByPullRequest: PullRequestReviewStatesByPullRequest;
+  ciJobStatesByPullRequest: PullRequestCiJobStatesByPullRequest;
   onRefresh: () => void;
   prSubTab: PrSubTab;
   uiFilters: UiFilterValues;
@@ -1101,6 +1107,7 @@ function PullRequestList({
                 pullRequest={pullRequest}
                 timelineEntries={timelineEntries}
                 reviewStates={reviewStatesByPullRequest[String(pullRequest.githubPullRequestId)] ?? []}
+                ciJobStates={ciJobStatesByPullRequest[String(pullRequest.githubPullRequestId)] ?? []}
                 renderAction={renderAction}
               />
             );
@@ -1115,11 +1122,13 @@ function PullRequestListItem({
   pullRequest,
   timelineEntries,
   reviewStates,
+  ciJobStates,
   renderAction,
 }: {
   pullRequest: PullRequestRecord;
   timelineEntries: PullRequestTimelineEntry[];
   reviewStates: PullRequestReviewStateRecord[];
+  ciJobStates: PullRequestCiJobStateRecord[];
   renderAction: ((pullRequest: PullRequestRecord) => ReactNode) | undefined;
 }) {
   const [isTimelineExpanded, setIsTimelineExpanded] = useState(false);
@@ -1215,6 +1224,7 @@ function PullRequestListItem({
               {formatRelativeHistoryTimestamp(timelineEntries[0].occurredAt)}
             </time>
           ) : null}
+          {ciJobStates.length > 0 ? <CiJobStatsSummary ciJobStates={ciJobStates} /> : null}
         </span>
       </div>
       {isTimelineExpanded ? (
@@ -1225,6 +1235,7 @@ function PullRequestListItem({
             pullRequestAuthorLogin={pullRequest.authorLogin}
             pullRequestAuthorAvatarUrl={pullRequest.authorAvatarUrl}
           />
+          {ciJobStates.length > 0 ? <CiJobStateList ciJobStates={ciJobStates} /> : null}
         </div>
       ) : null}
     </li>
@@ -1237,6 +1248,114 @@ function formatPullRequestTimelineSummaryLabel(eventCount: number): string {
   }
 
   return `${eventCount} ${eventCount === 1 ? "event" : "events"}`;
+}
+
+function CiJobStatsSummary({ ciJobStates }: { ciJobStates: PullRequestCiJobStateRecord[] }) {
+  return <span className="ci-job-stats">{buildCiSummaryNodes(ciJobStates, "ci-job-stats")}</span>;
+}
+
+function CiJobStateList({ ciJobStates }: { ciJobStates: PullRequestCiJobStateRecord[] }) {
+  const grouped = new Map<string, PullRequestCiJobStateRecord[]>();
+
+  for (const job of ciJobStates) {
+    const existing = grouped.get(job.workflowRunName);
+    if (existing) {
+      existing.push(job);
+    } else {
+      grouped.set(job.workflowRunName, [job]);
+    }
+  }
+
+  const groups = [...grouped.entries()]
+    .map(([runName, jobs]) => ({ runName, jobs, outcome: resolveGroupOutcome(jobs) }))
+    .sort((a, b) => (CI_GROUP_ORDER[a.outcome] ?? 4) - (CI_GROUP_ORDER[b.outcome] ?? 4));
+
+  return (
+    <div className="ci-job-list">
+      <div className="ci-job-list-header">CI checks</div>
+      {groups.map(({ runName, jobs, outcome }) => {
+        const visibleItems = deduplicateJobs(jobs).filter((item) => item.outcome === "failing" || item.outcome === "pending");
+        return (
+          <div key={runName} className={`ci-job-group ci-job-group-${outcome}`}>
+            <div className="ci-job-group-name">
+              <span className="ci-job-group-name-text">{runName}</span>
+              <span className="ci-job-group-summary">{buildCiSummaryNodes(jobs, "ci-job-group-summary")}</span>
+            </div>
+            {visibleItems.length > 0 ? (
+              <ul className="ci-job-group-items">
+                {visibleItems.map((item) => (
+                  <li key={item.key} className={`ci-job-item ci-job-item-${item.outcome}`}>
+                    <span className="ci-job-item-name">{item.job.jobName}{item.count > 1 ? <span className="ci-job-item-count"> ×{item.count}</span> : null}</span>
+                    {item.job.isBlockingMerge === true ? <span className="ci-job-item-blocking" aria-label="required" title="Required for merge">●</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const CI_GROUP_ORDER: Record<string, number> = { failing: 0, pending: 1, passing: 2, skipped: 3 };
+
+function resolveGroupOutcome(jobs: PullRequestCiJobStateRecord[]): "failing" | "pending" | "passing" | "skipped" {
+  let hasFailing = false;
+  let hasPending = false;
+  let hasPassing = false;
+
+  for (const job of jobs) {
+    const outcome = resolveCiJobOutcome(job);
+    if (outcome === "failing") hasFailing = true;
+    else if (outcome === "pending") hasPending = true;
+    else if (outcome === "passing") hasPassing = true;
+  }
+
+  if (hasFailing) return "failing";
+  if (hasPending) return "pending";
+  if (hasPassing) return "passing";
+  return "skipped";
+}
+
+function buildCiSummaryNodes(jobs: PullRequestCiJobStateRecord[], prefix: string): React.ReactNode {
+  let failing = 0, pending = 0, passing = 0, skipped = 0;
+  for (const job of jobs) {
+    const o = resolveCiJobOutcome(job);
+    if (o === "failing") failing++;
+    else if (o === "pending") pending++;
+    else if (o === "passing") passing++;
+    else skipped++;
+  }
+  const parts: React.ReactNode[] = [];
+  if (failing > 0) parts.push(<span key="f" className={`${prefix}-failing`}>{failing} failing</span>);
+  if (pending > 0) parts.push(<span key="p" className={`${prefix}-pending`}>{pending} pending</span>);
+  if (passing > 0) parts.push(<span key="ok" className={`${prefix}-passing`}>{passing} passing</span>);
+  if (skipped > 0) parts.push(<span key="s" className={`${prefix}-skipped`}>{skipped} skipped</span>);
+  return parts.reduce<React.ReactNode[]>((acc, part, i) => (i === 0 ? [part] : [...acc, ", ", part]), []);
+}
+
+function deduplicateJobs(jobs: PullRequestCiJobStateRecord[]): { key: string; job: PullRequestCiJobStateRecord; count: number; outcome: string }[] {
+  const seen = new Map<string, { job: PullRequestCiJobStateRecord; count: number; outcome: string }>();
+  for (const job of jobs) {
+    const outcome = resolveCiJobOutcome(job);
+    const key = `${job.jobName}::${outcome}`;
+    const existing = seen.get(key);
+    if (existing) {
+      existing.count++;
+    } else {
+      seen.set(key, { job, count: 1, outcome });
+    }
+  }
+  return [...seen.entries()].map(([key, { job, count, outcome }]) => ({ key, job, count, outcome }));
+}
+
+function resolveCiJobOutcome(job: PullRequestCiJobStateRecord): string {
+  if (job.jobStatus !== "completed") return "pending";
+  if (job.jobConclusion === "success") return "passing";
+  if (job.jobConclusion === "skipped" || job.jobConclusion === "neutral") return "skipped";
+  if (job.jobConclusion === "failure" || job.jobConclusion === "timed_out" || job.jobConclusion === "action_required") return "failing";
+  return "pending";
 }
 
 function PullRequestInteractionGroups({
@@ -3434,6 +3553,181 @@ const APP_STYLES = `
     border-color: rgba(248, 113, 113, 0.3);
     background: rgba(248, 113, 113, 0.05);
     color: var(--danger);
+  }
+
+  .ci-job-stats {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .ci-job-stats-failing {
+    color: var(--danger);
+  }
+
+  .ci-job-stats-pending {
+    color: var(--warn);
+  }
+
+  .ci-job-stats-passing {
+    color: var(--success);
+  }
+
+  .ci-job-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 0 14px;
+  }
+
+  .ci-job-list-header {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 10px 0 4px;
+  }
+
+  .ci-job-group {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .ci-job-group-failing {
+    border-color: rgba(248, 113, 113, 0.3);
+  }
+
+  .ci-job-group-pending {
+    border-color: rgba(250, 204, 21, 0.25);
+  }
+
+  .ci-job-group-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 5px 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .ci-job-group-failing > .ci-job-group-name {
+    background: rgba(248, 113, 113, 0.06);
+    border-bottom-color: rgba(248, 113, 113, 0.2);
+  }
+
+  .ci-job-group-name-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ci-job-group-summary {
+    font-size: 0.6875rem;
+    font-weight: 400;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .ci-job-group-summary-failing {
+    color: var(--danger);
+  }
+
+  .ci-job-group-summary-pending {
+    color: var(--warn);
+  }
+
+  .ci-job-group-summary-passing {
+    color: var(--success);
+  }
+
+  .ci-job-group-summary-skipped {
+    color: var(--text-muted);
+  }
+
+  .ci-job-group-items {
+    list-style: none;
+    margin: 0;
+    padding: 3px 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ci-job-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    padding: 3px 10px;
+  }
+
+  .ci-job-item:hover {
+    background: var(--surface-hover);
+  }
+
+  .ci-job-item::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--text-muted);
+  }
+
+  .ci-job-item-failing {
+    color: var(--text);
+  }
+
+  .ci-job-item-failing::before {
+    background: var(--danger);
+  }
+
+  .ci-job-item-pending::before {
+    background: var(--warn);
+  }
+
+  .ci-job-item-passing::before {
+    background: var(--success);
+  }
+
+  .ci-job-item-skipped {
+    color: var(--text-muted);
+  }
+
+  .ci-job-item-skipped::before {
+    background: var(--border-strong);
+  }
+
+  .ci-job-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ci-job-item-count {
+    color: var(--text-muted);
+    font-size: 0.6875rem;
+  }
+
+  .ci-job-item-blocking {
+    font-size: 0.5625rem;
+    color: var(--accent);
+    flex-shrink: 0;
+    line-height: 1;
+    opacity: 0.8;
   }
 
   @media (max-width: 1024px) {

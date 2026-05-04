@@ -123,6 +123,7 @@ describe("ingestPullRequestActivity", () => {
               }),
             ];
           },
+          fetchJobsForWorkflowRun: async () => [],
         }),
       ).resolves.toEqual({
         processedCount: 10,
@@ -265,6 +266,7 @@ describe("ingestPullRequestActivity", () => {
           },
           fetchPullRequestTimeline: async () => [],
           fetchWorkflowRuns: async () => [],
+          fetchJobsForWorkflowRun: async () => [],
         }),
       ).resolves.toEqual({
         processedCount: 2,
@@ -285,6 +287,7 @@ describe("ingestPullRequestActivity", () => {
           },
           fetchPullRequestTimeline: async () => [],
           fetchWorkflowRuns: async () => [],
+          fetchJobsForWorkflowRun: async () => [],
         }),
       ).resolves.toEqual({
         processedCount: 2,
@@ -341,6 +344,7 @@ describe("ingestPullRequestActivity", () => {
               url: "https://github.com/acme/octopulse/actions/runs/5007",
             }),
           ],
+          fetchJobsForWorkflowRun: async () => [],
         }),
       ).resolves.toEqual({
         processedCount: 1,
@@ -391,6 +395,7 @@ describe("ingestPullRequestActivity", () => {
         fetchPullRequestReviewComments: async () => [],
         fetchPullRequestTimeline: async () => [],
         fetchWorkflowRuns: async () => [],
+        fetchJobsForWorkflowRun: async () => [],
       });
 
       expect(
@@ -420,6 +425,7 @@ describe("ingestPullRequestActivity", () => {
         fetchPullRequestReviewComments: async () => [],
         fetchPullRequestTimeline: async () => [],
         fetchWorkflowRuns: async () => [],
+        fetchJobsForWorkflowRun: async () => [],
       });
 
       expect(

@@ -136,10 +136,14 @@ describe("startServer", () => {
       ],
       202: [],
     };
+    const ciJobStatesByPullRequest = {
+      101: [],
+      202: [],
+    };
     const server = await startServer({
       host: "127.0.0.1",
       port: 0,
-      listPullRequestTimeline: async () => ({ timelineByPullRequest, reviewStatesByPullRequest }),
+      listPullRequestTimeline: async () => ({ timelineByPullRequest, reviewStatesByPullRequest, ciJobStatesByPullRequest }),
     });
     servers.push(server);
 
@@ -149,6 +153,7 @@ describe("startServer", () => {
     expect((await response.json()) as unknown).toEqual({
       timelineByPullRequest,
       reviewStatesByPullRequest,
+      ciJobStatesByPullRequest,
     });
   });
 
@@ -324,6 +329,7 @@ function createPullRequestResponseRecord(
     mergedAt: string | null;
     graceUntil: string | null;
     lastSeenHeadSha: string | null;
+    baseBranch: string | null;
     createdAt: string;
     updatedAt: string;
   }> = {},
@@ -348,6 +354,7 @@ function createPullRequestResponseRecord(
     mergedAt: null,
     graceUntil: null,
     lastSeenHeadSha: "abc123",
+    baseBranch: "main",
     createdAt: "2026-04-10 12:00:00",
     updatedAt: "2026-04-10 12:00:00",
     ...overrides,

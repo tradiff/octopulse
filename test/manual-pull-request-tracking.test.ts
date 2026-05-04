@@ -285,6 +285,7 @@ function createDiscoveredPullRequest(
     closedAt: null,
     mergedAt: null,
     lastSeenHeadSha: "abc123",
+    baseBranch: "main",
     ...overrides,
   };
 }

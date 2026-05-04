@@ -41,6 +41,7 @@ interface PullRequestDetailRefresh {
   closedAt: string | null;
   mergedAt: string | null;
   lastSeenHeadSha: string | null;
+  baseBranch: string | null;
 }
 
 export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
@@ -51,6 +52,7 @@ export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   observedAt?: string;
   notificationDispatchedAt?: string;
   onError?: (error: PullRequestPollingError) => void;
+  fetchJobsForWorkflowRun?: IngestPullRequestActivityOptions<TClient>["fetchJobsForWorkflowRun"];
 }
 
 export interface PollTrackedPullRequestsResult {
@@ -94,9 +96,12 @@ export async function pollTrackedPullRequests<TClient>(
         pullRequest,
         pullRequestRepository,
       );
-      const activityIngestionOptions = skipActivityFanout
-        ? buildSkippedPullRequestActivityFetchOptions<TClient>(database, refreshedPullRequest.id)
-        : undefined;
+      const activityIngestionOptions: IngestPullRequestActivityOptions<TClient> = {
+        ...(skipActivityFanout
+          ? buildSkippedPullRequestActivityFetchOptions<TClient>(database, refreshedPullRequest.id)
+          : {}),
+        ...(options.fetchJobsForWorkflowRun ? { fetchJobsForWorkflowRun: options.fetchJobsForWorkflowRun } : {}),
+      };
 
       await ingestPullRequestActivity(
         database,
@@ -298,6 +303,7 @@ async function refreshPullRequestForPolling<TClient>(
     closedAt: detail.closedAt,
     mergedAt: detail.mergedAt,
     lastSeenHeadSha: detail.lastSeenHeadSha,
+    baseBranch: detail.baseBranch,
   });
 
   writePullRequestDetailEtag(database, refreshedPullRequest.id, response.etag);
@@ -374,6 +380,7 @@ function mapPullRequestDetailResponse(
   const value = requireRecord(data, "pull request response");
   const user = requireRecord(value.user, "pull request response.user");
   const head = requireRecord(value.head, "pull request response.head");
+  const base = requireRecord(value.base, "pull request response.base");
   const number = readInteger(value.number, "pull request response.number");
 
   if (number !== pullRequest.number) {
@@ -393,6 +400,7 @@ function mapPullRequestDetailResponse(
     closedAt: readNullableString(value.closed_at, "pull request response.closed_at"),
     mergedAt: readNullableString(value.merged_at, "pull request response.merged_at"),
     lastSeenHeadSha: readNullableString(head.sha, "pull request response.head.sha"),
+    baseBranch: readNullableString(base.ref, "pull request response.base.ref"),
   };
 }
 
