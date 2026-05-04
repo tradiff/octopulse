@@ -330,6 +330,9 @@ function createPullRequestResponseRecord(
     graceUntil: string | null;
     lastSeenHeadSha: string | null;
     baseBranch: string | null;
+    mergeable: boolean | null;
+    mergeableState: string | null;
+    requestedReviewTeamSlugs: string[];
     createdAt: string;
     updatedAt: string;
   }> = {},
@@ -355,6 +358,9 @@ function createPullRequestResponseRecord(
     graceUntil: null,
     lastSeenHeadSha: "abc123",
     baseBranch: "main",
+    mergeable: null,
+    mergeableState: null,
+    requestedReviewTeamSlugs: [],
     createdAt: "2026-04-10 12:00:00",
     updatedAt: "2026-04-10 12:00:00",
     ...overrides,

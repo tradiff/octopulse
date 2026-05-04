@@ -23,6 +23,9 @@ export interface PullRequestRecord {
   graceUntil: string | null;
   lastSeenHeadSha: string | null;
   baseBranch: string | null;
+  mergeable: boolean | null;
+  mergeableState: string | null;
+  requestedReviewTeamSlugs: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -50,6 +53,9 @@ export interface UpsertPullRequestInput {
   graceUntil?: string | null;
   lastSeenHeadSha?: string | null;
   baseBranch?: string | null;
+  mergeable?: boolean | null;
+  mergeableState?: string | null;
+  requestedReviewTeamSlugs?: string[];
   tracking?: PullRequestTrackingState;
 }
 
@@ -109,6 +115,9 @@ export class PullRequestRepository {
                     grace_until = ?,
                     last_seen_head_sha = ?,
                     base_branch = ?,
+                    mergeable = ?,
+                    mergeable_state = ?,
+                    requested_review_team_slugs_json = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
               `,
@@ -133,6 +142,11 @@ export class PullRequestRepository {
               resolveNullableField(input.graceUntil, existing.graceUntil),
               resolveNullableField(input.lastSeenHeadSha, existing.lastSeenHeadSha),
               resolveNullableField(input.baseBranch, existing.baseBranch),
+              writeNullableBoolean(resolveNullableBooleanField(input.mergeable, existing.mergeable)),
+              resolveNullableField(input.mergeableState, existing.mergeableState),
+              writeStringArray(
+                resolveStringArrayField(input.requestedReviewTeamSlugs, existing.requestedReviewTeamSlugs),
+              ),
               existing.id,
             );
 
@@ -161,8 +175,11 @@ export class PullRequestRepository {
                 merged_at,
                 grace_until,
                 last_seen_head_sha,
-                base_branch
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                base_branch,
+                mergeable,
+                mergeable_state,
+                requested_review_team_slugs_json
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
           )
           .run(
@@ -185,6 +202,9 @@ export class PullRequestRepository {
             input.graceUntil ?? null,
             input.lastSeenHeadSha ?? null,
             input.baseBranch ?? null,
+            writeNullableBoolean(input.mergeable ?? null),
+            input.mergeableState ?? null,
+            writeStringArray(input.requestedReviewTeamSlugs ?? []),
           );
 
         return this.requirePullRequestById(readInteger(result.lastInsertRowid, "lastInsertRowid"));
@@ -393,6 +413,12 @@ function mapPullRequestRow(row: unknown): PullRequestRecord {
       "PullRequest.last_seen_head_sha",
     ),
     baseBranch: readNullableString(value.base_branch, "PullRequest.base_branch"),
+    mergeable: readNullableBoolean(value.mergeable, "PullRequest.mergeable"),
+    mergeableState: readNullableString(value.mergeable_state, "PullRequest.mergeable_state"),
+    requestedReviewTeamSlugs: readStringArray(
+      value.requested_review_team_slugs_json,
+      "PullRequest.requested_review_team_slugs_json",
+    ),
     createdAt: readString(value.created_at, "PullRequest.created_at"),
     updatedAt: readString(value.updated_at, "PullRequest.updated_at"),
   };
@@ -419,6 +445,17 @@ function resolveNullableField(
   existingValue: string | null,
 ): string | null {
   return nextValue === undefined ? existingValue : nextValue;
+}
+
+function resolveNullableBooleanField(
+  nextValue: boolean | null | undefined,
+  existingValue: boolean | null,
+): boolean | null {
+  return nextValue === undefined ? existingValue : nextValue;
+}
+
+function resolveStringArrayField(nextValue: string[] | undefined, existingValue: string[]): string[] {
+  return nextValue === undefined ? [...existingValue] : [...nextValue];
 }
 
 function withinTransaction<T>(database: DatabaseSync, operation: () => T): T {
@@ -496,8 +533,47 @@ function readBoolean(value: unknown, fieldName: string): boolean {
   throw new PullRequestRepositoryError(`${fieldName} must be stored as 0 or 1`);
 }
 
+function readNullableBoolean(value: unknown, fieldName: string): boolean | null {
+  if (value === null) {
+    return null;
+  }
+
+  return readBoolean(value, fieldName);
+}
+
+function readStringArray(value: unknown, fieldName: string): string[] {
+  const raw = readString(value, fieldName);
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new PullRequestRepositoryError(
+      `${fieldName} must be valid JSON: ${getErrorMessage(error)}`,
+    );
+  }
+
+  if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== "string")) {
+    throw new PullRequestRepositoryError(`${fieldName} must be a JSON array of strings`);
+  }
+
+  return [...parsed];
+}
+
 function writeBoolean(value: boolean): number {
   return value ? 1 : 0;
+}
+
+function writeNullableBoolean(value: boolean | null): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  return writeBoolean(value);
+}
+
+function writeStringArray(value: string[]): string {
+  return JSON.stringify(value);
 }
 
 function formatPullRequestLabel(

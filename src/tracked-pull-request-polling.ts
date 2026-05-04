@@ -42,6 +42,9 @@ interface PullRequestDetailRefresh {
   mergedAt: string | null;
   lastSeenHeadSha: string | null;
   baseBranch: string | null;
+  mergeable: boolean | null;
+  mergeableState: string | null;
+  requestedReviewTeamSlugs: string[];
 }
 
 export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
@@ -304,6 +307,9 @@ async function refreshPullRequestForPolling<TClient>(
     mergedAt: detail.mergedAt,
     lastSeenHeadSha: detail.lastSeenHeadSha,
     baseBranch: detail.baseBranch,
+    mergeable: detail.mergeable,
+    mergeableState: detail.mergeableState,
+    requestedReviewTeamSlugs: detail.requestedReviewTeamSlugs,
   });
 
   writePullRequestDetailEtag(database, refreshedPullRequest.id, response.etag);
@@ -401,6 +407,15 @@ function mapPullRequestDetailResponse(
     mergedAt: readNullableString(value.merged_at, "pull request response.merged_at"),
     lastSeenHeadSha: readNullableString(head.sha, "pull request response.head.sha"),
     baseBranch: readNullableString(base.ref, "pull request response.base.ref"),
+    mergeable: readNullableBoolean(value.mergeable, "pull request response.mergeable"),
+    mergeableState: readNullableString(
+      value.mergeable_state,
+      "pull request response.mergeable_state",
+    ),
+    requestedReviewTeamSlugs: readRequestedReviewTeamSlugs(
+      value.requested_teams,
+      "pull request response.requested_teams",
+    ),
   };
 }
 
@@ -563,6 +578,25 @@ function readBoolean(value: unknown, fieldName: string): boolean {
   }
 
   return value;
+}
+
+function readNullableBoolean(value: unknown, fieldName: string): boolean | null {
+  if (value === null) {
+    return null;
+  }
+
+  return readBoolean(value, fieldName);
+}
+
+function readRequestedReviewTeamSlugs(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new PullRequestPollingError(`${fieldName} must be an array`);
+  }
+
+  return value.map((entry, index) => {
+    const team = requireRecord(entry, `${fieldName}[${index}]`);
+    return readString(team.slug, `${fieldName}[${index}].slug`);
+  });
 }
 
 function formatPullRequestLabel(

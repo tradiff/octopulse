@@ -286,6 +286,9 @@ function createDiscoveredPullRequest(
     mergedAt: null,
     lastSeenHeadSha: "abc123",
     baseBranch: "main",
+    mergeable: true,
+    mergeableState: "clean",
+    requestedReviewTeamSlugs: [],
     ...overrides,
   };
 }

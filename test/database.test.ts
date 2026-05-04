@@ -134,6 +134,23 @@ describe("initializeDatabase", () => {
       database.close();
     }
   });
+
+  it("applies pull request merge-readiness migration", () => {
+    const homeDir = createTempDir("octopulse-db-home-");
+    const database = initializeDatabase(resolveAppPaths({ homeDir }));
+
+    try {
+      expect(readTableColumns(database, "PullRequest")).toEqual(
+        expect.arrayContaining([
+          "mergeable",
+          "mergeable_state",
+          "requested_review_team_slugs_json",
+        ]),
+      );
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createTempDir(prefix: string): string {

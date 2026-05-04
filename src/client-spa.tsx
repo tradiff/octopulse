@@ -1202,15 +1202,18 @@ function PullRequestListItem({
           {pullRequest.repositoryOwner}/{pullRequest.repositoryName} #{pullRequest.number}
         </span>
         <div className="pull-request-title">
-          <a
-            href={pullRequest.url}
-            className="pull-request-title-link"
-            title={pullRequest.title}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {pullRequest.title}
-          </a>
+          <div className="pull-request-title-copy">
+            <a
+              href={pullRequest.url}
+              className="pull-request-title-link"
+              title={pullRequest.title}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {pullRequest.title}
+            </a>
+          </div>
+          <PullRequestMergeReadinessIndicator pullRequest={pullRequest} />
         </div>
         <PullRequestInteractionGroups entries={timelineEntries} reviewStates={reviewStates} />
         <span className="pull-request-timeline-summary">
@@ -1250,8 +1253,237 @@ function formatPullRequestTimelineSummaryLabel(eventCount: number): string {
   return `${eventCount} ${eventCount === 1 ? "event" : "events"}`;
 }
 
+function PullRequestMergeReadinessIndicator({
+  pullRequest,
+}: {
+  pullRequest: Pick<PullRequestRecord, "state" | "mergeableState" | "requestedReviewTeamSlugs">;
+}) {
+  const indicator = readPullRequestMergeReadinessIndicator(pullRequest);
+
+  if (indicator === null) {
+    return null;
+  }
+
+  return (
+    <span
+      className={`pull-request-merge-readiness pull-request-merge-readiness-${indicator.tone}`}
+      role="img"
+      aria-label={indicator.label}
+      title={indicator.label}
+    >
+      <PullRequestMergeReadinessIcon kind={indicator.icon} />
+    </span>
+  );
+}
+
+function readPullRequestMergeReadinessIndicator(
+  pullRequest: Pick<PullRequestRecord, "state" | "mergeableState" | "requestedReviewTeamSlugs">,
+): {
+  tone: "ready" | "attention" | "danger" | "info" | "muted";
+  icon: "check" | "minus" | "x" | "arrow" | "clock";
+  label: string;
+} | null {
+  if (pullRequest.state !== "open" || pullRequest.mergeableState === null) {
+    return null;
+  }
+
+  switch (pullRequest.mergeableState) {
+    case "clean":
+      return { tone: "ready", icon: "check", label: "Ready to merge" };
+    case "blocked":
+      return {
+        tone: "attention",
+        icon: "minus",
+        label: readBlockedMergeStateLabel(pullRequest.requestedReviewTeamSlugs),
+      };
+    case "behind":
+      return { tone: "info", icon: "arrow", label: "Branch is behind the base branch" };
+    case "dirty":
+      return { tone: "danger", icon: "x", label: "Merge conflicts detected" };
+    case "unstable":
+      return {
+        tone: "attention",
+        icon: "clock",
+        label: "Required merge checks are failing or still pending",
+      };
+    case "has_hooks":
+      return {
+        tone: "attention",
+        icon: "clock",
+        label: "Waiting on required merge hooks",
+      };
+    case "unknown":
+      return {
+        tone: "muted",
+        icon: "clock",
+        label: "Merge readiness is still being calculated",
+      };
+    case "draft":
+      return { tone: "muted", icon: "clock", label: "Draft pull request" };
+    default:
+      return {
+        tone: "muted",
+        icon: "clock",
+        label: `GitHub merge status: ${formatMergeableStateLabel(pullRequest.mergeableState)}`,
+      };
+  }
+}
+
+function PullRequestMergeReadinessIcon({
+  kind,
+}: {
+  kind: "check" | "minus" | "x" | "arrow" | "clock";
+}) {
+  if (kind === "check") {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="M6.8 10.3 8.9 12.4 13.2 8.1"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  if (kind === "minus") {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M6.7 10h6.6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (kind === "x") {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="M7.3 7.3 12.7 12.7M12.7 7.3 7.3 12.7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
+  if (kind === "arrow") {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="M7.2 12.8 12.8 7.2M9.1 7.2h3.7v3.7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M10 6.4v4.1l2.4 1.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function formatMergeableStateLabel(mergeableState: string): string {
+  return mergeableState
+    .split("_")
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function readBlockedMergeStateLabel(requestedReviewTeamSlugs: string[]): string {
+  if (requestedReviewTeamSlugs.length === 0) {
+    return "Merge blocked by GitHub rules";
+  }
+
+  const teamLabel =
+    requestedReviewTeamSlugs.length === 1
+      ? `team ${requestedReviewTeamSlugs[0]}`
+      : `teams ${requestedReviewTeamSlugs.join(", ")}`;
+
+  return `Merge blocked: waiting on review from ${teamLabel}`;
+}
+
 function CiJobStatsSummary({ ciJobStates }: { ciJobStates: PullRequestCiJobStateRecord[] }) {
-  return <span className="ci-job-stats">{buildCiSummaryNodes(ciJobStates, "ci-job-stats")}</span>;
+  const counts = readCiSummaryCounts(ciJobStates);
+  const tooltip = buildCiSummaryTooltip(counts);
+  const parts: React.ReactNode[] = [];
+
+  if (counts.failing > 0) {
+    parts.push(
+      <span key="f" className="ci-job-stats-failing">
+        {counts.failing}
+      </span>,
+    );
+  }
+
+  if (counts.pending > 0) {
+    parts.push(
+      <span key="p" className="ci-job-stats-pending">
+        {counts.pending}
+      </span>,
+    );
+  }
+
+  if (counts.passing > 0) {
+    parts.push(
+      <span key="ok" className="ci-job-stats-passing">
+        {counts.passing}
+      </span>,
+    );
+  }
+
+  if (counts.skipped > 0) {
+    parts.push(
+      <span key="s" className="ci-job-stats-skipped">
+        {counts.skipped}
+      </span>,
+    );
+  }
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return (
+    <span className="ci-job-stats" title={tooltip} aria-label={tooltip}>
+      <span className="ci-job-stats-label">CI:</span>
+      {parts.reduce<React.ReactNode[]>((acc, part, index) => {
+        if (index === 0) {
+          return [part];
+        }
+
+        return [
+          ...acc,
+          <span key={`sep-${index}`} className="ci-job-stats-separator" aria-hidden="true">
+            |
+          </span>,
+          part,
+        ];
+      }, [])}
+    </span>
+  );
 }
 
 function CiJobStateList({ ciJobStates }: { ciJobStates: PullRequestCiJobStateRecord[] }) {
@@ -1319,7 +1551,25 @@ function resolveGroupOutcome(jobs: PullRequestCiJobStateRecord[]): "failing" | "
 }
 
 function buildCiSummaryNodes(jobs: PullRequestCiJobStateRecord[], prefix: string): React.ReactNode {
+  const { failing, pending, passing, skipped } = readCiSummaryCounts(jobs);
+
+  const parts: React.ReactNode[] = [];
+
+  if (failing > 0) parts.push(<span key="f" className={`${prefix}-failing`}>{failing} failing</span>);
+  if (pending > 0) parts.push(<span key="p" className={`${prefix}-pending`}>{pending} pending</span>);
+  if (passing > 0) parts.push(<span key="ok" className={`${prefix}-passing`}>{passing} passing</span>);
+  if (skipped > 0) parts.push(<span key="s" className={`${prefix}-skipped`}>{skipped} skipped</span>);
+  return parts.reduce<React.ReactNode[]>((acc, part, i) => (i === 0 ? [part] : [...acc, ", ", part]), []);
+}
+
+function readCiSummaryCounts(jobs: PullRequestCiJobStateRecord[]): {
+  failing: number;
+  pending: number;
+  passing: number;
+  skipped: number;
+} {
   let failing = 0, pending = 0, passing = 0, skipped = 0;
+
   for (const job of jobs) {
     const o = resolveCiJobOutcome(job);
     if (o === "failing") failing++;
@@ -1327,12 +1577,35 @@ function buildCiSummaryNodes(jobs: PullRequestCiJobStateRecord[], prefix: string
     else if (o === "passing") passing++;
     else skipped++;
   }
-  const parts: React.ReactNode[] = [];
-  if (failing > 0) parts.push(<span key="f" className={`${prefix}-failing`}>{failing} failing</span>);
-  if (pending > 0) parts.push(<span key="p" className={`${prefix}-pending`}>{pending} pending</span>);
-  if (passing > 0) parts.push(<span key="ok" className={`${prefix}-passing`}>{passing} passing</span>);
-  if (skipped > 0) parts.push(<span key="s" className={`${prefix}-skipped`}>{skipped} skipped</span>);
-  return parts.reduce<React.ReactNode[]>((acc, part, i) => (i === 0 ? [part] : [...acc, ", ", part]), []);
+
+  return { failing, pending, passing, skipped };
+}
+
+function buildCiSummaryTooltip(counts: {
+  failing: number;
+  pending: number;
+  passing: number;
+  skipped: number;
+}): string {
+  const parts: string[] = [];
+
+  if (counts.failing > 0) {
+    parts.push(`${counts.failing} failing`);
+  }
+
+  if (counts.pending > 0) {
+    parts.push(`${counts.pending} pending`);
+  }
+
+  if (counts.passing > 0) {
+    parts.push(`${counts.passing} passing`);
+  }
+
+  if (counts.skipped > 0) {
+    parts.push(`${counts.skipped} skipped`);
+  }
+
+  return parts.length === 0 ? "CI checks" : `CI checks: ${parts.join(", ")}`;
 }
 
 function deduplicateJobs(jobs: PullRequestCiJobStateRecord[]): { key: string; job: PullRequestCiJobStateRecord; count: number; outcome: string }[] {
@@ -2699,11 +2972,19 @@ const APP_STYLES = `
 
   .pull-request-title {
     grid-area: title;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
   }
 
+  .pull-request-title-copy {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
   .pull-request-title-link {
-    display: inline-flex;
+    display: inline-block;
     color: var(--text);
     text-decoration: none;
     font-weight: 500;
@@ -2717,6 +2998,40 @@ const APP_STYLES = `
 
   .pull-request-title-link:hover {
     color: var(--accent);
+  }
+
+  .pull-request-merge-readiness {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .pull-request-merge-readiness svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .pull-request-merge-readiness-ready {
+    color: var(--success);
+  }
+
+  .pull-request-merge-readiness-attention {
+    color: var(--warn);
+  }
+
+  .pull-request-merge-readiness-danger {
+    color: var(--danger);
+  }
+
+  .pull-request-merge-readiness-info {
+    color: var(--accent);
+  }
+
+  .pull-request-merge-readiness-muted {
+    color: var(--text-muted);
   }
 
   .pull-request-repo-pill {
@@ -3556,10 +3871,20 @@ const APP_STYLES = `
   }
 
   .ci-job-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 0.6875rem;
     font-weight: 500;
     color: var(--text-muted);
     margin-top: 1px;
+    white-space: nowrap;
+  }
+
+  .ci-job-stats-label,
+  .ci-job-stats-separator,
+  .ci-job-stats-skipped {
+    color: var(--text-muted);
   }
 
   .ci-job-stats-failing {
@@ -3785,6 +4110,10 @@ const APP_STYLES = `
 
     .pull-request-title-link {
       white-space: normal;
+    }
+
+    .pull-request-title {
+      align-items: flex-start;
     }
 
     .pull-request-panel > .panel-header {

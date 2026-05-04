@@ -44,6 +44,9 @@ export interface DiscoveredPullRequest extends PullRequestCoordinates {
   mergedAt: string | null;
   lastSeenHeadSha: string | null;
   baseBranch: string | null;
+  mergeable: boolean | null;
+  mergeableState: string | null;
+  requestedReviewTeamSlugs: string[];
 }
 
 export interface DiscoverOpenAuthoredPullRequestsOptions<TClient = Octokit> {
@@ -278,6 +281,9 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
         graceUntil: null,
         lastSeenHeadSha: pullRequest.lastSeenHeadSha,
         baseBranch: pullRequest.baseBranch,
+        mergeable: pullRequest.mergeable,
+        mergeableState: pullRequest.mergeableState,
+        requestedReviewTeamSlugs: pullRequest.requestedReviewTeamSlugs,
       });
 
       if (
@@ -522,6 +528,15 @@ function mapPullRequestDetail(
     mergedAt: readNullableString(value.merged_at, "pull request response.merged_at"),
     lastSeenHeadSha: readNullableString(head.sha, "pull request response.head.sha"),
     baseBranch: readNullableString(base.ref, "pull request response.base.ref"),
+    mergeable: readNullableBoolean(value.mergeable, "pull request response.mergeable"),
+    mergeableState: readNullableString(
+      value.mergeable_state,
+      "pull request response.mergeable_state",
+    ),
+    requestedReviewTeamSlugs: readRequestedReviewTeamSlugs(
+      value.requested_teams,
+      "pull request response.requested_teams",
+    ),
   };
 }
 
@@ -596,6 +611,25 @@ function readBoolean(value: unknown, fieldName: string): boolean {
   }
 
   return value;
+}
+
+function readNullableBoolean(value: unknown, fieldName: string): boolean | null {
+  if (value === null) {
+    return null;
+  }
+
+  return readBoolean(value, fieldName);
+}
+
+function readRequestedReviewTeamSlugs(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new PullRequestDiscoveryError(`${fieldName} must be an array`);
+  }
+
+  return value.map((entry, index) => {
+    const team = requireRecord(entry, `${fieldName}[${index}]`);
+    return readString(team.slug, `${fieldName}[${index}].slug`);
+  });
 }
 
 function formatPullRequestLabel(coordinates: PullRequestCoordinates): string {

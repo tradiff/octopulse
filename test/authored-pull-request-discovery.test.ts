@@ -51,7 +51,16 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
     const searchOpenReviewRequestedPullRequests = vi.fn(async () => [] as PullRequestCoordinates[]);
     const fetchPullRequestDetail = vi.fn(
       async (_client: typeof client, coordinates: PullRequestCoordinates) =>
-        createDiscoveredPullRequest(coordinates),
+        createDiscoveredPullRequest(
+          coordinates,
+          coordinates.number === 42
+            ? {
+                mergeable: true,
+                mergeableState: "blocked",
+                requestedReviewTeamSlugs: ["quality-processing-squad"],
+              }
+            : {},
+        ),
     );
 
     try {
@@ -97,6 +106,11 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
       expect(trackedPullRequests.every((pullRequest) => pullRequest.lastSeenAt === OBSERVED_AT)).toBe(
         true,
       );
+      expect(repository.getPullRequestByGitHubPullRequestId(4201)).toMatchObject({
+        mergeable: true,
+        mergeableState: "blocked",
+        requestedReviewTeamSlugs: ["quality-processing-squad"],
+      });
       expect(readAppStateValue(database, FIRST_RUN_DISCOVERY_COMPLETED_KEY)).toBe("true");
     } finally {
       database.close();
@@ -590,6 +604,9 @@ function createDiscoveredPullRequest(
     mergedAt: null,
     lastSeenHeadSha: coordinates.number === 42 ? "xyz789" : "abc123",
     baseBranch: "main",
+    mergeable: true,
+    mergeableState: "clean",
+    requestedReviewTeamSlugs: [],
     ...overrides,
   };
 }

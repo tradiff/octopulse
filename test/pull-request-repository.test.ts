@@ -24,7 +24,13 @@ describe("PullRequestRepository", () => {
     const { database, repository } = createRepository();
 
     try {
-      const inserted = repository.upsertPullRequest(createPullRequestInput());
+      const inserted = repository.upsertPullRequest(
+        createPullRequestInput({
+          mergeable: true,
+          mergeableState: "blocked",
+          requestedReviewTeamSlugs: ["quality-processing-squad"],
+        }),
+      );
 
       expect(inserted.githubPullRequestId).toBe(101);
       expect(inserted.isTracked).toBe(true);
@@ -32,6 +38,9 @@ describe("PullRequestRepository", () => {
       expect(inserted.isStickyUntracked).toBe(false);
       expect(inserted.graceUntil).toBeNull();
       expect(inserted.lastSeenHeadSha).toBe("abc123");
+      expect(inserted.mergeable).toBe(true);
+      expect(inserted.mergeableState).toBe("blocked");
+      expect(inserted.requestedReviewTeamSlugs).toEqual(["quality-processing-squad"]);
 
       repository.updatePullRequestTrackingState(101, {
         isTracked: false,
@@ -57,6 +66,9 @@ describe("PullRequestRepository", () => {
       expect(updated.closedAt).toBe("2026-04-10T12:30:00.000Z");
       expect(updated.graceUntil).toBe("2026-04-17T12:30:00.000Z");
       expect(updated.lastSeenHeadSha).toBeNull();
+      expect(updated.mergeable).toBe(true);
+      expect(updated.mergeableState).toBe("blocked");
+      expect(updated.requestedReviewTeamSlugs).toEqual(["quality-processing-squad"]);
       expect(updated.isTracked).toBe(false);
       expect(updated.trackingReason).toBe("manual");
       expect(updated.isStickyUntracked).toBe(true);

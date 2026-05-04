@@ -156,6 +156,9 @@ describe("pollTrackedPullRequests", () => {
             etag: 'W/"acme-octopulse-7-v1"',
             title: "Refresh pull request polling",
             headSha: "def456",
+            mergeable: true,
+            mergeableState: "blocked",
+            requestedReviewTeamSlugs: ["quality-processing-squad"],
           });
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
@@ -278,6 +281,9 @@ describe("pollTrackedPullRequests", () => {
       expect(pullRequest).toMatchObject({
         title: "Refresh pull request polling",
         lastSeenHeadSha: "def456",
+        mergeable: true,
+        mergeableState: "blocked",
+        requestedReviewTeamSlugs: ["quality-processing-squad"],
       });
       expect(readPullRequestDetailEtag(database, pullRequest?.id ?? -1)).toBe(
         'W/"acme-octopulse-7-v1"',
@@ -1679,6 +1685,9 @@ function createPullRequestDetailResponse(
     closedAt?: string | null;
     mergedAt?: string | null;
     headSha?: string | null;
+    mergeable?: boolean | null;
+    mergeableState?: string | null;
+    requestedReviewTeamSlugs?: string[];
   } = {},
 ): {
   status: number;
@@ -1710,8 +1719,11 @@ function createPullRequestDetailResponse(
       title: overrides.title ?? "Add pull request polling",
       state: overrides.state ?? "open",
       draft: overrides.isDraft ?? false,
+      mergeable: overrides.mergeable ?? true,
+      mergeable_state: overrides.mergeableState ?? "clean",
       closed_at: overrides.closedAt ?? null,
       merged_at: overrides.mergedAt ?? null,
+      requested_teams: (overrides.requestedReviewTeamSlugs ?? []).map((slug) => ({ slug })),
       head: {
         sha: overrides.headSha ?? "abc123",
       },
