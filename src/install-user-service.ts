@@ -59,8 +59,9 @@ export function renderUserServiceUnit(repoRoot: string): string {
   return [
     "[Unit]",
     "Description=Octopulse local PR activity monitor",
-    "After=network-online.target",
+    "After=network-online.target graphical-session.target",
     "Wants=network-online.target",
+    "PartOf=graphical-session.target",
     "",
     "[Service]",
     "Type=simple",
@@ -72,7 +73,7 @@ export function renderUserServiceUnit(repoRoot: string): string {
     "StandardError=journal",
     "",
     "[Install]",
-    "WantedBy=default.target",
+    "WantedBy=graphical-session.target",
     "",
   ].join("\n");
 }

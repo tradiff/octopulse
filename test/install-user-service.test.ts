@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   installUserService,
   renderInstallUserServiceSummary,
+  renderUserServiceUnit,
 } from "../src/install-user-service.js";
 
 const tempDirs: string[] = [];
@@ -18,6 +19,15 @@ afterEach(() => {
 });
 
 describe("installUserService", () => {
+  it("renders a graphical-session-bound user service unit", () => {
+    const serviceUnit = renderUserServiceUnit("/tmp/octopulse");
+
+    expect(serviceUnit).toContain("After=network-online.target graphical-session.target");
+    expect(serviceUnit).toContain("Wants=network-online.target");
+    expect(serviceUnit).toContain("PartOf=graphical-session.target");
+    expect(serviceUnit).toContain("WantedBy=graphical-session.target");
+  });
+
   it("installs user service file and example config", () => {
     const tempRoot = createTempDir("octopulse-install-");
     const homeDir = path.join(tempRoot, "home");
@@ -29,10 +39,15 @@ describe("installUserService", () => {
     const result = installUserService({ homeDir, repoRoot });
 
     expect(existsSync(result.paths.servicePath)).toBe(true);
-    expect(readFileSync(result.paths.servicePath, "utf8")).toContain(`WorkingDirectory=${repoRoot}`);
-    expect(readFileSync(result.paths.servicePath, "utf8")).toContain(
+    const serviceContents = readFileSync(result.paths.servicePath, "utf8");
+
+    expect(serviceContents).toContain(`WorkingDirectory=${repoRoot}`);
+    expect(serviceContents).toContain(
       `ExecStart=/usr/bin/node ${path.join(repoRoot, "dist", "main.js")}`,
     );
+    expect(serviceContents).toContain("After=network-online.target graphical-session.target");
+    expect(serviceContents).toContain("PartOf=graphical-session.target");
+    expect(serviceContents).toContain("WantedBy=graphical-session.target");
     expect(existsSync(result.paths.desktopEntryPath)).toBe(true);
     expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("Name=Octopulse");
     expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("Icon=");
