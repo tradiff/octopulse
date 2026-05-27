@@ -2542,18 +2542,18 @@ function handleClientNavigation(
 const APP_STYLES = `
   :root {
     color-scheme: dark;
-    --bg: #0a0a0a;
-    --bg-elevated: #0f0f0f;
-    --surface: #111111;
-    --surface-hover: #161616;
-    --border: #1f1f1f;
-    --border-strong: #2a2a2a;
-    --text: #ededed;
-    --text-secondary: #a1a1a1;
-    --text-muted: #6b6b6b;
-    --accent: #5b8bf0;
-    --accent-soft: rgba(91, 139, 240, 0.12);
-    --timeline-line: rgba(91, 139, 240, 0.22);
+    --bg: #10141c;
+    --bg-elevated: #151b24;
+    --surface: #1a212b;
+    --surface-hover: #222c39;
+    --border: #2b3645;
+    --border-strong: #3a475a;
+    --text: #f3f6fb;
+    --text-secondary: #c3cede;
+    --text-muted: #8e9aae;
+    --accent: #78a6ff;
+    --accent-soft: rgba(120, 166, 255, 0.14);
+    --timeline-line: rgba(120, 166, 255, 0.24);
     --timeline-dot: var(--accent);
     --success: #4ade80;
     --warn: #facc15;
