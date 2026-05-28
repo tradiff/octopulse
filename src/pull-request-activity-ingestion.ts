@@ -171,6 +171,7 @@ export async function ingestPullRequestActivity<TClient>(
     ),
     workflowRunsPromise,
   ]);
+  const filteredTimelineEvents = filterRedundantMergedClosedTimelineEvents(timelineEvents);
   const rawEvents = [
     ...issueComments.map((comment) => mapIssueCommentRawEvent(comment, pullRequest.id)),
     ...reviews.flatMap((review) => {
@@ -178,7 +179,7 @@ export async function ingestPullRequestActivity<TClient>(
       return rawEvent ? [rawEvent] : [];
     }),
     ...reviewComments.map((comment) => mapPullRequestReviewCommentRawEvent(comment, pullRequest.id)),
-    ...timelineEvents.flatMap((event) => {
+    ...filteredTimelineEvents.flatMap((event) => {
       const rawEvent = mapPullRequestTimelineRawEvent(event, pullRequest.id);
       return rawEvent ? [rawEvent] : [];
     }),
@@ -596,6 +597,74 @@ function mapPullRequestReviewCommentRawEvent(
     payloadJson: serializePayload(data, "pull request review comment"),
     occurredAt: readString(value.created_at, "pull request review comment.created_at"),
   };
+}
+
+function filterRedundantMergedClosedTimelineEvents(events: readonly unknown[]): unknown[] {
+  const mergedCandidates = events.flatMap((event) => {
+    const candidate = readTimelineMergeCloseCandidate(event);
+
+    if (candidate?.eventType !== "merged" || candidate.actorLogin === null) {
+      return [];
+    }
+
+    return [candidate];
+  });
+
+  return events.filter((event) => {
+    const candidate = readTimelineMergeCloseCandidate(event);
+
+    if (candidate?.eventType !== "closed" || candidate.actorLogin === null) {
+      return true;
+    }
+
+    return !mergedCandidates.some(
+      (mergedCandidate) =>
+        mergedCandidate.actorLogin === candidate.actorLogin &&
+        Math.abs(mergedCandidate.occurredAtMs - candidate.occurredAtMs) <= 1_000,
+    );
+  });
+}
+
+function readTimelineMergeCloseCandidate(
+  event: unknown,
+): { eventType: string; actorLogin: string | null; occurredAtMs: number } | null {
+  if (typeof event !== "object" || event === null || Array.isArray(event)) {
+    return null;
+  }
+
+  const value = event as Record<string, unknown>;
+  const eventType = typeof value.event === "string" ? value.event : null;
+
+  if (eventType !== "closed" && eventType !== "merged") {
+    return null;
+  }
+
+  const createdAt = typeof value.created_at === "string" ? value.created_at : null;
+
+  if (createdAt === null) {
+    return null;
+  }
+
+  const occurredAtMs = Date.parse(createdAt);
+
+  if (!Number.isFinite(occurredAtMs)) {
+    return null;
+  }
+
+  return {
+    eventType,
+    actorLogin: readOptionalIdentityLogin(value.actor),
+    occurredAtMs,
+  };
+}
+
+function readOptionalIdentityLogin(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const login = (value as Record<string, unknown>).login;
+  return typeof login === "string" && login.length > 0 ? login : null;
 }
 
 function mapPullRequestTimelineRawEvent(

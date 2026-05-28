@@ -246,6 +246,70 @@ describe("ingestPullRequestActivity", () => {
     }
   });
 
+  it("drops redundant closed timeline events when a matching merged event is fetched", async () => {
+    const { database, pullRequest } = createPullRequest();
+    const rawEventRepository = new RawEventRepository(database);
+
+    try {
+      await expect(
+        ingestPullRequestActivity(database, { kind: "fake-client" }, pullRequest, {
+          fetchIssueComments: async () => [],
+          fetchPullRequestReviews: async () => [],
+          fetchPullRequestReviewComments: async () => [],
+          fetchPullRequestTimeline: async () => [
+            createTimelineEventFixture({
+              id: 4101,
+              actorLogin: "octocat",
+              event: "merged",
+              createdAt: "2026-04-10T12:05:00.000Z",
+            }),
+            createTimelineEventFixture({
+              id: 4102,
+              actorLogin: "octocat",
+              event: "closed",
+              createdAt: "2026-04-10T12:05:01.000Z",
+            }),
+            createTimelineEventFixture({
+              id: 4103,
+              actorLogin: "alice",
+              event: "closed",
+              createdAt: "2026-04-10T12:06:00.000Z",
+            }),
+          ],
+          fetchWorkflowRuns: async () => [],
+        }),
+      ).resolves.toEqual({
+        processedCount: 2,
+        insertedCount: 2,
+        duplicateCount: 0,
+      });
+
+      expect(
+        rawEventRepository.listRawEventsForPullRequest(pullRequest.id).map((rawEvent) => ({
+          sourceId: rawEvent.sourceId,
+          eventType: rawEvent.eventType,
+          actorLogin: rawEvent.actorLogin,
+          occurredAt: rawEvent.occurredAt,
+        })),
+      ).toEqual([
+        {
+          sourceId: "4101",
+          eventType: "merged",
+          actorLogin: "octocat",
+          occurredAt: "2026-04-10T12:05:00.000Z",
+        },
+        {
+          sourceId: "4103",
+          eventType: "closed",
+          actorLogin: "alice",
+          occurredAt: "2026-04-10T12:06:00.000Z",
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("dedupes repeated ingestion and reuses comment fetch cursors", async () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);
