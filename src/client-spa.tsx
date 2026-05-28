@@ -456,7 +456,7 @@ function App() {
     });
 
     const nextFilters = readUiFilterValues(searchParams);
-    navigateToHref(buildPageHref(route.currentPage, nextFilters, route.logLevelFilter));
+    navigateToHref(buildPageHref(route.currentPage, nextFilters, route.logLevelFilter, route.prSubTab));
   }
 
   function handleLogsFilterChange(event: FormEvent<HTMLFormElement>): void {
@@ -501,7 +501,8 @@ function App() {
             uiFilters={route.uiFilters}
             uiFilterOptions={uiFilterOptions}
             logLevelFilter={route.logLevelFilter}
-            formKey={buildPageHref(route.currentPage, route.uiFilters, route.logLevelFilter)}
+            prSubTab={route.prSubTab}
+            formKey={buildPageHref(route.currentPage, route.uiFilters, route.logLevelFilter, route.prSubTab)}
             onFormChange={route.currentPage === "logs" ? handleLogsFilterChange : handleFilterChange}
             onNavigate={navigateToHref}
           />
@@ -604,6 +605,7 @@ function FilterPanel({
   uiFilters,
   uiFilterOptions,
   logLevelFilter,
+  prSubTab,
   formKey,
   onFormChange,
   onNavigate,
@@ -612,6 +614,7 @@ function FilterPanel({
   uiFilters: UiFilterValues;
   uiFilterOptions: UiFilterOptions;
   logLevelFilter: LogLevelFilter;
+  prSubTab: PrSubTab;
   formKey: string;
   onFormChange: (event: FormEvent<HTMLFormElement>) => void;
   onNavigate: (href: string) => void;
@@ -660,7 +663,7 @@ function FilterPanel({
                         pill.value,
                       ),
                     };
-                    const href = buildPageHref(currentPage, nextFilters, logLevelFilter);
+                    const href = buildPageHref(currentPage, nextFilters, logLevelFilter, prSubTab);
 
                     return (
                       <button
