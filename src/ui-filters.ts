@@ -30,11 +30,27 @@ export const DEFAULT_UI_FILTERS: UiFilterValues = {
   pullRequestStates: [],
 };
 
+export const DEFAULT_LANDING_UI_FILTERS: UiFilterValues = {
+  ...DEFAULT_UI_FILTERS,
+  pullRequestStates: ["tracked", "open"],
+};
+
 const PULL_REQUEST_STATE_FILTERS = new Set<PullRequestStateFilter>(PULL_REQUEST_STATE_FILTER_VALUES);
 const ACTOR_CLASSES = new Set<ActorClass>(["self", "human_other", "bot"]);
 const ALL_ACTIVITY_ACTOR_CLASSES = ["self", "human_other", "bot"] satisfies ActorClass[];
+const UI_FILTER_SEARCH_PARAM_KEYS = ["pr-state", "repo", "actor-type"] as const;
 
-export function readUiFilterValues(searchParams: URLSearchParams): UiFilterValues {
+export function readUiFilterValues(
+  searchParams: URLSearchParams,
+  defaultWhenNoFilterParams: UiFilterValues = DEFAULT_UI_FILTERS,
+): UiFilterValues {
+  if (!hasUiFilterSearchParams(searchParams)) {
+    return {
+      ...defaultWhenNoFilterParams,
+      pullRequestStates: normalizePullRequestStateFilters(defaultWhenNoFilterParams.pullRequestStates),
+    };
+  }
+
   const actorClass = searchParams.get("actor-type");
 
   return {
@@ -142,6 +158,10 @@ function matchesRepository(repositoryKey: string | null, filterValue: string): b
 
 function matchesMultiValue(values: readonly string[], filterValue: string): boolean {
   return filterValue.length === 0 || values.includes(filterValue);
+}
+
+function hasUiFilterSearchParams(searchParams: URLSearchParams): boolean {
+  return UI_FILTER_SEARCH_PARAM_KEYS.some((key) => searchParams.has(key));
 }
 
 function readTrimmedSearchParam(searchParams: URLSearchParams, key: string): string {

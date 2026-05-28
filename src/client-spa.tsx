@@ -26,6 +26,7 @@ import type { PullRequestReviewStateRecord, ReviewState } from "./pull-request-r
 import type { PullRequestCiJobStateRecord } from "./pull-request-ci-job-state-repository.js";
 import type { PullRequestTimeline, PullRequestTimelineEntry, PullRequestReviewStatesByPullRequest, PullRequestCiJobStatesByPullRequest } from "./raw-events.js";
 import {
+  DEFAULT_LANDING_UI_FILTERS,
   DEFAULT_UI_FILTERS,
   buildUiFilterOptions,
   filterInactivePullRequests,
@@ -2040,7 +2041,7 @@ function readPrSubTab(searchParams: URLSearchParams): PrSubTab {
 function readRouteState(url: URL): RouteState {
   return {
     currentPage: readDocumentPage(url.pathname),
-    uiFilters: readUiFilterValues(url.searchParams),
+    uiFilters: readUiFilterValues(url.searchParams, DEFAULT_LANDING_UI_FILTERS),
     logLevelFilter: readLogLevelFilter(url.searchParams),
     activityPage: readActivityPage(url.searchParams),
     prSubTab: readPrSubTab(url.searchParams),
@@ -2199,12 +2200,19 @@ function appendUiFilters(
   fields: readonly PageFilterField[],
   uiFilters: UiFilterValues,
 ): void {
+  let appendedFilter = false;
+
   for (const field of fields) {
     if (field === "pullRequestStates") {
+      if (isAllPullRequestStateFilterSelection(uiFilters.pullRequestStates)) {
+        continue;
+      }
+
       for (const filter of uiFilters.pullRequestStates) {
         searchParams.append(formatFilterSearchParamKey(field), filter);
       }
 
+      appendedFilter = true;
       continue;
     }
 
@@ -2215,6 +2223,11 @@ function appendUiFilters(
     }
 
     searchParams.set(formatFilterSearchParamKey(field), value);
+    appendedFilter = true;
+  }
+
+  if (!appendedFilter && fields.includes("pullRequestStates")) {
+    searchParams.set(formatFilterSearchParamKey("pullRequestStates"), "all");
   }
 }
 
