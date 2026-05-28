@@ -219,6 +219,67 @@ describe("listNotificationHistory", () => {
       database.close();
     }
   });
+
+  it("omits redundant review-submitted lines from bundled history summaries", () => {
+    const { database, pullRequest } = createPullRequest();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const eventBundleRepository = new EventBundleRepository(database);
+    const notificationRecordRepository = new NotificationRecordRepository(database);
+
+    try {
+      const reviewSubmitted = normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_submitted",
+        actorLogin: "alice",
+        actorClass: "human_other",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ reviewId: 42, bodyText: "   " }),
+        occurredAt: "2026-04-10T12:00:00.000Z",
+      });
+      const inlineComment = normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_inline_comment",
+        actorLogin: "alice",
+        actorClass: "human_other",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ reviewId: 42, bodyText: "nit: rename this" }),
+        occurredAt: "2026-04-10T12:00:15.000Z",
+      });
+      const bundle = eventBundleRepository.createEventBundle({
+        pullRequestId: pullRequest.id,
+        firstEventOccurredAt: reviewSubmitted.occurredAt,
+        lastEventOccurredAt: inlineComment.occurredAt,
+      });
+
+      normalizedEventRepository.assignEventBundle([reviewSubmitted.id, inlineComment.id], bundle.id);
+
+      notificationRecordRepository.createNotificationRecord({
+        eventBundleId: bundle.id,
+        pullRequestId: pullRequest.id,
+        title: "acme/octopulse PR #7",
+        body: "alice: 💬 submitted review\n\nalice: 💬 nit: rename this",
+        clickUrl: pullRequest.url,
+        deliveryStatus: "sent",
+        deliveredAt: "2026-04-10T12:02:45.000Z",
+      });
+
+      expect(listNotificationHistory(database).entries).toEqual([
+        expect.objectContaining({
+          eventTypes: ["review_submitted", "review_inline_comment"],
+          summaryParagraphs: [
+            {
+              actorLogin: "alice",
+              actorAvatarKey: "alice",
+              actorAvatarUrl: null,
+              text: "💬 nit: rename this",
+            },
+          ],
+        }),
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {

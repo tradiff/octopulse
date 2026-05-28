@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 
+import { filterDisplayableNotificationEvents } from "./displayable-notification-events.js";
 import {
   NormalizedEventRepository,
 } from "./normalized-event-repository.js";
@@ -64,8 +65,11 @@ export function listPullRequestTimeline(
   for (const pullRequest of pullRequests) {
     const key = String(pullRequest.githubPullRequestId);
 
-    timelineByPullRequest[key] = normalizedEventRepository
-      .listNormalizedEventsForPullRequest(pullRequest.id)
+    const normalizedEvents = normalizedEventRepository.listNormalizedEventsForPullRequest(
+      pullRequest.id,
+    );
+
+    timelineByPullRequest[key] = filterDisplayableNotificationEvents(normalizedEvents)
       .slice()
       .reverse()
       .map((event) => ({

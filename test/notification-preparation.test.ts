@@ -152,6 +152,54 @@ describe("preparePullRequestNotifications", () => {
     }
   });
 
+  it("omits redundant review-submitted lines from bundled notifications", () => {
+    const { database, pullRequest } = createPullRequest();
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const notificationRecordRepository = new NotificationRecordRepository(database);
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_submitted",
+        actorLogin: "alice",
+        actorClass: "human_other",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ reviewId: 42, bodyText: "   " }),
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_inline_comment",
+        actorLogin: "alice",
+        actorClass: "human_other",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({ reviewId: 42, bodyText: "nit: rename this" }),
+        occurredAt: "2026-04-10T12:01:10.000Z",
+      });
+
+      expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
+        eligibleCount: 2,
+        bundledCount: 2,
+        createdBundleCount: 1,
+      });
+
+      expect(preparePullRequestNotifications(database, pullRequest)).toEqual({
+        immediateCount: 0,
+        bundledCount: 1,
+        createdCount: 1,
+      });
+
+      expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest.id)).toEqual([
+        expect.objectContaining({
+          normalizedEventId: null,
+          eventBundleId: expect.any(Number),
+          body: "alice: 💬 nit: rename this",
+        }),
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {

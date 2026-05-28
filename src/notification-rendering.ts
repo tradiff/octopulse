@@ -1,3 +1,4 @@
+import { filterDisplayableNotificationEvents } from "./displayable-notification-events.js";
 import type { NormalizedEventRecord } from "./normalized-event-repository.js";
 import { formatPullRequestStateLabel } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
@@ -56,12 +57,21 @@ export function renderNotification(
     throw new Error("Cannot render notification without events");
   }
 
+  const displayableEvents = filterDisplayableNotificationEvents(events);
+
+  if (displayableEvents.length === 0) {
+    throw new Error("Cannot render notification without displayable events");
+  }
+
   const title = `${pullRequest.repositoryOwner}/${pullRequest.repositoryName} #${pullRequest.number} ${pullRequest.title}`;
-  const summary = events.length === 1 ? renderSingleEventSummary(events[0]) : renderBundleSummary(events);
+  const summary =
+    displayableEvents.length === 1
+      ? renderSingleEventSummary(displayableEvents[0])
+      : renderBundleSummary(displayableEvents);
 
   return {
     title,
-    body: renderNotificationBody(events),
+    body: renderNotificationBody(displayableEvents),
     clickUrl: pullRequest.url,
     summary,
   };
@@ -75,11 +85,13 @@ export function renderNotificationMarkup(
     throw new Error("Cannot render notification markup without events");
   }
 
+  const displayableEvents = filterDisplayableNotificationEvents(events);
+
   return {
     headerText: `[${pullRequest.repositoryName}] ${pullRequest.title} (${formatPullRequestStateLabel(pullRequest).toLowerCase()})`,
     headerAvatarKey: pullRequest.authorLogin,
     headerAvatarUrl: pullRequest.authorAvatarUrl,
-    paragraphs: events.map((event) => buildNotificationParagraph(event)),
+    paragraphs: displayableEvents.map((event) => buildNotificationParagraph(event)),
   };
 }
 

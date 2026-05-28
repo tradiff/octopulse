@@ -140,6 +140,76 @@ describe("renderNotification", () => {
     });
   });
 
+  it("omits empty review-submitted wrappers when inline comments for the same review are present", () => {
+    expect(
+      renderNotification(
+        {
+          repositoryOwner: "acme",
+          repositoryName: "octopulse",
+          number: 7,
+          title: "Ship notifications",
+          url: "https://github.com/acme/octopulse/pull/7",
+        },
+        [
+          {
+            id: 221,
+            eventType: "review_submitted",
+            actorLogin: "alice",
+            occurredAt: "2026-04-10T12:00:00.000Z",
+            payloadJson: JSON.stringify({ reviewId: 42, bodyText: "   " }),
+          },
+          {
+            id: 222,
+            eventType: "review_inline_comment",
+            actorLogin: "alice",
+            occurredAt: "2026-04-10T12:00:15.000Z",
+            payloadJson: JSON.stringify({ reviewId: 42, bodyText: "nit: rename this" }),
+          },
+        ],
+      ),
+    ).toEqual({
+      title: "acme/octopulse #7 Ship notifications",
+      body: "alice: 💬 nit: rename this",
+      clickUrl: "https://github.com/acme/octopulse/pull/7",
+      summary: "alice left inline comment",
+    });
+  });
+
+  it("keeps review-submitted events with their own body text", () => {
+    expect(
+      renderNotification(
+        {
+          repositoryOwner: "acme",
+          repositoryName: "octopulse",
+          number: 7,
+          title: "Ship notifications",
+          url: "https://github.com/acme/octopulse/pull/7",
+        },
+        [
+          {
+            id: 231,
+            eventType: "review_submitted",
+            actorLogin: "alice",
+            occurredAt: "2026-04-10T12:00:00.000Z",
+            payloadJson: JSON.stringify({ reviewId: 42, bodyText: "Looks good overall" }),
+          },
+          {
+            id: 232,
+            eventType: "review_inline_comment",
+            actorLogin: "alice",
+            occurredAt: "2026-04-10T12:00:15.000Z",
+            payloadJson: JSON.stringify({ reviewId: 42, bodyText: "nit: rename this" }),
+          },
+        ],
+      ),
+    ).toEqual({
+      title: "acme/octopulse #7 Ship notifications",
+      body: "alice: 💬 Looks good overall\n\nalice: 💬 nit: rename this",
+      clickUrl: "https://github.com/acme/octopulse/pull/7",
+      summary: "alice: 1 review, 1 comment",
+    });
+  });
+
   it("truncates long snippets", () => {
     expect(
       renderNotification(

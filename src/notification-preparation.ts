@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 
+import { filterDisplayableNotificationEvents } from "./displayable-notification-events.js";
 import { EventBundleRepository } from "./event-bundling.js";
 import { NormalizedEventRepository } from "./normalized-event-repository.js";
 import { NotificationRecordRepository } from "./notification-record-repository.js";
@@ -49,7 +50,13 @@ export function preparePullRequestNotifications(
   for (const event of normalizedEventRepository.listImmediateEligibleUnnotifiedEventsForPullRequest(
     pullRequest.id,
   )) {
-    const notification = render(pullRequest, [event]);
+    const displayableEvents = filterDisplayableNotificationEvents([event]);
+
+    if (displayableEvents.length === 0) {
+      continue;
+    }
+
+    const notification = render(pullRequest, displayableEvents);
 
     notificationRecordRepository.createNotificationRecord({
       normalizedEventId: event.id,
@@ -69,7 +76,13 @@ export function preparePullRequestNotifications(
       continue;
     }
 
-    const notification = render(pullRequest, events);
+    const displayableEvents = filterDisplayableNotificationEvents(events);
+
+    if (displayableEvents.length === 0) {
+      continue;
+    }
+
+    const notification = render(pullRequest, displayableEvents);
 
     notificationRecordRepository.createNotificationRecord({
       eventBundleId: bundle.id,
