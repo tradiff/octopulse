@@ -8,6 +8,7 @@ import {
   type PullRequestCoordinates,
 } from "./authored-pull-request-discovery.js";
 import type { GitHubAuthContext } from "./github.js";
+import { createPullRequestUpsertInput } from "./pull-request-snapshot.js";
 import {
   PullRequestRepository,
   type PullRequestRecord,
@@ -94,29 +95,17 @@ export async function trackPullRequestByUrl<TClient>(
   try {
     return {
       outcome: "tracked",
-      pullRequest: pullRequestRepository.upsertPullRequest({
-        githubPullRequestId: pullRequest.githubPullRequestId,
-        repositoryOwner: pullRequest.repositoryOwner,
-        repositoryName: pullRequest.repositoryName,
-        number: pullRequest.number,
-        url: pullRequest.url,
-        authorLogin: pullRequest.authorLogin,
-        authorAvatarUrl: pullRequest.authorAvatarUrl,
-        title: pullRequest.title,
-        state: pullRequest.state,
-        isDraft: pullRequest.isDraft,
-        lastSeenAt: options.observedAt ?? new Date().toISOString(),
-        closedAt: pullRequest.closedAt,
-        mergedAt: pullRequest.mergedAt,
-        graceUntil: null,
-        lastSeenHeadSha: pullRequest.lastSeenHeadSha,
-        baseBranch: pullRequest.baseBranch,
-        tracking: {
-          isTracked: true,
-          trackingReason: MANUAL_TRACKING_REASON,
-          isStickyUntracked: false,
-        },
-      }),
+      pullRequest: pullRequestRepository.upsertPullRequest(
+        createPullRequestUpsertInput(pullRequest, {
+          lastSeenAt: options.observedAt ?? new Date().toISOString(),
+          graceUntil: null,
+          tracking: {
+            isTracked: true,
+            trackingReason: MANUAL_TRACKING_REASON,
+            isStickyUntracked: false,
+          },
+        }),
+      ),
     };
   } catch (error) {
     throw new ManualPullRequestTrackingError(

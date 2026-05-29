@@ -8,6 +8,12 @@ import type { NotificationDispatcher } from "./notification-dispatch.js";
 import { dispatchPullRequestNotifications } from "./notification-dispatch.js";
 import { NormalizedEventRepository } from "./normalized-event-repository.js";
 import { preparePullRequestNotifications } from "./notification-preparation.js";
+import {
+  createPullRequestUpsertInput,
+  mapPullRequestSnapshot,
+  type PullRequestCoordinates,
+  type PullRequestSnapshot,
+} from "./pull-request-snapshot.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 
@@ -26,28 +32,8 @@ interface DiscoveryCandidate {
   sources: PullRequestDiscoverySource[];
 }
 
-export interface PullRequestCoordinates {
-  repositoryOwner: string;
-  repositoryName: string;
-  number: number;
-}
-
-export interface DiscoveredPullRequest extends PullRequestCoordinates {
-  githubPullRequestId: number;
-  url: string;
-  authorLogin: string;
-  authorAvatarUrl: string | null;
-  title: string;
-  state: string;
-  isDraft: boolean;
-  closedAt: string | null;
-  mergedAt: string | null;
-  lastSeenHeadSha: string | null;
-  baseBranch: string | null;
-  mergeable: boolean | null;
-  mergeableState: string | null;
-  requestedReviewTeamSlugs: string[];
-}
+export type { PullRequestCoordinates } from "./pull-request-snapshot.js";
+export type DiscoveredPullRequest = PullRequestSnapshot;
 
 export interface DiscoverOpenAuthoredPullRequestsOptions<TClient = Octokit> {
   pullRequestRepository?: Pick<
@@ -264,27 +250,12 @@ export async function discoverOpenAuthoredPullRequests<TClient>(
     }
 
     try {
-      const persistedPullRequest = pullRequestRepository.upsertPullRequest({
-        githubPullRequestId: pullRequest.githubPullRequestId,
-        repositoryOwner: pullRequest.repositoryOwner,
-        repositoryName: pullRequest.repositoryName,
-        number: pullRequest.number,
-        url: pullRequest.url,
-        authorLogin: pullRequest.authorLogin,
-        authorAvatarUrl: pullRequest.authorAvatarUrl,
-        title: pullRequest.title,
-        state: pullRequest.state,
-        isDraft: pullRequest.isDraft,
-        lastSeenAt: observedAt,
-        closedAt: pullRequest.closedAt,
-        mergedAt: pullRequest.mergedAt,
-        graceUntil: null,
-        lastSeenHeadSha: pullRequest.lastSeenHeadSha,
-        baseBranch: pullRequest.baseBranch,
-        mergeable: pullRequest.mergeable,
-        mergeableState: pullRequest.mergeableState,
-        requestedReviewTeamSlugs: pullRequest.requestedReviewTeamSlugs,
-      });
+      const persistedPullRequest = pullRequestRepository.upsertPullRequest(
+        createPullRequestUpsertInput(pullRequest, {
+          lastSeenAt: observedAt,
+          graceUntil: null,
+        }),
+      );
 
       if (
         existingPullRequest === undefined &&
@@ -381,7 +352,11 @@ export async function fetchPullRequestDetailFromGitHub(
     headers: GITHUB_API_HEADERS,
   });
 
-  return mapPullRequestDetail(response.data as unknown, coordinates);
+  return mapPullRequestSnapshot(
+    response.data as unknown,
+    coordinates,
+    (message) => new PullRequestDiscoveryError(message),
+  );
 }
 
 function readSearchItems(data: unknown): unknown[] {
@@ -497,49 +472,6 @@ async function createReviewRequestedNotification(
   preparePullRequestNotifications(database, pullRequest);
 }
 
-function mapPullRequestDetail(
-  data: unknown,
-  coordinates: PullRequestCoordinates,
-): DiscoveredPullRequest {
-  const value = requireRecord(data, "pull request response");
-  const user = requireRecord(value.user, "pull request response.user");
-  const head = requireRecord(value.head, "pull request response.head");
-  const base = requireRecord(value.base, "pull request response.base");
-  const number = readInteger(value.number, "pull request response.number");
-
-  if (number !== coordinates.number) {
-    throw new PullRequestDiscoveryError(
-      `GitHub returned a mismatched pull request number for ${formatPullRequestLabel(coordinates)}`,
-    );
-  }
-
-  return {
-    githubPullRequestId: readInteger(value.id, "pull request response.id"),
-    repositoryOwner: coordinates.repositoryOwner,
-    repositoryName: coordinates.repositoryName,
-    number,
-    url: readString(value.html_url, "pull request response.html_url"),
-    authorLogin: readString(user.login, "pull request response.user.login"),
-    authorAvatarUrl: readNullableString(user.avatar_url, "pull request response.user.avatar_url"),
-    title: readString(value.title, "pull request response.title"),
-    state: readString(value.state, "pull request response.state"),
-    isDraft: readBoolean(value.draft, "pull request response.draft"),
-    closedAt: readNullableString(value.closed_at, "pull request response.closed_at"),
-    mergedAt: readNullableString(value.merged_at, "pull request response.merged_at"),
-    lastSeenHeadSha: readNullableString(head.sha, "pull request response.head.sha"),
-    baseBranch: readNullableString(base.ref, "pull request response.base.ref"),
-    mergeable: readNullableBoolean(value.mergeable, "pull request response.mergeable"),
-    mergeableState: readNullableString(
-      value.mergeable_state,
-      "pull request response.mergeable_state",
-    ),
-    requestedReviewTeamSlugs: readRequestedReviewTeamSlugs(
-      value.requested_teams,
-      "pull request response.requested_teams",
-    ),
-  };
-}
-
 function readAppStateValue(database: DatabaseSync, key: string): string | undefined {
   const row = database.prepare("SELECT value FROM AppState WHERE key = ?").get(key);
 
@@ -603,33 +535,6 @@ function readNullableString(value: unknown, fieldName: string): string | null {
   }
 
   return readString(value, fieldName);
-}
-
-function readBoolean(value: unknown, fieldName: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new PullRequestDiscoveryError(`${fieldName} must be a boolean`);
-  }
-
-  return value;
-}
-
-function readNullableBoolean(value: unknown, fieldName: string): boolean | null {
-  if (value === null) {
-    return null;
-  }
-
-  return readBoolean(value, fieldName);
-}
-
-function readRequestedReviewTeamSlugs(value: unknown, fieldName: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new PullRequestDiscoveryError(`${fieldName} must be an array`);
-  }
-
-  return value.map((entry, index) => {
-    const team = requireRecord(entry, `${fieldName}[${index}]`);
-    return readString(team.slug, `${fieldName}[${index}].slug`);
-  });
 }
 
 function formatPullRequestLabel(coordinates: PullRequestCoordinates): string {
