@@ -14,20 +14,47 @@ import { Highlight, themes } from "prism-react-renderer";
 
 import {
   DEFAULT_ACTIVITY_PAGE_SIZE,
-  isAllPullRequestStateFilterSelection,
-  normalizePullRequestStateFilters,
   type PullRequestStateFilter,
 } from "./activity-feed.js";
+import {
+  APP_PAGES,
+  DEFAULT_ACTIVITY_PAGE,
+  buildActivityPageHref,
+  buildPageHref,
+  buildLogViewerHref,
+  countActivePageFilters,
+  formatPageLabel,
+  formatPagePath,
+  formatPullRequestEmptyMessage,
+  isLogLevel,
+  readRouteState,
+  togglePullRequestStateSelection,
+  type AppPage,
+  type LogLevelFilter,
+  type PrSubTab,
+  type RouteState,
+} from "./client-route-state.js";
+import {
+  apiFetch,
+  loadLogsData,
+  loadNotificationHistoryPageData,
+  loadPullRequestBasePageData,
+  loadPullRequestsPageData,
+  type PaginationState,
+} from "./client-page-data.js";
 import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { PullRequestReviewStateRecord, ReviewState } from "./pull-request-review-state-repository.js";
 import type { PullRequestCiJobStateRecord } from "./pull-request-ci-job-state-repository.js";
-import type { PullRequestTimeline, PullRequestTimelineEntry, PullRequestReviewStatesByPullRequest, PullRequestCiJobStatesByPullRequest } from "./raw-events.js";
+import type {
+  PullRequestTimeline,
+  PullRequestTimelineEntry,
+  PullRequestReviewStatesByPullRequest,
+  PullRequestCiJobStatesByPullRequest,
+} from "./raw-events.js";
 import {
-  DEFAULT_LANDING_UI_FILTERS,
-  DEFAULT_UI_FILTERS,
   buildUiFilterOptions,
   filterInactivePullRequests,
   filterNotificationHistory,
@@ -42,32 +69,7 @@ interface AppFlashMessage {
   text: string;
 }
 
-interface PaginationState {
-  page: number;
-  pageSize: number;
-  totalCount: number;
-  totalPages: number;
-}
-
-type LogLevel = "debug" | "info" | "warn" | "error";
-type LogLevelFilter = "all" | LogLevel;
-type AppPage = "pull-requests" | "logs" | "notification-history";
-
-type PrSubTab = "my-prs" | "review-requested";
-
-interface RouteState {
-  currentPage: AppPage;
-  uiFilters: UiFilterValues;
-  logLevelFilter: LogLevelFilter;
-  activityPage: number;
-  prSubTab: PrSubTab;
-}
-
-type PageFilterField = keyof UiFilterValues;
-
 const ROOT = document.querySelector("#root");
-const PULL_REQUEST_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestStates", "repository"];
-const ACTIVITY_FILTER_FIELDS: readonly PageFilterField[] = ["pullRequestStates", "repository", "actorClass"];
 const PULL_REQUEST_FILTER_PILLS: readonly { value: PullRequestStateFilter; label: string }[] = [
   { value: "tracked", label: "Tracked" },
   { value: "inactive", label: "Untracked" },
@@ -75,12 +77,6 @@ const PULL_REQUEST_FILTER_PILLS: readonly { value: PullRequestStateFilter; label
   { value: "merged", label: "Merged" },
   { value: "closed", label: "Closed" },
 ];
-const APP_PAGES: readonly AppPage[] = [
-  "pull-requests",
-  "notification-history",
-  "logs",
-];
-const DEFAULT_ACTIVITY_PAGE = 1;
 const EMPTY_PAGINATION_STATE: PaginationState = {
   page: DEFAULT_ACTIVITY_PAGE,
   pageSize: DEFAULT_ACTIVITY_PAGE_SIZE,
@@ -131,10 +127,6 @@ interface PullRequestInteractionGroup {
   kind: PullRequestInteractionGroupKind;
   label: string;
   actors: PullRequestInteractionActor[];
-}
-
-function isLogLevel(value: string): value is LogLevel {
-  return value === "debug" || value === "info" || value === "warn" || value === "error";
 }
 
 if (!(ROOT instanceof HTMLElement)) {
@@ -285,43 +277,30 @@ function App() {
   async function loadCurrentPageData(routeState: RouteState): Promise<void> {
     try {
       if (routeState.currentPage === "pull-requests") {
-        const [trackedResponse, inactiveResponse, pullRequestTimelineResponse] = await Promise.all([
-          apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
-          apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
-          apiFetch<{ timelineByPullRequest: PullRequestTimeline; reviewStatesByPullRequest: PullRequestReviewStatesByPullRequest; ciJobStatesByPullRequest: PullRequestCiJobStatesByPullRequest }>("/api/pull-request-timeline"),
-        ]);
+        const pageData = await loadPullRequestsPageData();
 
-        setTrackedPullRequests(trackedResponse.pullRequests);
-        setInactivePullRequests(inactiveResponse.pullRequests);
-        setTimelineByPullRequest(pullRequestTimelineResponse.timelineByPullRequest);
-        setReviewStatesByPullRequest(pullRequestTimelineResponse.reviewStatesByPullRequest);
-        setCiJobStatesByPullRequest(pullRequestTimelineResponse.ciJobStatesByPullRequest);
+        setTrackedPullRequests(pageData.trackedPullRequests);
+        setInactivePullRequests(pageData.inactivePullRequests);
+        setTimelineByPullRequest(pageData.timelineByPullRequest);
+        setReviewStatesByPullRequest(pageData.reviewStatesByPullRequest);
+        setCiJobStatesByPullRequest(pageData.ciJobStatesByPullRequest);
         return;
       }
 
       if (routeState.currentPage === "notification-history") {
-        const [trackedResponse, inactiveResponse, notificationHistoryResponse] = await Promise.all([
-          apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
-          apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
-          apiFetch<{ notificationHistory: NotificationHistoryEntry[]; pagination: PaginationState }>(
-            buildActivityApiPath("/api/notification-history", routeState.uiFilters, routeState.activityPage),
-          ),
-        ]);
+        const pageData = await loadNotificationHistoryPageData(routeState);
 
-        setTrackedPullRequests(trackedResponse.pullRequests);
-        setInactivePullRequests(inactiveResponse.pullRequests);
-        setNotificationHistory(notificationHistoryResponse.notificationHistory);
-        setNotificationHistoryPagination(notificationHistoryResponse.pagination);
+        setTrackedPullRequests(pageData.trackedPullRequests);
+        setInactivePullRequests(pageData.inactivePullRequests);
+        setNotificationHistory(pageData.notificationHistory);
+        setNotificationHistoryPagination(pageData.pagination);
         return;
       }
 
-      const [trackedResponse, inactiveResponse] = await Promise.all([
-        apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/tracked-pull-requests"),
-        apiFetch<{ pullRequests: PullRequestRecord[] }>("/api/inactive-pull-requests"),
-      ]);
+      const pageData = await loadPullRequestBasePageData();
 
-      setTrackedPullRequests(trackedResponse.pullRequests);
-      setInactivePullRequests(inactiveResponse.pullRequests);
+      setTrackedPullRequests(pageData.trackedPullRequests);
+      setInactivePullRequests(pageData.inactivePullRequests);
     } catch (error) {
       setFlashMessage({
         kind: "error",
@@ -332,8 +311,7 @@ function App() {
 
   async function loadLogs(logLevelFilter: LogLevelFilter): Promise<void> {
     try {
-      const response = await apiFetch<{ logs: RecentLogEntry[] }>(buildLogsApiPath(logLevelFilter));
-      setRecentLogs(response.logs);
+      setRecentLogs(await loadLogsData(logLevelFilter));
     } catch (error) {
       setFlashMessage({
         kind: "error",
@@ -2015,288 +1993,6 @@ function PullRequestTrackingControl({
         </button>
       </div>
     </form>
-  );
-}
-
-async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const body = (await response.json()) as unknown;
-
-  if (!response.ok) {
-    const message =
-      typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
-        ? body.error
-        : `Request failed: ${response.status}`;
-
-    throw new Error(message);
-  }
-
-  return body as T;
-}
-
-function readPrSubTab(searchParams: URLSearchParams): PrSubTab {
-  return searchParams.get("tab") === "review-requested" ? "review-requested" : "my-prs";
-}
-
-function readRouteState(url: URL): RouteState {
-  return {
-    currentPage: readDocumentPage(url.pathname),
-    uiFilters: readUiFilterValues(url.searchParams, DEFAULT_LANDING_UI_FILTERS),
-    logLevelFilter: readLogLevelFilter(url.searchParams),
-    activityPage: readActivityPage(url.searchParams),
-    prSubTab: readPrSubTab(url.searchParams),
-  };
-}
-
-function buildLogsApiPath(logLevelFilter: LogLevelFilter): string {
-  return logLevelFilter === "all" ? "/api/logs" : `/api/logs?level=${logLevelFilter}`;
-}
-
-function buildActivityApiPath(path: string, uiFilters: UiFilterValues, page: number): string {
-  const searchParams = new URLSearchParams();
-
-  appendUiFilters(searchParams, ACTIVITY_FILTER_FIELDS, uiFilters);
-
-  if (page > DEFAULT_ACTIVITY_PAGE) {
-    searchParams.set("page", String(page));
-  }
-
-  const search = searchParams.toString();
-
-  return search.length > 0 ? `${path}?${search}` : path;
-}
-
-function readDocumentPage(pathname: string): AppPage {
-  if (pathname === "/logs") {
-    return "logs";
-  }
-
-  if (pathname === "/notification-history") {
-    return "notification-history";
-  }
-
-  return "pull-requests";
-}
-
-function readLogLevelFilter(searchParams: URLSearchParams): LogLevelFilter {
-  const value = searchParams.get("level");
-
-  if (value === null || value === "all") {
-    return "all";
-  }
-
-  return isLogLevel(value) ? value : "all";
-}
-
-function readActivityPage(searchParams: URLSearchParams): number {
-  const value = searchParams.get("page");
-
-  if (value === null) {
-    return DEFAULT_ACTIVITY_PAGE;
-  }
-
-  const numericValue = Number(value);
-
-  return Number.isSafeInteger(numericValue) && numericValue > 0 ? numericValue : DEFAULT_ACTIVITY_PAGE;
-}
-
-function countActivePageFilters(filters: UiFilterValues, page: AppPage, logLevelFilter: LogLevelFilter): number {
-  if (page === "logs") {
-    return logLevelFilter === "all" ? 0 : 1;
-  }
-
-  let count = 0;
-
-  for (const field of getPageFilterFields(page)) {
-    if (field === "pullRequestStates") {
-      if (!isAllPullRequestStateFilterSelection(filters.pullRequestStates)) {
-        count += 1;
-      }
-
-      continue;
-    }
-
-    if (filters[field] !== DEFAULT_UI_FILTERS[field]) {
-      count += 1;
-    }
-  }
-
-  return count;
-}
-
-function getPageFilterFields(page: AppPage): readonly PageFilterField[] {
-  if (page === "pull-requests") {
-    return PULL_REQUEST_FILTER_FIELDS;
-  }
-
-  if (page === "logs") {
-    return [];
-  }
-
-  return ACTIVITY_FILTER_FIELDS;
-}
-
-function buildPageHref(page: AppPage, uiFilters: UiFilterValues, logLevelFilter: LogLevelFilter, prSubTab?: PrSubTab): string {
-  if (page === "logs") {
-    return buildLogViewerHref(logLevelFilter);
-  }
-
-  const searchParams = new URLSearchParams();
-
-  appendUiFilters(searchParams, getPageFilterFields(page), uiFilters);
-
-  if (page === "pull-requests" && prSubTab && prSubTab !== "my-prs") {
-    searchParams.set("tab", prSubTab);
-  }
-
-  const pagePath = formatPagePath(page);
-  const search = searchParams.toString();
-
-  return search.length > 0 ? `${pagePath}?${search}` : pagePath;
-}
-
-function buildActivityPageHref(
-  page: "notification-history",
-  uiFilters: UiFilterValues,
-  activityPage: number,
-): string {
-  const searchParams = new URLSearchParams();
-
-  appendUiFilters(searchParams, getPageFilterFields(page), uiFilters);
-
-  if (activityPage > DEFAULT_ACTIVITY_PAGE) {
-    searchParams.set("page", String(activityPage));
-  }
-
-  const pagePath = formatPagePath(page);
-  const search = searchParams.toString();
-
-  return search.length > 0 ? `${pagePath}?${search}` : pagePath;
-}
-
-function buildLogViewerHref(logLevelFilter: LogLevelFilter): string {
-  if (logLevelFilter === "all") {
-    return "/logs";
-  }
-
-  return `/logs?level=${logLevelFilter}`;
-}
-
-function formatFilterSearchParamKey(field: PageFilterField): string {
-  switch (field) {
-    case "pullRequestStates":
-      return "pr-state";
-    case "repository":
-      return "repo";
-    case "actorClass":
-      return "actor-type";
-  }
-
-  throw new Error(`Unsupported filter field: ${field}`);
-}
-
-function appendUiFilters(
-  searchParams: URLSearchParams,
-  fields: readonly PageFilterField[],
-  uiFilters: UiFilterValues,
-): void {
-  let appendedFilter = false;
-
-  for (const field of fields) {
-    if (field === "pullRequestStates") {
-      if (isAllPullRequestStateFilterSelection(uiFilters.pullRequestStates)) {
-        continue;
-      }
-
-      for (const filter of uiFilters.pullRequestStates) {
-        searchParams.append(formatFilterSearchParamKey(field), filter);
-      }
-
-      appendedFilter = true;
-      continue;
-    }
-
-    const value = uiFilters[field];
-
-    if (value === DEFAULT_UI_FILTERS[field]) {
-      continue;
-    }
-
-    searchParams.set(formatFilterSearchParamKey(field), value);
-    appendedFilter = true;
-  }
-
-  if (!appendedFilter && fields.includes("pullRequestStates")) {
-    searchParams.set(formatFilterSearchParamKey("pullRequestStates"), "all");
-  }
-}
-
-function formatPagePath(page: AppPage): string {
-  if (page === "pull-requests") {
-    return "/";
-  }
-
-  return `/${page}`;
-}
-
-function formatPageLabel(page: AppPage): string {
-  if (page === "pull-requests") {
-    return "Pull Requests";
-  }
-
-  if (page === "logs") {
-    return "Logs";
-  }
-
-  if (page === "notification-history") {
-    return "Notification History";
-  }
-
-  return "Logs";
-}
-
-function formatPullRequestEmptyMessage(uiFilters: UiFilterValues, hasActiveFilters: boolean): string {
-  if (!hasActiveFilters) {
-    return "No pull requests yet.";
-  }
-
-  const [selectedFilter] = uiFilters.pullRequestStates;
-
-  if (uiFilters.pullRequestStates.length !== 1 || selectedFilter === undefined) {
-    return "No pull requests match current filters.";
-  }
-
-  if (selectedFilter === "tracked") {
-    return "No tracked pull requests match current filters.";
-  }
-
-  if (selectedFilter === "inactive") {
-    return "No untracked pull requests match current filters.";
-  }
-
-  if (selectedFilter === "open") {
-    return "No open pull requests match current filters.";
-  }
-
-  if (selectedFilter === "merged") {
-    return "No merged pull requests match current filters.";
-  }
-
-  if (selectedFilter === "closed") {
-    return "No closed pull requests match current filters.";
-  }
-
-  return "No pull requests match current filters.";
-}
-
-function togglePullRequestStateSelection(
-  selectedFilters: readonly PullRequestStateFilter[],
-  filter: PullRequestStateFilter,
-): PullRequestStateFilter[] {
-  return normalizePullRequestStateFilters(
-    selectedFilters.includes(filter)
-      ? selectedFilters.filter((value) => value !== filter)
-      : [...selectedFilters, filter],
   );
 }
 
