@@ -376,6 +376,75 @@ describe("dispatchPullRequestNotifications", () => {
       database.close();
     }
   });
+
+  it("keeps review-thread reply notifications sticky when the current user participated in the thread", async () => {
+    const { database, pullRequest } = createPullRequest({ authorLogin: "alice" });
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const notificationDispatcher = {
+      dispatchNotification: vi.fn().mockResolvedValue(undefined),
+    };
+
+    try {
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_inline_comment",
+        actorLogin: "octocat",
+        actorClass: "self",
+        decisionState: "suppressed_self_action",
+        payloadJson: JSON.stringify({
+          commentId: 5001,
+          reviewId: 42,
+          bodyText: "I think this is fine",
+          path: "src/main.ts",
+        }),
+        occurredAt: "2026-04-10T12:00:00.000Z",
+      });
+      normalizedEventRepository.insertNormalizedEvent({
+        pullRequestId: pullRequest.id,
+        eventType: "review_inline_comment",
+        actorLogin: "bob",
+        actorClass: "human_other",
+        decisionState: "notified",
+        payloadJson: JSON.stringify({
+          commentId: 5002,
+          inReplyToCommentId: 5001,
+          reviewId: 42,
+          bodyText: "I still disagree",
+          path: "src/main.ts",
+        }),
+        occurredAt: "2026-04-10T12:01:00.000Z",
+      });
+
+      expect(bundlePullRequestEvents(database, pullRequest.id)).toEqual({
+        eligibleCount: 1,
+        bundledCount: 1,
+        createdBundleCount: 1,
+      });
+
+      await expect(
+        dispatchPullRequestNotifications(database, pullRequest, {
+          currentUserLogin: "octocat",
+          notificationDispatcher,
+        }),
+      ).resolves.toEqual({
+        immediateCount: 0,
+        bundledCount: 1,
+        createdCount: 1,
+        dispatchedCount: 1,
+        failedCount: 0,
+      });
+
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledWith(expect.objectContaining({
+        body: "bob: 💬 I still disagree",
+        sticky: true,
+      }));
+      expect(notificationDispatcher.dispatchNotification.mock.calls[0]?.[0]).not.toHaveProperty(
+        "soundFile",
+      );
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {

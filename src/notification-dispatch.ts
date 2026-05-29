@@ -190,11 +190,14 @@ function buildDispatchNotification(
   record: NotificationRecord,
   normalizedEventRepository: Pick<
     NormalizedEventRepository,
-    "getNormalizedEventById" | "listNormalizedEventsForBundle"
+    "getNormalizedEventById" | "listNormalizedEventsForBundle" | "listNormalizedEventsForPullRequest"
   >,
   currentUserLogin?: string,
 ): LinuxNotification {
   const events = resolveNotificationEvents(record, normalizedEventRepository);
+  const allPullRequestEvents = normalizedEventRepository.listNormalizedEventsForPullRequest(
+    pullRequest.id,
+  );
   const soundFile = resolveNotificationSoundFilePath(pullRequest, events, currentUserLogin);
 
   return {
@@ -203,7 +206,7 @@ function buildDispatchNotification(
     clickUrl: record.clickUrl,
     icon: resolvePullRequestStateAssetFilePath(pullRequest),
     ...(soundFile === undefined ? {} : { soundFile }),
-    sticky: shouldKeepNotificationSticky(pullRequest, events, currentUserLogin),
+    sticky: shouldKeepNotificationSticky(pullRequest, events, allPullRequestEvents, currentUserLogin),
     ...(events === null || events.length === 0 ? {} : { markup: renderNotificationMarkup(pullRequest, events) }),
   };
 }
@@ -242,6 +245,7 @@ function resolveNotificationSoundFilePath(
 function shouldKeepNotificationSticky(
   pullRequest: Pick<PullRequestRecord, "authorLogin">,
   events: readonly NormalizedEventRecord[] | null,
+  allPullRequestEvents: readonly NormalizedEventRecord[],
   currentUserLogin?: string,
 ): boolean {
   if (events === null) {
@@ -258,11 +262,15 @@ function shouldKeepNotificationSticky(
     return true;
   }
 
-  if (currentUserLogin === undefined || !sameLogin(currentUserLogin, pullRequest.authorLogin)) {
+  if (currentUserLogin === undefined) {
     return false;
   }
 
-  return true;
+  if (sameLogin(currentUserLogin, pullRequest.authorLogin)) {
+    return true;
+  }
+
+  return hasParticipantThreadComment(events, allPullRequestEvents, currentUserLogin);
 }
 
 function isStickyNotificationEventType(eventType: string): boolean {
@@ -278,6 +286,75 @@ function isStickyNotificationEventType(eventType: string): boolean {
 
 function isReviewRequestEventType(eventType: string): boolean {
   return eventType === "review_requested" || eventType === "ready_for_review";
+}
+
+function hasParticipantThreadComment(
+  events: readonly NormalizedEventRecord[],
+  allPullRequestEvents: readonly NormalizedEventRecord[],
+  currentUserLogin: string,
+): boolean {
+  const participatedThreadIds = new Set(
+    allPullRequestEvents.flatMap((event) => {
+      if (
+        event.eventType !== "review_inline_comment" ||
+        event.actorLogin === null ||
+        !sameLogin(event.actorLogin, currentUserLogin)
+      ) {
+        return [];
+      }
+
+      const threadId = readReviewThreadId(event);
+
+      return threadId === null ? [] : [threadId];
+    }),
+  );
+
+  if (participatedThreadIds.size === 0) {
+    return false;
+  }
+
+  return events.some((event) => {
+    if (event.eventType !== "review_inline_comment") {
+      return false;
+    }
+
+    const threadId = readReviewThreadId(event);
+
+    return threadId !== null && participatedThreadIds.has(threadId);
+  });
+}
+
+function readReviewThreadId(event: Pick<NormalizedEventRecord, "eventType" | "payloadJson">): string | null {
+  if (event.eventType !== "review_inline_comment") {
+    return null;
+  }
+
+  const payload = parsePayload(event.payloadJson);
+  const inReplyToCommentId = payload?.inReplyToCommentId;
+
+  if (typeof inReplyToCommentId === "number" || typeof inReplyToCommentId === "string") {
+    return String(inReplyToCommentId);
+  }
+
+  const commentId = payload?.commentId;
+
+  if (typeof commentId === "number" || typeof commentId === "string") {
+    return String(commentId);
+  }
+
+  return null;
+}
+
+function parsePayload(payloadJson: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(payloadJson) as unknown;
+
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function sameLogin(left: string, right: string): boolean {
