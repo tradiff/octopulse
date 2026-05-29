@@ -238,6 +238,58 @@ describe("renderNotification", () => {
     });
   });
 
+  it("converts bot markdown and html into plain text summaries", () => {
+    const notification = renderNotification(
+      {
+        repositoryOwner: "acme",
+        repositoryName: "octopulse",
+        number: 7,
+        title: "Ship notifications",
+        url: "https://github.com/acme/octopulse/pull/7",
+      },
+      [
+        {
+          id: 302,
+          eventType: "issue_comment",
+          actorLogin: "gitar-bot[bot]",
+          occurredAt: "2026-04-10T12:00:00.000Z",
+          payloadJson: JSON.stringify({
+            bodyText: [
+              "<details>",
+              "<summary><b>Code Review</b> <kbd>👍 Approved with suggestions</kbd></summary>",
+              "",
+              "Implements byte-symmetric BP4/BP5 Purl handling.",
+              "",
+              "<details>",
+              "<summary>💡 <b>Edge Case:</b> withoutVersionAndEpoch crashes if '#' precedes '?' in input</summary>",
+              "",
+              "<kbd>📄 <a href=\"https://github.com/acme/octopulse/pull/7/files\">AbstractPurl.java:432-438</a></kbd>",
+              "",
+              "````",
+              'var qualifierString = "";',
+              "````",
+              "",
+              "</details>",
+              "</details>",
+            ].join("\n"),
+          }),
+        },
+      ],
+    );
+
+    expect(notification).toMatchObject({
+      title: "acme/octopulse #7 Ship notifications",
+      body: expect.stringContaining(
+        "gitar-bot[bot]: 💬 Code Review 👍 Approved with suggestions Implements byte-symmetric BP4/BP5 Purl handling",
+      ),
+      clickUrl: "https://github.com/acme/octopulse/pull/7",
+      summary: "gitar-bot[bot] commented",
+    });
+    expect(notification.body).not.toContain("<details>");
+    expect(notification.body).not.toContain("<kbd>");
+    expect(notification.body).not.toContain("````");
+  });
+
   it("renders notification markup model with header avatar and actor avatars", () => {
     expect(
       renderNotificationMarkup(

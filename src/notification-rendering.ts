@@ -1,3 +1,4 @@
+import { normalizeNotificationBodyText } from "./notification-body-text.js";
 import { filterDisplayableNotificationEvents } from "./displayable-notification-events.js";
 import type { NormalizedEventRecord } from "./normalized-event-repository.js";
 import { formatPullRequestStateLabel } from "./pull-request-state.js";
@@ -271,7 +272,7 @@ function readEventText(event: NotificationEvent): string | null {
     return null;
   }
 
-  const normalizedText = bodyText.replace(/\s+/g, " ").trim();
+  const normalizedText = normalizeNotificationBodyText(bodyText);
 
   if (normalizedText.length === 0) {
     return null;

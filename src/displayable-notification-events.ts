@@ -1,3 +1,4 @@
+import { normalizeNotificationBodyText } from "./notification-body-text.js";
 import type { NormalizedEventRecord } from "./normalized-event-repository.js";
 
 type DisplayableNotificationEvent = Pick<NormalizedEventRecord, "eventType" | "payloadJson">;
@@ -56,7 +57,7 @@ function readBodyText(event: DisplayableNotificationEvent): string | null {
     return null;
   }
 
-  const normalizedBodyText = bodyText.trim();
+  const normalizedBodyText = normalizeNotificationBodyText(bodyText);
 
   return normalizedBodyText.length > 0 ? normalizedBodyText : null;
 }
