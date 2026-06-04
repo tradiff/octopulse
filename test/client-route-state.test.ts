@@ -27,6 +27,9 @@ describe("client route state helpers", () => {
       activityPage: 3,
       prSubTab: "my-prs",
     });
+    expect(readRouteState(new URL("http://127.0.0.1/?tab=needs-my-review")).prSubTab).toBe(
+      "needs-my-review",
+    );
   });
 
   it("builds navigation hrefs from one route module", () => {
@@ -36,6 +39,9 @@ describe("client route state helpers", () => {
       repository: "acme/octopulse",
     };
 
+    expect(buildPageHref("pull-requests", uiFilters, "all", "needs-my-review")).toBe(
+      "/?pr-state=tracked&repo=acme%2Foctopulse&tab=needs-my-review",
+    );
     expect(buildPageHref("pull-requests", uiFilters, "all", "review-requested")).toBe(
       "/?pr-state=tracked&repo=acme%2Foctopulse&tab=review-requested",
     );

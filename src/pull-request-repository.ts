@@ -25,6 +25,8 @@ export interface PullRequestRecord {
   baseBranch: string | null;
   mergeable: boolean | null;
   mergeableState: string | null;
+  requestedReviewerLogins: string[];
+  requestedReviewTeamKeys: string[];
   requestedReviewTeamSlugs: string[];
   createdAt: string;
   updatedAt: string;
@@ -55,6 +57,8 @@ export interface UpsertPullRequestInput {
   baseBranch?: string | null;
   mergeable?: boolean | null;
   mergeableState?: string | null;
+  requestedReviewerLogins?: string[];
+  requestedReviewTeamKeys?: string[];
   requestedReviewTeamSlugs?: string[];
   tracking?: PullRequestTrackingState;
 }
@@ -117,6 +121,8 @@ export class PullRequestRepository {
                     base_branch = ?,
                     mergeable = ?,
                     mergeable_state = ?,
+                    requested_reviewer_logins_json = ?,
+                    requested_review_team_keys_json = ?,
                     requested_review_team_slugs_json = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
@@ -144,6 +150,12 @@ export class PullRequestRepository {
               resolveNullableField(input.baseBranch, existing.baseBranch),
               writeNullableBoolean(resolveNullableBooleanField(input.mergeable, existing.mergeable)),
               resolveNullableField(input.mergeableState, existing.mergeableState),
+              writeStringArray(
+                resolveStringArrayField(input.requestedReviewerLogins, existing.requestedReviewerLogins),
+              ),
+              writeStringArray(
+                resolveStringArrayField(input.requestedReviewTeamKeys, existing.requestedReviewTeamKeys),
+              ),
               writeStringArray(
                 resolveStringArrayField(input.requestedReviewTeamSlugs, existing.requestedReviewTeamSlugs),
               ),
@@ -178,8 +190,10 @@ export class PullRequestRepository {
                 base_branch,
                 mergeable,
                 mergeable_state,
+                requested_reviewer_logins_json,
+                requested_review_team_keys_json,
                 requested_review_team_slugs_json
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
           )
           .run(
@@ -204,6 +218,8 @@ export class PullRequestRepository {
             input.baseBranch ?? null,
             writeNullableBoolean(input.mergeable ?? null),
             input.mergeableState ?? null,
+            writeStringArray(input.requestedReviewerLogins ?? []),
+            writeStringArray(input.requestedReviewTeamKeys ?? []),
             writeStringArray(input.requestedReviewTeamSlugs ?? []),
           );
 
@@ -293,6 +309,7 @@ export class PullRequestRepository {
       );
     }
   }
+
 
   private listByTrackedState(isTracked: boolean): PullRequestRecord[] {
     const rows = this.database
@@ -415,6 +432,14 @@ function mapPullRequestRow(row: unknown): PullRequestRecord {
     baseBranch: readNullableString(value.base_branch, "PullRequest.base_branch"),
     mergeable: readNullableBoolean(value.mergeable, "PullRequest.mergeable"),
     mergeableState: readNullableString(value.mergeable_state, "PullRequest.mergeable_state"),
+    requestedReviewerLogins: readStringArray(
+      value.requested_reviewer_logins_json,
+      "PullRequest.requested_reviewer_logins_json",
+    ),
+    requestedReviewTeamKeys: readStringArray(
+      value.requested_review_team_keys_json,
+      "PullRequest.requested_review_team_keys_json",
+    ),
     requestedReviewTeamSlugs: readStringArray(
       value.requested_review_team_slugs_json,
       "PullRequest.requested_review_team_slugs_json",

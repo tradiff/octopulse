@@ -46,6 +46,11 @@ import type { RecentLogEntry } from "./logger.js";
 import type { NotificationHistoryEntry } from "./notification-history.js";
 import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
+import {
+  doesPullRequestNeedMyReview,
+  isPullRequestAuthoredByCurrentUser,
+  isPullRequestInReviewRequestedQueue,
+} from "./pull-request-review-targeting.js";
 import type { PullRequestReviewStateRecord, ReviewState } from "./pull-request-review-state-repository.js";
 import type { PullRequestCiJobStateRecord } from "./pull-request-ci-job-state-repository.js";
 import type {
@@ -152,10 +157,12 @@ function App() {
   const [trackFormMessage, setTrackFormMessage] = useState<AppFlashMessage | undefined>(undefined);
   const [flashMessage, setFlashMessage] = useState<AppFlashMessage | undefined>(undefined);
   const [currentUserLogin, setCurrentUserLogin] = useState<string | null>(null);
+  const [currentUserTeamKeys, setCurrentUserTeamKeys] = useState<string[]>([]);
 
   useEffect(() => {
-    void apiFetch<{ login: string | null }>("/api/me").then((res) => {
+    void apiFetch<{ login: string | null; teamKeys: string[] }>("/api/me").then((res) => {
       setCurrentUserLogin(res.login);
+      setCurrentUserTeamKeys(res.teamKeys);
     });
   }, []);
 
@@ -237,20 +244,45 @@ function App() {
       ),
     [filteredTrackedPullRequests, filteredInactivePullRequests, timelineByPullRequest],
   );
-  const subTabPullRequests = useMemo(() => {
-    if (currentUserLogin === null) return sortedPullRequests;
-    if (route.prSubTab === "review-requested") {
-      return sortedPullRequests.filter((pr) => pr.authorLogin !== currentUserLogin);
+  const pullRequestsBySubTab = useMemo<Record<PrSubTab, PullRequestRecord[]>>(() => {
+    if (currentUserLogin === null) {
+      return {
+        "my-prs": sortedPullRequests,
+        "needs-my-review": [],
+        "review-requested": [],
+      };
     }
-    return sortedPullRequests.filter((pr) => pr.authorLogin === currentUserLogin);
-  }, [sortedPullRequests, route.prSubTab, currentUserLogin]);
-  const subTabCounts = useMemo<Record<PrSubTab, number>>(() => {
-    if (currentUserLogin === null) return { "my-prs": sortedPullRequests.length, "review-requested": 0 };
+
+    const myPullRequests = sortedPullRequests.filter((pr) =>
+      isPullRequestAuthoredByCurrentUser(pr, currentUserLogin),
+    );
+    const needsMyReviewPullRequests = sortedPullRequests.filter((pr) =>
+      doesPullRequestNeedMyReview(pr, currentUserLogin, currentUserTeamKeys),
+    );
+    const reviewRequestedPullRequests = sortedPullRequests.filter(
+      (pr) =>
+        isPullRequestInReviewRequestedQueue(pr, currentUserLogin) &&
+        !doesPullRequestNeedMyReview(pr, currentUserLogin, currentUserTeamKeys),
+    );
+
     return {
-      "my-prs": sortedPullRequests.filter((pr) => pr.authorLogin === currentUserLogin).length,
-      "review-requested": sortedPullRequests.filter((pr) => pr.authorLogin !== currentUserLogin).length,
+      "my-prs": myPullRequests,
+      "needs-my-review": needsMyReviewPullRequests,
+      "review-requested": reviewRequestedPullRequests,
     };
-  }, [sortedPullRequests, currentUserLogin]);
+  }, [sortedPullRequests, currentUserLogin, currentUserTeamKeys]);
+  const subTabPullRequests = useMemo(
+    () => pullRequestsBySubTab[route.prSubTab],
+    [pullRequestsBySubTab, route.prSubTab],
+  );
+  const subTabCounts = useMemo<Record<PrSubTab, number>>(
+    () => ({
+      "my-prs": pullRequestsBySubTab["my-prs"].length,
+      "needs-my-review": pullRequestsBySubTab["needs-my-review"].length,
+      "review-requested": pullRequestsBySubTab["review-requested"].length,
+    }),
+    [pullRequestsBySubTab],
+  );
   const filteredNotificationHistory = useMemo(
     () => filterNotificationHistory(notificationHistory, route.uiFilters),
     [notificationHistory, route.uiFilters],
@@ -1037,6 +1069,7 @@ function PullRequestList({
 }) {
   const subTabs: { id: PrSubTab; label: string }[] = [
     { id: "my-prs", label: "My PRs" },
+    { id: "needs-my-review", label: "Needs My Review" },
     { id: "review-requested", label: "Review Requests" },
   ];
 

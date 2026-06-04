@@ -288,6 +288,8 @@ function createDiscoveredPullRequest(
     baseBranch: "main",
     mergeable: true,
     mergeableState: "clean",
+    requestedReviewerLogins: [],
+    requestedReviewTeamKeys: [],
     requestedReviewTeamSlugs: [],
     ...overrides,
   };

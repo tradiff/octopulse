@@ -320,11 +320,18 @@ async function searchOpenReviewRequestedPullRequestsViaGitHub(
   client: Octokit,
   reviewerLogin: string,
 ): Promise<PullRequestCoordinates[]> {
+  return searchPullRequestsViaGitHub(client, `is:pr state:open review-requested:${reviewerLogin}`);
+}
+
+async function searchPullRequestsViaGitHub(
+  client: Octokit,
+  query: string,
+): Promise<PullRequestCoordinates[]> {
   const coordinatesList: PullRequestCoordinates[] = [];
 
   for (let page = 1; ; page += 1) {
     const response = await client.request("GET /search/issues", {
-      q: `is:pr state:open review-requested:${reviewerLogin}`,
+      q: query,
       per_page: SEARCH_PAGE_SIZE,
       page,
       headers: GITHUB_API_HEADERS,

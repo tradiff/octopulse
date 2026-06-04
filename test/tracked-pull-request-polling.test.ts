@@ -1723,6 +1723,7 @@ function createPullRequestDetailResponse(
       mergeable_state: overrides.mergeableState ?? "clean",
       closed_at: overrides.closedAt ?? null,
       merged_at: overrides.mergedAt ?? null,
+      requested_reviewers: [],
       requested_teams: (overrides.requestedReviewTeamSlugs ?? []).map((slug) => ({ slug })),
       head: {
         sha: overrides.headSha ?? "abc123",

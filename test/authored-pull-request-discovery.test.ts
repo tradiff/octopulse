@@ -9,6 +9,7 @@ import { initializeDatabase } from "../src/database.js";
 import { NormalizedEventRepository } from "../src/normalized-event-repository.js";
 import { NotificationRecordRepository } from "../src/notification-record-repository.js";
 import {
+  discoverOpenAuthoredPullRequests,
   runFirstRunAuthoredPullRequestDiscovery,
   startRecurringAuthoredPullRequestDiscovery,
   type DiscoveredPullRequest,
@@ -216,6 +217,120 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
           body: "👀 review requested",
         }),
       ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps tracked review-requested pull requests stored when a later discovery pass no longer returns them", async () => {
+    const { database, repository } = createRepository();
+    const client = { kind: "fake-client" };
+    let reviewRequestedCoordinates: PullRequestCoordinates[] = [
+      {
+        repositoryOwner: "widgets",
+        repositoryName: "dashboard",
+        number: 42,
+      },
+    ];
+
+    try {
+      await runFirstRunAuthoredPullRequestDiscovery(
+        database,
+        {
+          client,
+          currentUserLogin: "octocat",
+        },
+        {
+          pullRequestRepository: repository,
+          searchOpenAuthoredPullRequests: async () => [],
+          searchOpenReviewRequestedPullRequests: async () =>
+            reviewRequestedCoordinates.map((coordinates) => ({ ...coordinates })),
+          fetchPullRequestDetail: async (_client, coordinates) => createDiscoveredPullRequest(coordinates),
+          observedAt: OBSERVED_AT,
+        },
+      );
+
+      expect(repository.getPullRequestByGitHubPullRequestId(4201)?.githubPullRequestId).toBe(4201);
+
+      reviewRequestedCoordinates = [];
+
+      await discoverOpenAuthoredPullRequests(
+        database,
+        {
+          client,
+          currentUserLogin: "octocat",
+        },
+        {
+          pullRequestRepository: repository,
+          searchOpenAuthoredPullRequests: async () => [],
+          searchOpenReviewRequestedPullRequests: async () =>
+            reviewRequestedCoordinates.map((coordinates) => ({ ...coordinates })),
+          fetchPullRequestDetail: async (_client, coordinates) => createDiscoveredPullRequest(coordinates),
+          observedAt: "2026-04-10T12:05:00.000Z",
+        },
+      );
+
+      expect(repository.getPullRequestByGitHubPullRequestId(4201)?.githubPullRequestId).toBe(4201);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps prior review-requested state unchanged when discovery fails before completion", async () => {
+    const { database, repository } = createRepository();
+    const client = { kind: "fake-client" };
+
+    try {
+      repository.upsertPullRequest(
+        createPullRequestInput({
+          githubPullRequestId: 4201,
+          repositoryOwner: "widgets",
+          repositoryName: "dashboard",
+          number: 42,
+          url: "https://github.com/widgets/dashboard/pull/42",
+          authorLogin: "alice",
+          title: "Pull request 42",
+          lastSeenHeadSha: "xyz789",
+        }),
+      );
+      repository.upsertPullRequest(createPullRequestInput());
+
+      await expect(
+        discoverOpenAuthoredPullRequests(
+          database,
+          {
+            client,
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            searchOpenAuthoredPullRequests: async () => [],
+            searchOpenReviewRequestedPullRequests: async () => [
+              {
+                repositoryOwner: "acme",
+                repositoryName: "octopulse",
+                number: 7,
+              },
+              {
+                repositoryOwner: "widgets",
+                repositoryName: "dashboard",
+                number: 42,
+              },
+            ],
+            fetchPullRequestDetail: async (_client, coordinates) => {
+              if (coordinates.number === 42) {
+                throw new Error("temporary GitHub outage");
+              }
+
+              return createDiscoveredPullRequest(coordinates);
+            },
+            observedAt: "2026-04-10T12:05:00.000Z",
+          },
+        ),
+      ).rejects.toThrow("Failed to fetch pull request widgets/dashboard#42: temporary GitHub outage");
+
+      expect(repository.getPullRequestByGitHubPullRequestId(101)?.githubPullRequestId).toBe(101);
+      expect(repository.getPullRequestByGitHubPullRequestId(4201)?.githubPullRequestId).toBe(4201);
     } finally {
       database.close();
     }
@@ -550,6 +665,7 @@ describe("startRecurringAuthoredPullRequestDiscovery", () => {
 
       expect(repository.listTrackedPullRequests()).toHaveLength(1);
       expect(repository.listTrackedPullRequests()[0]?.githubPullRequestId).toBe(4201);
+      expect(repository.listTrackedPullRequests()[0]?.githubPullRequestId).toBe(4201);
       expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(1);
       expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -606,6 +722,8 @@ function createDiscoveredPullRequest(
     baseBranch: "main",
     mergeable: true,
     mergeableState: "clean",
+    requestedReviewerLogins: [],
+    requestedReviewTeamKeys: [],
     requestedReviewTeamSlugs: [],
     ...overrides,
   };

@@ -144,6 +144,8 @@ describe("initializeDatabase", () => {
         expect.arrayContaining([
           "mergeable",
           "mergeable_state",
+          "requested_reviewer_logins_json",
+          "requested_review_team_keys_json",
           "requested_review_team_slugs_json",
         ]),
       );

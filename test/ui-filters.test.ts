@@ -10,6 +10,9 @@ describe("readUiFilterValues", () => {
     expect(readUiFilterValues(new URLSearchParams("tab=review-requested"), DEFAULT_LANDING_UI_FILTERS)).toEqual(
       DEFAULT_LANDING_UI_FILTERS,
     );
+    expect(readUiFilterValues(new URLSearchParams("tab=needs-my-review"), DEFAULT_LANDING_UI_FILTERS)).toEqual(
+      DEFAULT_LANDING_UI_FILTERS,
+    );
   });
 
   it("does not apply landing defaults when explicit UI filters are present", () => {

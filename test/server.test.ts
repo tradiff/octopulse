@@ -332,6 +332,8 @@ function createPullRequestResponseRecord(
     baseBranch: string | null;
     mergeable: boolean | null;
     mergeableState: string | null;
+    requestedReviewerLogins: string[];
+    requestedReviewTeamKeys: string[];
     requestedReviewTeamSlugs: string[];
     createdAt: string;
     updatedAt: string;
@@ -360,6 +362,8 @@ function createPullRequestResponseRecord(
     baseBranch: "main",
     mergeable: null,
     mergeableState: null,
+    requestedReviewerLogins: [],
+    requestedReviewTeamKeys: [],
     requestedReviewTeamSlugs: [],
     createdAt: "2026-04-10 12:00:00",
     updatedAt: "2026-04-10 12:00:00",

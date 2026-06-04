@@ -22,7 +22,9 @@ describe("pull-request snapshot helpers", () => {
           baseBranch: "main",
           mergeable: true,
           mergeableState: "clean",
+          requestedReviewerLogins: ["tradiff"],
           requestedReviewTeamSlugs: ["quality-processing-squad"],
+          requestedReviewTeamKeys: ["acme/quality-processing-squad"],
         }),
         {
           repositoryOwner: "acme",
@@ -48,6 +50,8 @@ describe("pull-request snapshot helpers", () => {
       baseBranch: "main",
       mergeable: true,
       mergeableState: "clean",
+      requestedReviewerLogins: ["tradiff"],
+      requestedReviewTeamKeys: ["acme/quality-processing-squad"],
       requestedReviewTeamSlugs: ["quality-processing-squad"],
     });
   });
@@ -72,6 +76,8 @@ describe("pull-request snapshot helpers", () => {
           baseBranch: "main",
           mergeable: true,
           mergeableState: "clean",
+          requestedReviewerLogins: ["tradiff"],
+          requestedReviewTeamKeys: ["acme/quality-processing-squad"],
           requestedReviewTeamSlugs: ["quality-processing-squad"],
         },
         {
@@ -101,6 +107,8 @@ describe("pull-request snapshot helpers", () => {
       baseBranch: "main",
       mergeable: true,
       mergeableState: "clean",
+      requestedReviewerLogins: ["tradiff"],
+      requestedReviewTeamKeys: ["acme/quality-processing-squad"],
       requestedReviewTeamSlugs: ["quality-processing-squad"],
       lastSeenAt: "2026-04-10T12:00:00.000Z",
       graceUntil: null,

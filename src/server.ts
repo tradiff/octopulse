@@ -72,6 +72,7 @@ export interface StartServerOptions {
   ) => Promise<UntrackPullRequestResult>;
   resendNotificationRecord?: (notificationRecordId: number) => Promise<void>;
   getCurrentUserLogin?: () => string;
+  getCurrentUserTeamKeys?: () => string[];
 }
 
 export class ServerError extends Error {
@@ -158,7 +159,8 @@ async function handleRequest(
 
   if (request.method === "GET" && pathname === "/api/me") {
     const login = options.getCurrentUserLogin?.() ?? null;
-    respond(response, request.method, 200, "application/json; charset=utf-8", JSON.stringify({ login }));
+    const teamKeys = options.getCurrentUserTeamKeys?.() ?? [];
+    respond(response, request.method, 200, "application/json; charset=utf-8", JSON.stringify({ login, teamKeys }));
     return;
   }
 

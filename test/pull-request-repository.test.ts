@@ -28,6 +28,8 @@ describe("PullRequestRepository", () => {
         createPullRequestInput({
           mergeable: true,
           mergeableState: "blocked",
+          requestedReviewerLogins: ["tradiff"],
+          requestedReviewTeamKeys: ["acme/quality-processing-squad"],
           requestedReviewTeamSlugs: ["quality-processing-squad"],
         }),
       );
@@ -40,6 +42,8 @@ describe("PullRequestRepository", () => {
       expect(inserted.lastSeenHeadSha).toBe("abc123");
       expect(inserted.mergeable).toBe(true);
       expect(inserted.mergeableState).toBe("blocked");
+      expect(inserted.requestedReviewerLogins).toEqual(["tradiff"]);
+      expect(inserted.requestedReviewTeamKeys).toEqual(["acme/quality-processing-squad"]);
       expect(inserted.requestedReviewTeamSlugs).toEqual(["quality-processing-squad"]);
 
       repository.updatePullRequestTrackingState(101, {
@@ -68,6 +72,8 @@ describe("PullRequestRepository", () => {
       expect(updated.lastSeenHeadSha).toBeNull();
       expect(updated.mergeable).toBe(true);
       expect(updated.mergeableState).toBe("blocked");
+      expect(updated.requestedReviewerLogins).toEqual(["tradiff"]);
+      expect(updated.requestedReviewTeamKeys).toEqual(["acme/quality-processing-squad"]);
       expect(updated.requestedReviewTeamSlugs).toEqual(["quality-processing-squad"]);
       expect(updated.isTracked).toBe(false);
       expect(updated.trackingReason).toBe("manual");

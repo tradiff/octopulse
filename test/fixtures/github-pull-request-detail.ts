@@ -10,7 +10,9 @@ interface PullRequestDetailFixtureOverrides {
   baseBranch?: string | null;
   mergeable?: boolean | null;
   mergeableState?: string | null;
+  requestedReviewerLogins?: string[];
   requestedReviewTeamSlugs?: string[];
+  requestedReviewTeamKeys?: string[];
   authorLogin?: string;
   authorAvatarUrl?: string | null;
   url?: string;
@@ -42,6 +44,14 @@ export function createPullRequestDetailFixture(
     },
     mergeable: overrides.mergeable ?? true,
     mergeable_state: overrides.mergeableState ?? "clean",
-    requested_teams: (overrides.requestedReviewTeamSlugs ?? []).map((slug) => ({ slug })),
+    requested_reviewers: (overrides.requestedReviewerLogins ?? []).map((login) => ({ login })),
+    requested_teams: (overrides.requestedReviewTeamSlugs ?? []).map((slug, index) => ({
+      slug,
+      organization: {
+        login:
+          overrides.requestedReviewTeamKeys?.[index]?.split("/")[0] ??
+          (overrides.url?.split("/")[3] ?? "acme"),
+      },
+    })),
   };
 }

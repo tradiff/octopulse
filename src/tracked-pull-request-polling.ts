@@ -20,7 +20,10 @@ import {
 } from "./pull-request-repository.js";
 
 export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
-  pullRequestRepository?: Pick<PullRequestRepository, "listPullRequestsForPolling" | "upsertPullRequest">;
+  pullRequestRepository?: Pick<
+    PullRequestRepository,
+    "listPullRequestsForPolling" | "upsertPullRequest"
+  >;
   pollPullRequest?: (client: TClient, pullRequest: PullRequestRecord) => Promise<void>;
   botActivityClassifier?: BotActivityClassifier;
   notificationDispatcher?: NotificationDispatcher;

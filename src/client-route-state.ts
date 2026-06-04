@@ -14,7 +14,7 @@ import {
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogLevelFilter = "all" | LogLevel;
 export type AppPage = "pull-requests" | "logs" | "notification-history";
-export type PrSubTab = "my-prs" | "review-requested";
+export type PrSubTab = "my-prs" | "needs-my-review" | "review-requested";
 
 export interface RouteState {
   currentPage: AppPage;
@@ -226,7 +226,13 @@ export function togglePullRequestStateSelection(
 }
 
 function readPrSubTab(searchParams: URLSearchParams): PrSubTab {
-  return searchParams.get("tab") === "review-requested" ? "review-requested" : "my-prs";
+  const tab = searchParams.get("tab");
+
+  if (tab === "needs-my-review") {
+    return "needs-my-review";
+  }
+
+  return tab === "review-requested" ? "review-requested" : "my-prs";
 }
 
 function readDocumentPage(pathname: string): AppPage {

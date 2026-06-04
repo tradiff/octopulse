@@ -20,6 +20,8 @@ export interface PullRequestSnapshot extends PullRequestCoordinates {
   baseBranch: string | null;
   mergeable: boolean | null;
   mergeableState: string | null;
+  requestedReviewerLogins: string[];
+  requestedReviewTeamKeys: string[];
   requestedReviewTeamSlugs: string[];
 }
 
@@ -65,6 +67,17 @@ export function mapPullRequestSnapshot(
       "pull request response.mergeable_state",
       createError,
     ),
+    requestedReviewerLogins: readRequestedReviewerLogins(
+      value.requested_reviewers,
+      "pull request response.requested_reviewers",
+      createError,
+    ),
+    requestedReviewTeamKeys: readRequestedReviewTeamKeys(
+      value.requested_teams,
+      "pull request response.requested_teams",
+      coordinates.repositoryOwner,
+      createError,
+    ),
     requestedReviewTeamSlugs: readRequestedReviewTeamSlugs(
       value.requested_teams,
       "pull request response.requested_teams",
@@ -94,6 +107,8 @@ export function createPullRequestUpsertInput(
     baseBranch: snapshot.baseBranch,
     mergeable: snapshot.mergeable,
     mergeableState: snapshot.mergeableState,
+    requestedReviewerLogins: snapshot.requestedReviewerLogins,
+    requestedReviewTeamKeys: snapshot.requestedReviewTeamKeys,
     requestedReviewTeamSlugs: snapshot.requestedReviewTeamSlugs,
     ...(overrides.lastSeenAt === undefined ? {} : { lastSeenAt: overrides.lastSeenAt }),
     ...(overrides.graceUntil === undefined ? {} : { graceUntil: overrides.graceUntil }),
@@ -185,6 +200,44 @@ function readNullableBoolean(
   return readBoolean(value, fieldName, createError);
 }
 
+function readRequestedReviewerLogins(
+  value: unknown,
+  fieldName: string,
+  createError: (message: string) => Error,
+): string[] {
+  if (!Array.isArray(value)) {
+    throw createError(`${fieldName} must be an array`);
+  }
+
+  return value.map((entry, index) => {
+    const user = requireRecord(entry, `${fieldName}[${index}]`, createError);
+    return readString(user.login, `${fieldName}[${index}].login`, createError);
+  });
+}
+
+function readRequestedReviewTeamKeys(
+  value: unknown,
+  fieldName: string,
+  fallbackOrganizationLogin: string,
+  createError: (message: string) => Error,
+): string[] {
+  if (!Array.isArray(value)) {
+    throw createError(`${fieldName} must be an array`);
+  }
+
+  return value.map((entry, index) => {
+    const team = requireRecord(entry, `${fieldName}[${index}]`, createError);
+    const organizationLogin = readNullableOrganizationLogin(
+      team.organization,
+      `${fieldName}[${index}].organization`,
+      createError,
+    );
+    const slug = readString(team.slug, `${fieldName}[${index}].slug`, createError);
+
+    return `${(organizationLogin ?? fallbackOrganizationLogin).trim().toLowerCase()}/${slug.trim().toLowerCase()}`;
+  });
+}
+
 function readRequestedReviewTeamSlugs(
   value: unknown,
   fieldName: string,
@@ -198,4 +251,17 @@ function readRequestedReviewTeamSlugs(
     const team = requireRecord(entry, `${fieldName}[${index}]`, createError);
     return readString(team.slug, `${fieldName}[${index}].slug`, createError);
   });
+}
+
+function readNullableOrganizationLogin(
+  value: unknown,
+  fieldName: string,
+  createError: (message: string) => Error,
+): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const organization = requireRecord(value, fieldName, createError);
+  return readString(organization.login, `${fieldName}.login`, createError);
 }

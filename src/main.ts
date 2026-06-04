@@ -1,11 +1,13 @@
 import type { Server } from "node:http";
 
 import {
+  discoverOpenAuthoredPullRequests,
   runFirstRunAuthoredPullRequestDiscovery,
   startRecurringAuthoredPullRequestDiscovery,
   type RecurringAuthoredPullRequestDiscoveryHandle,
 } from "./authored-pull-request-discovery.js";
 import { createOpenAiBotActivityClassifier } from "./bot-activity-classification.js";
+import { loadCurrentUserReviewContext } from "./current-user-review-context.js";
 import { loadConfig, resolveAppPaths } from "./config.js";
 import { initializeDatabase } from "./database.js";
 import { initializeGitHubAuth } from "./github.js";
@@ -20,6 +22,7 @@ import { trackPullRequestByUrl, untrackPullRequest } from "./manual-pull-request
 import { listNotificationHistory } from "./notification-history.js";
 import { resendNotificationRecord } from "./notification-dispatch.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
+import { runRequestedReviewTargetsBackfill } from "./pull-request-review-target-backfill.js";
 import { listPullRequestTimeline } from "./raw-events.js";
 import { readServerOrigin, startServer } from "./server.js";
 import {
@@ -88,6 +91,12 @@ async function main(): Promise<void> {
     const botActivityClassifier = config.openAiApiKey
       ? createOpenAiBotActivityClassifier({ apiKey: config.openAiApiKey })
       : undefined;
+    const currentUserReviewContext = await loadCurrentUserReviewContext(githubAuth.client).catch((error) => {
+      logger.warn("Failed to load current user review context", { error });
+      return {
+        teamKeys: [],
+      };
+    });
     const notificationDispatcher = new LinuxNotificationAdapter();
     const currentDatabase = initializeDatabase(config.paths);
     const pullRequestRepository = new PullRequestRepository(currentDatabase);
@@ -100,6 +109,26 @@ async function main(): Promise<void> {
       },
     );
     logger.info("Pull request discovery completed", firstRunDiscoveryResult);
+
+    if (!firstRunDiscoveryResult.didRun) {
+      const startupDiscoveryResult = await discoverOpenAuthoredPullRequests(
+        currentDatabase,
+        githubAuth,
+        {
+          notificationDispatcher,
+        },
+      );
+      logger.info("Startup pull request discovery completed", startupDiscoveryResult);
+    }
+    const reviewTargetBackfillResult = await runRequestedReviewTargetsBackfill(
+      currentDatabase,
+      githubAuth,
+      {
+        pullRequestRepository,
+      },
+    );
+    logger.info("Requested review target backfill completed", reviewTargetBackfillResult);
+
     server = await startServer({
       listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
       listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
@@ -131,6 +160,7 @@ async function main(): Promise<void> {
           notificationDispatcher,
         }),
       getCurrentUserLogin: () => githubAuth.currentUserLogin,
+      getCurrentUserTeamKeys: () => currentUserReviewContext.teamKeys,
     });
     const serverOrigin = readServerOrigin(server);
     trayIcon = await startTrayIcon({
