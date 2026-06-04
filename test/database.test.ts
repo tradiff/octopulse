@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -153,6 +153,155 @@ describe("initializeDatabase", () => {
       database.close();
     }
   });
+
+  it("applies pull request ci job head sha migration", () => {
+    const homeDir = createTempDir("octopulse-db-home-");
+    const database = initializeDatabase(resolveAppPaths({ homeDir }));
+
+    try {
+      expect(readTableColumns(database, "PullRequestCiJobState")).toEqual(
+        expect.arrayContaining(["head_sha"]),
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it("backfills pull request ci job head sha from workflow run raw events", () => {
+    const homeDir = createTempDir("octopulse-db-home-");
+    const paths = resolveAppPaths({ homeDir });
+    const databaseBeforeMigration = initializeDatabase(paths, {
+      migrationsPath: createExistingMigrationsDir([
+        "0001_initial_schema.sql",
+        "0002_pull_request_additional_fields.sql",
+        "0003_app_state.sql",
+        "0004_normalized_event_notification_timing.sql",
+        "0005_normalized_event_bundle_id.sql",
+        "0006_notification_record_links.sql",
+        "0007_event_bundle_event_range.sql",
+        "0008_pull_request_author_avatar_url.sql",
+        "0009_pull_request_review_state.sql",
+        "0010_pull_request_ci_job_state.sql",
+        "0011_pull_request_merge_readiness.sql",
+        "0013_pull_request_review_responsibility.sql",
+      ]),
+    });
+
+    try {
+      const result = databaseBeforeMigration
+        .prepare(
+          `
+            INSERT INTO PullRequest (
+              github_pull_request_id,
+              repository_owner,
+              repository_name,
+              number,
+              url,
+              author_login,
+              title,
+              state,
+              is_draft,
+              last_seen_at,
+              last_seen_head_sha
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          101,
+          "acme",
+          "octopulse",
+          7,
+          "https://github.com/acme/octopulse/pull/7",
+          "octocat",
+          "Add notifications",
+          "open",
+          0,
+          "2026-04-10T12:00:00.000Z",
+          "abc123",
+        );
+      const pullRequestId = Number(result.lastInsertRowid);
+
+      databaseBeforeMigration
+        .prepare(
+          `
+            INSERT INTO RawEvent (
+              pull_request_id,
+              source,
+              source_id,
+              event_type,
+              actor_login,
+              payload_json,
+              occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          pullRequestId,
+          "github_actions_workflow_run",
+          "5001:2026-04-10T12:01:00.000Z",
+          "workflow_run",
+          "github-actions[bot]",
+          JSON.stringify({
+            id: 5001,
+            head_sha: "abc123",
+            name: "Build",
+            status: "completed",
+            conclusion: "success",
+            updated_at: "2026-04-10T12:01:00.000Z",
+          }),
+          "2026-04-10T12:01:00.000Z",
+        );
+      databaseBeforeMigration
+        .prepare(
+          `
+            INSERT INTO PullRequestCiJobState (
+              pull_request_id,
+              workflow_run_id,
+              workflow_run_name,
+              workflow_run_updated_at,
+              job_id,
+              job_name,
+              job_status,
+              job_conclusion,
+              is_blocking_merge
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          pullRequestId,
+          "5001",
+          "Build",
+          "2026-04-10T12:01:00.000Z",
+          "7001",
+          "Artifactory / Promote",
+          "completed",
+          "success",
+          1,
+        );
+      databaseBeforeMigration
+        .prepare("INSERT INTO SchemaMigration (version, name) VALUES (?, ?)")
+        .run(14, "cleanup_obsolete_review_request_columns");
+    } finally {
+      databaseBeforeMigration.close();
+    }
+
+    const databaseAfterMigration = initializeDatabase(paths);
+
+    try {
+      const row = databaseAfterMigration
+        .prepare("SELECT head_sha FROM PullRequestCiJobState WHERE job_id = ?")
+        .get("7001") as { head_sha: string | null } | undefined;
+      const schemaVersions = databaseAfterMigration
+        .prepare("SELECT version FROM SchemaMigration ORDER BY version")
+        .all()
+        .map((schemaRow) => Number(schemaRow.version));
+
+      expect(row?.head_sha).toBe("abc123");
+      expect(schemaVersions).toContain(15);
+    } finally {
+      databaseAfterMigration.close();
+    }
+  });
 });
 
 function createTempDir(prefix: string): string {
@@ -171,6 +320,15 @@ function createMigrationsDir(migrations: Array<{ name: string; sql: string }>): 
   }
 
   return migrationsPath;
+}
+
+function createExistingMigrationsDir(fileNames: string[]): string {
+  return createMigrationsDir(
+    fileNames.map((fileName) => ({
+      name: fileName,
+      sql: readFileSync(path.join(process.cwd(), "migrations", fileName), "utf8"),
+    })),
+  );
 }
 
 function readTableNames(database: ReturnType<typeof initializeDatabase>): string[] {

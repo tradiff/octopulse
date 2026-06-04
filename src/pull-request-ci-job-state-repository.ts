@@ -6,6 +6,7 @@ export interface PullRequestCiJobStateRecord {
   workflowRunId: string;
   workflowRunName: string;
   workflowRunUpdatedAt: string;
+  headSha: string | null;
   jobId: string;
   jobName: string;
   jobStatus: string;
@@ -19,6 +20,7 @@ export interface UpsertCiJobStateInput {
   workflowRunId: string;
   workflowRunName: string;
   workflowRunUpdatedAt: string;
+  headSha: string;
   jobId: string;
   jobName: string;
   jobStatus: string;
@@ -39,17 +41,19 @@ export class PullRequestCiJobStateRepository {
               workflow_run_id,
               workflow_run_name,
               workflow_run_updated_at,
+              head_sha,
               job_id,
               job_name,
               job_status,
               job_conclusion,
               is_blocking_merge,
               updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(pull_request_id, job_id) DO UPDATE SET
               workflow_run_id = excluded.workflow_run_id,
               workflow_run_name = excluded.workflow_run_name,
               workflow_run_updated_at = excluded.workflow_run_updated_at,
+              head_sha = COALESCE(excluded.head_sha, head_sha),
               job_name = excluded.job_name,
               job_status = excluded.job_status,
               job_conclusion = excluded.job_conclusion,
@@ -62,6 +66,7 @@ export class PullRequestCiJobStateRepository {
           input.workflowRunId,
           input.workflowRunName,
           input.workflowRunUpdatedAt,
+          input.headSha,
           input.jobId,
           input.jobName,
           input.jobStatus,
@@ -91,19 +96,38 @@ export class PullRequestCiJobStateRepository {
     return row !== undefined;
   }
 
-  listCiJobStatesForPullRequest(pullRequestId: number): PullRequestCiJobStateRecord[] {
+  listCiJobStatesForPullRequest(
+    pullRequestId: number,
+    currentHeadSha: string | null,
+  ): PullRequestCiJobStateRecord[] {
+    if (currentHeadSha === null) {
+      return [];
+    }
+
     const rows = this.database
       .prepare(
         `
           SELECT *
           FROM PullRequestCiJobState
           WHERE pull_request_id = ?
-          ORDER BY workflow_run_name ASC, job_name ASC
+            AND head_sha = ?
+          ORDER BY workflow_run_name ASC, job_name ASC, workflow_run_updated_at DESC, updated_at DESC, id DESC
         `,
       )
-      .all(pullRequestId);
+      .all(pullRequestId, currentHeadSha);
 
-    return rows.map(mapCiJobStateRow);
+    const latestByLogicalCheck = new Map<string, PullRequestCiJobStateRecord>();
+
+    for (const row of rows) {
+      const record = mapCiJobStateRow(row);
+      const key = `${record.workflowRunName}\u0000${record.jobName}`;
+
+      if (!latestByLogicalCheck.has(key)) {
+        latestByLogicalCheck.set(key, record);
+      }
+    }
+
+    return [...latestByLogicalCheck.values()];
   }
 }
 
@@ -120,6 +144,7 @@ function mapCiJobStateRow(row: unknown): PullRequestCiJobStateRecord {
     workflowRunId: readString(value.workflow_run_id, "PullRequestCiJobState.workflow_run_id"),
     workflowRunName: readString(value.workflow_run_name, "PullRequestCiJobState.workflow_run_name"),
     workflowRunUpdatedAt: readString(value.workflow_run_updated_at, "PullRequestCiJobState.workflow_run_updated_at"),
+    headSha: readNullableString(value.head_sha, "PullRequestCiJobState.head_sha"),
     jobId: readString(value.job_id, "PullRequestCiJobState.job_id"),
     jobName: readString(value.job_name, "PullRequestCiJobState.job_name"),
     jobStatus: readString(value.job_status, "PullRequestCiJobState.job_status"),

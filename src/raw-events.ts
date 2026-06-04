@@ -83,7 +83,10 @@ export function listPullRequestTimeline(
       pullRequestReviewStateRepository.listReviewStatesForPullRequest(pullRequest.id);
 
     ciJobStatesByPullRequest[key] =
-      ciJobStateRepository.listCiJobStatesForPullRequest(pullRequest.id);
+      ciJobStateRepository.listCiJobStatesForPullRequest(
+        pullRequest.id,
+        pullRequest.lastSeenHeadSha,
+      );
   }
 
   return { timelineByPullRequest, reviewStatesByPullRequest, ciJobStatesByPullRequest };

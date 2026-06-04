@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resolveAppPaths } from "../src/config.js";
 import { initializeDatabase } from "../src/database.js";
 import { NormalizedEventRepository } from "../src/normalized-event-repository.js";
+import { PullRequestCiJobStateRepository } from "../src/pull-request-ci-job-state-repository.js";
 import {
   PullRequestRepository,
   type PullRequestRecord,
@@ -86,6 +87,98 @@ describe("listPullRequestTimeline", () => {
       database.close();
     }
   });
+
+  it("returns only the latest ci job states for the current head sha", () => {
+    const { database, pullRequest } = createPullRequest({ lastSeenHeadSha: "def456" });
+    const ciJobStateRepository = new PullRequestCiJobStateRepository(database);
+
+    try {
+      ciJobStateRepository.upsertCiJobState({
+        pullRequestId: pullRequest.id,
+        workflowRunId: "5001",
+        workflowRunName: "Build",
+        workflowRunUpdatedAt: "2026-04-10T12:01:00.000Z",
+        headSha: "abc123",
+        jobId: "7001",
+        jobName: "Artifactory / Promote",
+        jobStatus: "in_progress",
+        jobConclusion: null,
+        isBlockingMerge: true,
+      });
+      ciJobStateRepository.upsertCiJobState({
+        pullRequestId: pullRequest.id,
+        workflowRunId: "5002",
+        workflowRunName: "Build",
+        workflowRunUpdatedAt: "2026-04-10T12:02:00.000Z",
+        headSha: "def456",
+        jobId: "7002",
+        jobName: "Artifactory / Promote",
+        jobStatus: "in_progress",
+        jobConclusion: null,
+        isBlockingMerge: true,
+      });
+      ciJobStateRepository.upsertCiJobState({
+        pullRequestId: pullRequest.id,
+        workflowRunId: "5003",
+        workflowRunName: "Build",
+        workflowRunUpdatedAt: "2026-04-10T12:03:00.000Z",
+        headSha: "def456",
+        jobId: "7003",
+        jobName: "Artifactory / Promote",
+        jobStatus: "completed",
+        jobConclusion: "success",
+        isBlockingMerge: true,
+      });
+      ciJobStateRepository.upsertCiJobState({
+        pullRequestId: pullRequest.id,
+        workflowRunId: "5004",
+        workflowRunName: "Build",
+        workflowRunUpdatedAt: "2026-04-10T12:02:30.000Z",
+        headSha: "def456",
+        jobId: "7004",
+        jobName: "Test / Domain shared",
+        jobStatus: "completed",
+        jobConclusion: "success",
+        isBlockingMerge: false,
+      });
+
+      const result = listPullRequestTimeline(database);
+      const ciJobs = result.ciJobStatesByPullRequest[String(pullRequest.githubPullRequestId)] ?? [];
+
+      expect(
+        ciJobs.map((job) => ({
+          workflowRunId: job.workflowRunId,
+          workflowRunName: job.workflowRunName,
+          headSha: job.headSha,
+          jobName: job.jobName,
+          jobStatus: job.jobStatus,
+          jobConclusion: job.jobConclusion,
+          isBlockingMerge: job.isBlockingMerge,
+        })),
+      ).toEqual([
+        {
+          workflowRunId: "5003",
+          workflowRunName: "Build",
+          headSha: "def456",
+          jobName: "Artifactory / Promote",
+          jobStatus: "completed",
+          jobConclusion: "success",
+          isBlockingMerge: true,
+        },
+        {
+          workflowRunId: "5004",
+          workflowRunName: "Build",
+          headSha: "def456",
+          jobName: "Test / Domain shared",
+          jobStatus: "completed",
+          jobConclusion: "success",
+          isBlockingMerge: false,
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {
@@ -101,7 +194,9 @@ function createRepository(): {
   };
 }
 
-function createPullRequest(): {
+function createPullRequest(
+  overrides: Partial<UpsertPullRequestInput> = {},
+): {
   database: ReturnType<typeof initializeDatabase>;
   pullRequest: PullRequestRecord;
 } {
@@ -109,7 +204,7 @@ function createPullRequest(): {
 
   return {
     database,
-    pullRequest: repository.upsertPullRequest(createPullRequestInput()),
+    pullRequest: repository.upsertPullRequest(createPullRequestInput(overrides)),
   };
 }
 

@@ -477,6 +477,7 @@ async function persistCurrentCiJobStates<TClient>(
       const runId = readSourceId(runRecord, "workflow run");
       const runName = readString(runRecord.name, "workflow run.name");
       const runUpdatedAt = readString(runRecord.updated_at, "workflow run.updated_at");
+      const runHeadSha = readString(runRecord.head_sha, "workflow run.head_sha");
 
       if (repository.hasJobsForWorkflowRun(pullRequest.id, runId, runUpdatedAt)) {
         return;
@@ -511,6 +512,7 @@ async function persistCurrentCiJobStates<TClient>(
           workflowRunId: runId,
           workflowRunName: runName,
           workflowRunUpdatedAt: runUpdatedAt,
+          headSha: runHeadSha,
           jobId,
           jobName,
           jobStatus,
