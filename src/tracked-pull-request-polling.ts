@@ -22,12 +22,13 @@ import {
 export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   pullRequestRepository?: Pick<
     PullRequestRepository,
-    "listPullRequestsForPolling" | "upsertPullRequest"
+    "deactivateClosedPullRequests" | "listPullRequestsForPolling" | "upsertPullRequest"
   >;
   pollPullRequest?: (client: TClient, pullRequest: PullRequestRecord) => Promise<void>;
   botActivityClassifier?: BotActivityClassifier;
   notificationDispatcher?: NotificationDispatcher;
   observedAt?: string;
+  gracePeriodMs?: number;
   notificationDispatchedAt?: string;
   onError?: (error: PullRequestPollingError) => void;
   fetchJobsForWorkflowRun?: ProcessTrackedPullRequestActivityOptions<TClient>["fetchJobsForWorkflowRun"];
@@ -65,6 +66,11 @@ export async function pollTrackedPullRequests<TClient>(
   const notificationDispatcher = options.notificationDispatcher;
   const observedAt = options.observedAt ?? new Date().toISOString();
   const notificationDispatchedAt = options.notificationDispatchedAt ?? new Date().toISOString();
+
+  if (options.gracePeriodMs !== undefined) {
+    pullRequestRepository.deactivateClosedPullRequests(options.gracePeriodMs);
+  }
+
   const defaultPollPullRequest =
     options.pollPullRequest ??
     (async (client: TClient, pullRequest: PullRequestRecord) => {

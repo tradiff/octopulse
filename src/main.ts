@@ -101,6 +101,14 @@ async function main(): Promise<void> {
     const currentDatabase = initializeDatabase(config.paths);
     const pullRequestRepository = new PullRequestRepository(currentDatabase);
     database = currentDatabase;
+    const deactivatedPullRequestCount = pullRequestRepository.deactivateClosedPullRequests(
+      config.timings.gracePeriodMs,
+    );
+    if (deactivatedPullRequestCount > 0) {
+      logger.info("Moved closed pull requests into the grace period", {
+        deactivatedPullRequestCount,
+      });
+    }
     const firstRunDiscoveryResult = await runFirstRunAuthoredPullRequestDiscovery(
       currentDatabase,
       githubAuth,
@@ -183,6 +191,7 @@ async function main(): Promise<void> {
       githubAuth,
       {
         intervalMs: config.timings.trackedPullRequestPollMs,
+        gracePeriodMs: config.timings.gracePeriodMs,
         pullRequestRepository,
         notificationDispatcher,
         ...(botActivityClassifier ? { botActivityClassifier } : {}),

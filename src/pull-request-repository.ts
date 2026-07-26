@@ -265,6 +265,49 @@ export class PullRequestRepository {
     return rows.map((row) => mapPullRequestRow(row));
   }
 
+  deactivateClosedPullRequests(gracePeriodMs: number): number {
+    if (!Number.isFinite(gracePeriodMs) || gracePeriodMs <= 0) {
+      throw new PullRequestRepositoryError("Grace period must be greater than zero");
+    }
+
+    const pullRequests = this.database
+      .prepare(
+        `
+          SELECT *
+          FROM PullRequest
+          WHERE is_tracked = 1
+            AND state = 'closed'
+            AND (merged_at IS NOT NULL OR closed_at IS NOT NULL)
+        `,
+      )
+      .all()
+      .map((row) => mapPullRequestRow(row));
+    const update = this.database.prepare(
+      `
+        UPDATE PullRequest
+        SET is_tracked = 0,
+            is_sticky_untracked = 0,
+            grace_until = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+    );
+
+    return withinTransaction(this.database, () => {
+      for (const pullRequest of pullRequests) {
+        const closedAt = pullRequest.mergedAt ?? pullRequest.closedAt;
+
+        if (closedAt === null) {
+          continue;
+        }
+
+        update.run(addDuration(closedAt, gracePeriodMs), pullRequest.id);
+      }
+
+      return pullRequests.length;
+    });
+  }
+
   updatePullRequestTrackingState(
     githubPullRequestId: number,
     tracking: PullRequestTrackingState,
@@ -481,6 +524,16 @@ function resolveNullableBooleanField(
 
 function resolveStringArrayField(nextValue: string[] | undefined, existingValue: string[]): string[] {
   return nextValue === undefined ? [...existingValue] : [...nextValue];
+}
+
+function addDuration(timestamp: string, durationMs: number): string {
+  const milliseconds = Date.parse(timestamp);
+
+  if (!Number.isFinite(milliseconds)) {
+    throw new PullRequestRepositoryError(`Invalid pull request closure timestamp ${timestamp}`);
+  }
+
+  return new Date(milliseconds + durationMs).toISOString();
 }
 
 function withinTransaction<T>(database: DatabaseSync, operation: () => T): T {

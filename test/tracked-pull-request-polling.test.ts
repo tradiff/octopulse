@@ -58,7 +58,6 @@ describe("pollTrackedPullRequests", () => {
           title: "Poll merged pull requests during grace",
           state: "closed",
           closedAt: "2026-04-10T11:45:00.000Z",
-          graceUntil: "2026-04-17T11:45:00.000Z",
           lastSeenHeadSha: "def456",
         }),
       );
@@ -125,6 +124,7 @@ describe("pollTrackedPullRequests", () => {
             pullRequestRepository: repository,
             pollPullRequest,
             observedAt: OBSERVED_AT,
+            gracePeriodMs: 7 * 24 * 60 * 60_000,
           },
         ),
       ).resolves.toEqual({
@@ -134,6 +134,11 @@ describe("pollTrackedPullRequests", () => {
       });
 
       expect(polledPullRequestIds.sort((left, right) => left - right)).toEqual([101, 202, 303]);
+      expect(repository.getPullRequestByGitHubPullRequestId(202)).toMatchObject({
+        isTracked: false,
+        isStickyUntracked: false,
+        graceUntil: "2026-04-17T11:45:00.000Z",
+      });
     } finally {
       database.close();
     }
