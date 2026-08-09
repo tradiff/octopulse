@@ -377,7 +377,7 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
-  it("skips unchanged comment and review fanout when pull request detail is not modified", async () => {
+  it("processes changed workflow runs when pull request detail is not modified", async () => {
     const { database, repository } = createRepository();
     const rawEventRepository = new RawEventRepository(database);
     const normalizedEventRepository = new NormalizedEventRepository(database);
@@ -399,9 +399,15 @@ describe("pollTrackedPullRequests", () => {
             owner: "acme",
             repo: "octopulse",
             head_sha: "abc123",
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-workflow-v1"',
+            }),
           });
 
           return {
+            headers: {
+              etag: 'W/"acme-octopulse-7-workflow-v2"',
+            },
             data: {
               total_count: 1,
               workflow_runs: [
@@ -425,6 +431,12 @@ describe("pollTrackedPullRequests", () => {
     try {
       const pullRequest = repository.upsertPullRequest(createPullRequestInput());
       writePullRequestDetailEtag(database, pullRequest.id, 'W/"acme-octopulse-7-v1"');
+      writeWorkflowRunListEtag(
+        database,
+        pullRequest.id,
+        "abc123",
+        'W/"acme-octopulse-7-workflow-v1"',
+      );
 
       const reviewStateRepository = new PullRequestReviewStateRepository(database);
       reviewStateRepository.upsertReviewState({
@@ -461,6 +473,9 @@ describe("pollTrackedPullRequests", () => {
       expect(readPullRequestDetailEtag(database, refreshedPullRequest?.id ?? -1)).toBe(
         'W/"acme-octopulse-7-v1"',
       );
+      expect(readWorkflowRunListEtag(database, refreshedPullRequest?.id ?? -1, "abc123")).toBe(
+        'W/"acme-octopulse-7-workflow-v2"',
+      );
       expect(
         rawEventRepository.listRawEventsForPullRequest(refreshedPullRequest?.id ?? -1).map((rawEvent) => ({
           source: rawEvent.source,
@@ -489,6 +504,456 @@ describe("pollTrackedPullRequests", () => {
           actorClass: "self",
         },
       ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("skips activity processing when pull request detail and workflow runs are not modified", async () => {
+    const { database, repository } = createRepository();
+    const rawEventRepository = new RawEventRepository(database);
+    const normalizedEventRepository = new NormalizedEventRepository(database);
+    const botActivityClassifier = vi.fn();
+    const notificationDispatcher = {
+      dispatchNotification: vi.fn(),
+    };
+    const fetchJobsForWorkflowRun = vi.fn(async () => []);
+    const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          expect(parameters).toMatchObject({
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-v1"',
+            }),
+          });
+          throw createGitHubNotModifiedError('W/"acme-octopulse-7-v1"');
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          expect(parameters).toMatchObject({
+            head_sha: "abc123",
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-workflow-v1"',
+            }),
+          });
+          throw createGitHubNotModifiedError('W/"acme-octopulse-7-workflow-v1"');
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      const pullRequest = repository.upsertPullRequest(createPullRequestInput());
+      writePullRequestDetailEtag(database, pullRequest.id, 'W/"acme-octopulse-7-v1"');
+      writeWorkflowRunListEtag(
+        database,
+        pullRequest.id,
+        "abc123",
+        'W/"acme-octopulse-7-workflow-v1"',
+      );
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: { request },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+            botActivityClassifier,
+            notificationDispatcher,
+            fetchJobsForWorkflowRun,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(rawEventRepository.listRawEventsForPullRequest(pullRequest.id)).toEqual([]);
+      expect(normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id)).toEqual([]);
+      expect(botActivityClassifier).not.toHaveBeenCalled();
+      expect(notificationDispatcher.dispatchNotification).not.toHaveBeenCalled();
+      expect(fetchJobsForWorkflowRun).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("processes activity when pull request detail changes and workflow runs are not modified", async () => {
+    const { database, repository } = createRepository();
+    const rawEventRepository = new RawEventRepository(database);
+    const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          expect(parameters).toMatchObject({
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-v1"',
+            }),
+          });
+          return createPullRequestDetailResponse({
+            etag: 'W/"acme-octopulse-7-v2"',
+            title: "Refresh changed pull request detail",
+          });
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+          return {
+            data: [
+              createIssueCommentFixture({
+                id: 8601,
+                actorLogin: "alice",
+                createdAt: "2026-04-10T12:07:00.000Z",
+              }),
+            ],
+          };
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return { data: [] };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          expect(parameters).toMatchObject({
+            head_sha: "abc123",
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-workflow-v1"',
+            }),
+          });
+          throw createGitHubNotModifiedError('W/"acme-octopulse-7-workflow-v1"');
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      const pullRequest = repository.upsertPullRequest(createPullRequestInput());
+      writePullRequestDetailEtag(database, pullRequest.id, 'W/"acme-octopulse-7-v1"');
+      writeWorkflowRunListEtag(
+        database,
+        pullRequest.id,
+        "abc123",
+        'W/"acme-octopulse-7-workflow-v1"',
+      );
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: { request },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      const refreshedPullRequest = repository.listTrackedPullRequests()[0];
+
+      expect(refreshedPullRequest).toMatchObject({
+        title: "Refresh changed pull request detail",
+      });
+      expect(readPullRequestDetailEtag(database, refreshedPullRequest?.id ?? -1)).toBe(
+        'W/"acme-octopulse-7-v2"',
+      );
+      expect(readWorkflowRunListEtag(database, refreshedPullRequest?.id ?? -1, "abc123")).toBe(
+        'W/"acme-octopulse-7-workflow-v1"',
+      );
+      expect(
+        rawEventRepository.listRawEventsForPullRequest(refreshedPullRequest?.id ?? -1).map((event) => event.sourceId),
+      ).toEqual(["8601"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses a new workflow-run ETag cache entry when the pull request head changes", async () => {
+    const { database, repository } = createRepository();
+    const rawEventRepository = new RawEventRepository(database);
+    const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          expect(parameters).toMatchObject({
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-v1"',
+            }),
+          });
+          return createPullRequestDetailResponse({
+            etag: 'W/"acme-octopulse-7-v2"',
+            headSha: "def456",
+          });
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return { data: [] };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          expect(parameters).toMatchObject({
+            head_sha: "def456",
+          });
+          expect(parameters?.headers).not.toHaveProperty("If-None-Match");
+          return {
+            headers: {
+              etag: 'W/"acme-octopulse-7-workflow-v2"',
+            },
+            data: {
+              total_count: 1,
+              workflow_runs: [
+                createWorkflowRunFixture({
+                  id: 8701,
+                  actorLogin: "octocat",
+                  actorType: "User",
+                  headSha: "def456",
+                  status: "completed",
+                  conclusion: "success",
+                  updatedAt: "2026-04-10T12:08:00.000Z",
+                }),
+              ],
+            },
+          };
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      const pullRequest = repository.upsertPullRequest(createPullRequestInput());
+      writePullRequestDetailEtag(database, pullRequest.id, 'W/"acme-octopulse-7-v1"');
+      writeWorkflowRunListEtag(
+        database,
+        pullRequest.id,
+        "abc123",
+        'W/"acme-octopulse-7-workflow-v1"',
+      );
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: { request },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+            fetchJobsForWorkflowRun: async () => [],
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      const refreshedPullRequest = repository.listTrackedPullRequests()[0];
+
+      expect(refreshedPullRequest?.lastSeenHeadSha).toBe("def456");
+      expect(readWorkflowRunListEtag(database, refreshedPullRequest?.id ?? -1, "abc123")).toBe(
+        'W/"acme-octopulse-7-workflow-v1"',
+      );
+      expect(readWorkflowRunListEtag(database, refreshedPullRequest?.id ?? -1, "def456")).toBe(
+        'W/"acme-octopulse-7-workflow-v2"',
+      );
+      expect(
+        rawEventRepository.listRawEventsForPullRequest(refreshedPullRequest?.id ?? -1).map((event) => event.sourceId),
+      ).toEqual(["8701:2026-04-10T12:08:00.000Z"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps cached ETags when activity processing fails", async () => {
+    const { database, repository } = createRepository();
+    const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          expect(parameters).toMatchObject({
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-v1"',
+            }),
+          });
+          return createPullRequestDetailResponse({
+            etag: 'W/"acme-octopulse-7-v2"',
+          });
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+        case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+          return { data: [] };
+        case "GET /repos/{owner}/{repo}/actions/runs":
+          expect(parameters).toMatchObject({
+            headers: expect.objectContaining({
+              "If-None-Match": 'W/"acme-octopulse-7-workflow-v1"',
+            }),
+          });
+          return {
+            headers: {
+              etag: 'W/"acme-octopulse-7-workflow-v2"',
+            },
+            data: {
+              total_count: 1,
+              workflow_runs: [{}],
+            },
+          };
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      const pullRequest = repository.upsertPullRequest(createPullRequestInput());
+      writePullRequestDetailEtag(database, pullRequest.id, 'W/"acme-octopulse-7-v1"');
+      writeWorkflowRunListEtag(
+        database,
+        pullRequest.id,
+        "abc123",
+        'W/"acme-octopulse-7-workflow-v1"',
+      );
+      new PullRequestReviewStateRepository(database).upsertReviewState({
+        pullRequestId: pullRequest.id,
+        reviewerLogin: "bob",
+        reviewState: "APPROVED",
+      });
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: { request },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 0,
+        failedCount: 1,
+      });
+
+      expect(readPullRequestDetailEtag(database, pullRequest.id)).toBe('W/"acme-octopulse-7-v1"');
+      expect(readWorkflowRunListEtag(database, pullRequest.id, "abc123")).toBe(
+        'W/"acme-octopulse-7-workflow-v1"',
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it("checks later workflow-run pages when the first page is not modified", async () => {
+    const { database, repository } = createRepository();
+    const rawEventRepository = new RawEventRepository(database);
+    const firstPageWorkflowRuns = Array.from({ length: 100 }, (_, index) =>
+      createWorkflowRunFixture({
+        id: 8800 + index,
+        actorLogin: "octocat",
+        actorType: "User",
+        headSha: "abc123",
+        status: "completed",
+        conclusion: "success",
+        updatedAt: "2026-04-10T12:09:00.000Z",
+      }),
+    );
+    const request = vi.fn(async (route: string, parameters?: Record<string, unknown>) => {
+      switch (route) {
+        case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+          throw createGitHubNotModifiedError('W/"acme-octopulse-7-v1"');
+        case "GET /repos/{owner}/{repo}/actions/runs": {
+          const headers = parameters?.headers as Record<string, unknown> | undefined;
+
+          if (parameters?.page === 1 && headers?.["If-None-Match"]) {
+            expect(headers["If-None-Match"]).toBe('W/"acme-octopulse-7-workflow-v1"');
+            throw createGitHubNotModifiedError('W/"acme-octopulse-7-workflow-v1"');
+          }
+
+          if (parameters?.page === 1) {
+            expect(headers).not.toHaveProperty("If-None-Match");
+            return {
+              headers: {
+                etag: 'W/"acme-octopulse-7-workflow-v2"',
+              },
+              data: {
+                total_count: 101,
+                workflow_runs: firstPageWorkflowRuns,
+              },
+            };
+          }
+
+          if (parameters?.page === 2) {
+            return {
+              data: {
+                total_count: 101,
+                workflow_runs: [
+                  createWorkflowRunFixture({
+                    id: 8901,
+                    actorLogin: "octocat",
+                    actorType: "User",
+                    headSha: "abc123",
+                    status: "completed",
+                    conclusion: "failure",
+                    updatedAt: "2026-04-10T12:10:00.000Z",
+                  }),
+                ],
+              },
+            };
+          }
+
+          throw new Error(`Unexpected workflow-run page: ${parameters?.page}`);
+        }
+        default:
+          throw new Error(`Unexpected GitHub route: ${route}`);
+      }
+    });
+
+    try {
+      const pullRequest = repository.upsertPullRequest(createPullRequestInput());
+      writePullRequestDetailEtag(database, pullRequest.id, 'W/"acme-octopulse-7-v1"');
+      writeWorkflowRunListEtag(
+        database,
+        pullRequest.id,
+        "abc123",
+        'W/"acme-octopulse-7-workflow-v1"',
+        2,
+      );
+      new PullRequestReviewStateRepository(database).upsertReviewState({
+        pullRequestId: pullRequest.id,
+        reviewerLogin: "bob",
+        reviewState: "APPROVED",
+      });
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: { request },
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            observedAt: OBSERVED_AT,
+            fetchJobsForWorkflowRun: async () => [],
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 1,
+        polledCount: 1,
+        failedCount: 0,
+      });
+
+      expect(request).toHaveBeenCalledTimes(4);
+      expect(readWorkflowRunListEtag(database, pullRequest.id, "abc123")).toBe(
+        'W/"acme-octopulse-7-workflow-v2"',
+      );
+      expect(
+        rawEventRepository
+          .listRawEventsForPullRequest(pullRequest.id)
+          .some((event) => event.sourceId === "8901:2026-04-10T12:10:00.000Z"),
+      ).toBe(true);
     } finally {
       database.close();
     }
@@ -1755,6 +2220,22 @@ function readPullRequestDetailEtag(
   return String(row.value);
 }
 
+function readWorkflowRunListEtag(
+  database: ReturnType<typeof initializeDatabase>,
+  pullRequestId: number,
+  headSha: string,
+): string | undefined {
+  const row = database
+    .prepare("SELECT value FROM AppState WHERE key = ?")
+    .get(`workflow_run_list_etag:${pullRequestId}:${headSha}`);
+
+  if (row?.value === undefined) {
+    return undefined;
+  }
+
+  return (JSON.parse(String(row.value)) as { etag: string }).etag;
+}
+
 function writePullRequestDetailEtag(
   database: ReturnType<typeof initializeDatabase>,
   pullRequestId: number,
@@ -1771,6 +2252,26 @@ function writePullRequestDetailEtag(
       `,
     )
     .run(`pull_request_detail_etag:${pullRequestId}`, etag);
+}
+
+function writeWorkflowRunListEtag(
+  database: ReturnType<typeof initializeDatabase>,
+  pullRequestId: number,
+  headSha: string,
+  etag: string,
+  pageCount = 1,
+): void {
+  database
+    .prepare(
+      `
+        INSERT INTO AppState (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+    )
+    .run(`workflow_run_list_etag:${pullRequestId}:${headSha}`, JSON.stringify({ etag, pageCount }));
 }
 
 function createGitHubNotModifiedError(etag: string): Error & {
