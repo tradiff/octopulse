@@ -144,6 +144,53 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
+  it("stops polling grace-period pull requests after grace expires", async () => {
+    const { database, repository } = createRepository();
+    const pollPullRequest = vi.fn(async () => {});
+
+    try {
+      repository.upsertPullRequest(
+        createGracePeriodPullRequestInput({
+          graceUntil: "2026-04-10T12:10:00.000Z",
+        }),
+      );
+
+      await pollTrackedPullRequests(
+        database,
+        {
+          client: {},
+          currentUserLogin: "octocat",
+        },
+        {
+          pullRequestRepository: repository,
+          pollPullRequest,
+          observedAt: OBSERVED_AT,
+        },
+      );
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {},
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            pollPullRequest,
+            observedAt: "2026-04-10T12:15:00.000Z",
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 0,
+        polledCount: 0,
+        failedCount: 0,
+      });
+      expect(pollPullRequest).toHaveBeenCalledTimes(1);
+    } finally {
+      database.close();
+    }
+  });
+
   it("polls every eligible pull request once with bounded concurrency", async () => {
     const { database, repository } = createRepository();
     const startedPullRequestIds: number[] = [];
@@ -1094,7 +1141,7 @@ describe("pollTrackedPullRequests", () => {
     const { database, repository } = createRepository();
     const eventBundleRepository = new EventBundleRepository(database);
     const normalizedEventRepository = new NormalizedEventRepository(database);
-    const request = vi.fn(async (route: string) => {
+      const request = vi.fn(async (route: string) => {
       switch (route) {
         case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
           return createPullRequestDetailResponse();
@@ -1882,16 +1929,19 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
-  it("dispatches immediate and same-session bundled notification records during polling", async () => {
+  it("dispatches immediate and same-session bundled notifications for grace-period pull requests", async () => {
     const { database, repository } = createRepository();
     const notificationRecordRepository = new NotificationRecordRepository(database);
     const notificationDispatcher = {
       dispatchNotification: vi.fn().mockResolvedValue(undefined),
     };
     const request = vi.fn(async (route: string) => {
-      switch (route) {
+        switch (route) {
         case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
-          return createPullRequestDetailResponse();
+          return createPullRequestDetailResponse({
+            state: "closed",
+            closedAt: "2026-04-10T11:45:00.000Z",
+          });
         case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
           return {
             data: [
@@ -1943,7 +1993,9 @@ describe("pollTrackedPullRequests", () => {
     });
 
     try {
-      repository.upsertPullRequest(createPullRequestInput());
+      repository.upsertPullRequest(
+        createGracePeriodPullRequestInput(),
+      );
 
       await expect(
         pollTrackedPullRequests(
@@ -1967,7 +2019,7 @@ describe("pollTrackedPullRequests", () => {
         failedCount: 0,
       });
 
-      const pullRequest = repository.listTrackedPullRequests()[0];
+      const pullRequest = repository.getPullRequestByGitHubPullRequestId(101);
 
       expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(2);
       expect(notificationRecordRepository.listNotificationRecordsForPullRequest(pullRequest?.id ?? -1)).toEqual([
@@ -2177,6 +2229,129 @@ describe("startRecurringTrackedPullRequestPolling", () => {
     }
   });
 
+  it("polls grace-period pull requests every fifteen minutes independent of the active interval", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(OBSERVED_AT));
+
+    const { database, repository } = createRepository();
+    const polledPullRequestIds: number[] = [];
+    const pollPullRequest = vi.fn(async (_client: object, pullRequest: PullRequestRecord) => {
+      polledPullRequestIds.push(pullRequest.githubPullRequestId);
+    });
+    repository.upsertPullRequest(createPullRequestInput());
+    repository.upsertPullRequest(
+      createGracePeriodPullRequestInput({
+        githubPullRequestId: 202,
+        number: 8,
+        url: "https://github.com/acme/octopulse/pull/8",
+        title: "Poll closed pull requests less often",
+      }),
+    );
+
+    const handle = startRecurringTrackedPullRequestPolling(
+      database,
+      {
+        client: {},
+        currentUserLogin: "octocat",
+      },
+      {
+        intervalMs: 7 * 60_000,
+        pullRequestRepository: repository,
+        pollPullRequest,
+      },
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(15 * 60_000 + 1_000);
+
+      expect(polledPullRequestIds.filter((id) => id === 101)).toHaveLength(2);
+      expect(polledPullRequestIds.filter((id) => id === 202)).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+
+      expect(polledPullRequestIds.filter((id) => id === 101)).toHaveLength(4);
+      expect(polledPullRequestIds.filter((id) => id === 202)).toHaveLength(2);
+    } finally {
+      handle.stop();
+      database.close();
+    }
+  });
+
+  it("retries the grace-period sweep after one minute when a grace poll fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(OBSERVED_AT));
+
+    const { database, repository } = createRepository();
+    let shouldFail = true;
+    const pollPullRequest = vi.fn(async () => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("temporary GitHub outage");
+      }
+    });
+    repository.upsertPullRequest(
+      createGracePeriodPullRequestInput(),
+    );
+
+    const handle = startRecurringTrackedPullRequestPolling(
+      database,
+      {
+        client: {},
+        currentUserLogin: "octocat",
+      },
+      {
+        intervalMs: POLLING_INTERVAL_MS,
+        pullRequestRepository: repository,
+        pollPullRequest,
+      },
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(15 * 60_000 + 1_000);
+
+      expect(pollPullRequest).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(pollPullRequest).toHaveBeenCalledTimes(2);
+    } finally {
+      handle.stop();
+      database.close();
+    }
+  });
+
+  it("stops the grace-period polling timer", async () => {
+    vi.useFakeTimers();
+
+    const { database, repository } = createRepository();
+    const pollPullRequest = vi.fn(async () => {});
+    repository.upsertPullRequest(
+      createGracePeriodPullRequestInput(),
+    );
+
+    const handle = startRecurringTrackedPullRequestPolling(
+      database,
+      {
+        client: {},
+        currentUserLogin: "octocat",
+      },
+      {
+        intervalMs: POLLING_INTERVAL_MS,
+        pullRequestRepository: repository,
+        pollPullRequest,
+      },
+    );
+
+    try {
+      handle.stop();
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+
+      expect(pollPullRequest).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not start an overlapping polling cycle", async () => {
     vi.useFakeTimers();
 
@@ -2323,6 +2498,22 @@ function createPullRequestInput(
     ...input,
     ...overrides,
   };
+}
+
+function createGracePeriodPullRequestInput(
+  overrides: Partial<UpsertPullRequestInput> = {},
+): UpsertPullRequestInput {
+  return createPullRequestInput({
+    state: "closed",
+    closedAt: "2026-04-10T11:45:00.000Z",
+    graceUntil: "2026-04-17T11:45:00.000Z",
+    tracking: {
+      isTracked: false,
+      trackingReason: "auto",
+      isStickyUntracked: false,
+    },
+    ...overrides,
+  });
 }
 
 function createPullRequestDetailResponse(

@@ -20,6 +20,9 @@ import {
 } from "./pull-request-repository.js";
 
 const PULL_REQUEST_POLL_CONCURRENCY = 4;
+const GRACE_PERIOD_POLL_INTERVAL_MS = 15 * 60_000;
+const GRACE_PERIOD_POLL_RETRY_DELAY_MS = 60_000;
+const GRACE_PERIOD_POLL_DEFER_DELAY_MS = 1_000;
 
 export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   pullRequestRepository?: Pick<
@@ -31,6 +34,8 @@ export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   notificationDispatcher?: NotificationDispatcher;
   observedAt?: string;
   gracePeriodMs?: number;
+  includeTrackedPullRequests?: boolean;
+  includeGracePeriodPullRequests?: boolean;
   notificationDispatchedAt?: string;
   onError?: (error: PullRequestPollingError) => void;
   fetchJobsForWorkflowRun?: ProcessTrackedPullRequestActivityOptions<TClient>["fetchJobsForWorkflowRun"];
@@ -68,6 +73,8 @@ export async function pollTrackedPullRequests<TClient>(
   const notificationDispatcher = options.notificationDispatcher;
   const observedAt = options.observedAt ?? new Date().toISOString();
   const notificationDispatchedAt = options.notificationDispatchedAt ?? new Date().toISOString();
+  const includeTrackedPullRequests = options.includeTrackedPullRequests ?? true;
+  const includeGracePeriodPullRequests = options.includeGracePeriodPullRequests ?? true;
 
   if (options.gracePeriodMs !== undefined) {
     pullRequestRepository.deactivateClosedPullRequests(options.gracePeriodMs);
@@ -97,7 +104,12 @@ export async function pollTrackedPullRequests<TClient>(
   let pullRequests: PullRequestRecord[];
 
   try {
-    pullRequests = pullRequestRepository.listPullRequestsForPolling(observedAt);
+    pullRequests = pullRequestRepository
+      .listPullRequestsForPolling(observedAt)
+      .filter(
+        (pullRequest) =>
+          pullRequest.isTracked ? includeTrackedPullRequests : includeGracePeriodPullRequests,
+      );
   } catch (error) {
     if (error instanceof PullRequestPollingError) {
       throw error;
@@ -169,10 +181,12 @@ export function startRecurringTrackedPullRequestPolling<TClient>(
   let isStopped = false;
   let isRunning = false;
   const timer = setInterval(() => {
-    void runPollingCycle();
+    void runPollingCycle({ includeGracePeriodPullRequests: false });
   }, intervalMs);
+  let gracePeriodTimer: ReturnType<typeof setTimeout> | undefined;
 
   timer.unref?.();
+  scheduleGracePeriodPolling(GRACE_PERIOD_POLL_INTERVAL_MS);
 
   return {
     stop(): void {
@@ -182,10 +196,18 @@ export function startRecurringTrackedPullRequestPolling<TClient>(
 
       isStopped = true;
       clearInterval(timer);
+      if (gracePeriodTimer !== undefined) {
+        clearTimeout(gracePeriodTimer);
+      }
     },
   };
 
-  async function runPollingCycle(): Promise<void> {
+  async function runPollingCycle(
+    cycleOptions: Pick<
+      PollTrackedPullRequestsOptions<TClient>,
+      "includeTrackedPullRequests" | "includeGracePeriodPullRequests"
+    >,
+  ): Promise<PollTrackedPullRequestsResult | undefined> {
     if (isStopped || isRunning) {
       return;
     }
@@ -193,20 +215,21 @@ export function startRecurringTrackedPullRequestPolling<TClient>(
     isRunning = true;
 
     try {
-      const cycleOptions: PollTrackedPullRequestsOptions<TClient> = onError
-        ? {
-            ...pollOptions,
-            onError,
-          }
-        : pollOptions;
+      const pollingOptions: PollTrackedPullRequestsOptions<TClient> = {
+        ...pollOptions,
+        ...cycleOptions,
+        ...(onError ? { onError } : {}),
+      };
 
-      const result = await pollTrackedPullRequests(database, githubAuth, cycleOptions);
+      const result = await pollTrackedPullRequests(database, githubAuth, pollingOptions);
 
       if (result.polledCount > 0 || result.failedCount > 0) {
         getLogger().info("Completed tracked pull request polling cycle", result);
       } else {
         getLogger().debug("Tracked pull request polling cycle found no eligible work", result);
       }
+
+      return result;
     } catch (error) {
       const pollingError =
         error instanceof PullRequestPollingError
@@ -216,9 +239,40 @@ export function startRecurringTrackedPullRequestPolling<TClient>(
             );
 
       (onError ?? logTrackedPullRequestPollingError)(pollingError);
+      return undefined;
     } finally {
       isRunning = false;
     }
+  }
+
+  function scheduleGracePeriodPolling(delayMs: number): void {
+    gracePeriodTimer = setTimeout(() => {
+      void runGracePeriodPollingCycle();
+    }, delayMs);
+    gracePeriodTimer.unref?.();
+  }
+
+  async function runGracePeriodPollingCycle(): Promise<void> {
+    if (isStopped) {
+      return;
+    }
+
+    if (isRunning) {
+      scheduleGracePeriodPolling(GRACE_PERIOD_POLL_DEFER_DELAY_MS);
+      return;
+    }
+
+    const result = await runPollingCycle({ includeTrackedPullRequests: false });
+
+    if (isStopped) {
+      return;
+    }
+
+    scheduleGracePeriodPolling(
+      result === undefined || result.failedCount > 0
+        ? GRACE_PERIOD_POLL_RETRY_DELAY_MS
+        : GRACE_PERIOD_POLL_INTERVAL_MS,
+    );
   }
 }
 

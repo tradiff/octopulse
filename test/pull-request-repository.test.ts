@@ -162,6 +162,46 @@ describe("PullRequestRepository", () => {
       database.close();
     }
   });
+
+  it("reactivates grace-period pull requests when they reopen", () => {
+    const { database, repository } = createRepository();
+
+    try {
+      for (const trackingReason of ["auto", "manual"]) {
+        repository.upsertPullRequest(
+          createPullRequestInput({
+            state: "closed",
+            closedAt: "2026-04-10T11:45:00.000Z",
+            graceUntil: "2026-04-17T11:45:00.000Z",
+            tracking: {
+              isTracked: false,
+              trackingReason,
+              isStickyUntracked: false,
+            },
+          }),
+        );
+        const reopenedInput = createPullRequestInput({
+          state: "open",
+          closedAt: null,
+        });
+        delete reopenedInput.graceUntil;
+
+        const reopened = repository.upsertPullRequest(reopenedInput);
+
+        expect(reopened).toMatchObject({
+          isTracked: true,
+          trackingReason,
+          isStickyUntracked: false,
+          state: "open",
+          graceUntil: null,
+        });
+      }
+
+      expect(repository.listPullRequestsForPolling("2026-04-10T12:00:00.000Z")).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {

@@ -93,7 +93,23 @@ export class PullRequestRepository {
     try {
       return withinTransaction(this.database, () => {
         const existing = this.readExistingPullRequest(input);
-        const tracking = input.tracking ?? readTrackingState(existing);
+        const isReopeningGracePullRequest =
+          input.tracking === undefined &&
+          existing !== undefined &&
+          !existing.isTracked &&
+          !existing.isStickyUntracked &&
+          existing.graceUntil !== null &&
+          input.state === "open";
+        const tracking = isReopeningGracePullRequest
+          ? {
+              isTracked: true,
+              trackingReason: existing.trackingReason,
+              isStickyUntracked: false,
+            }
+          : input.tracking ?? readTrackingState(existing);
+        const graceUntil = isReopeningGracePullRequest
+          ? null
+          : resolveNullableField(input.graceUntil, existing?.graceUntil ?? null);
 
         if (existing) {
           this.database
@@ -145,7 +161,7 @@ export class PullRequestRepository {
               resolveNullableField(input.lastSeenAt, existing.lastSeenAt),
               resolveNullableField(input.closedAt, existing.closedAt),
               resolveNullableField(input.mergedAt, existing.mergedAt),
-              resolveNullableField(input.graceUntil, existing.graceUntil),
+              graceUntil,
               resolveNullableField(input.lastSeenHeadSha, existing.lastSeenHeadSha),
               resolveNullableField(input.baseBranch, existing.baseBranch),
               writeNullableBoolean(resolveNullableBooleanField(input.mergeable, existing.mergeable)),

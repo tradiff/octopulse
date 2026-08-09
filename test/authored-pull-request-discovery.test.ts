@@ -388,6 +388,65 @@ describe("runFirstRunAuthoredPullRequestDiscovery", () => {
     }
   });
 
+  it("reactivates automatic grace-period pull requests when discovery sees them open", async () => {
+    const { database, repository } = createRepository();
+    const client = { kind: "fake-client" };
+
+    try {
+      repository.upsertPullRequest(
+        createPullRequestInput({
+          state: "closed",
+          closedAt: "2026-04-10T11:45:00.000Z",
+          graceUntil: "2026-04-17T11:45:00.000Z",
+          tracking: {
+            isTracked: false,
+            trackingReason: "auto",
+            isStickyUntracked: false,
+          },
+        }),
+      );
+
+      await expect(
+        discoverOpenAuthoredPullRequests(
+          database,
+          {
+            client,
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            searchOpenAuthoredPullRequests: async () => [
+              {
+                repositoryOwner: "acme",
+                repositoryName: "octopulse",
+                number: 7,
+              },
+            ],
+            searchOpenReviewRequestedPullRequests: async () => [],
+            fetchPullRequestDetail: async (_client, coordinates) =>
+              createDiscoveredPullRequest(coordinates),
+            observedAt: OBSERVED_AT,
+          },
+        ),
+      ).resolves.toEqual({
+        discoveredCount: 1,
+      });
+
+      expect(repository.listTrackedPullRequests()).toEqual([
+        expect.objectContaining({
+          githubPullRequestId: 101,
+          state: "open",
+          isTracked: true,
+          trackingReason: "auto",
+          isStickyUntracked: false,
+          graceUntil: null,
+        }),
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("skips discovery after first-run completion is already persisted", async () => {
     const { database, repository } = createRepository();
     const searchOpenAuthoredPullRequests = vi.fn(async () => [] as PullRequestCoordinates[]);
