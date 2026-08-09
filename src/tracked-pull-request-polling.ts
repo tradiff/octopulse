@@ -19,6 +19,8 @@ import {
   type PullRequestRecord,
 } from "./pull-request-repository.js";
 
+const PULL_REQUEST_POLL_CONCURRENCY = 4;
+
 export interface PollTrackedPullRequestsOptions<TClient = Octokit> {
   pullRequestRepository?: Pick<
     PullRequestRepository,
@@ -114,22 +116,35 @@ export async function pollTrackedPullRequests<TClient>(
   let polledCount = 0;
   let failedCount = 0;
 
-  for (const pullRequest of pullRequests) {
-    try {
-      await pollPullRequest(githubAuth.client, pullRequest);
-      polledCount += 1;
-      getLogger().debug("Polled tracked pull request", {
-        pullRequest: formatPullRequestLabel(pullRequest),
-      });
-    } catch (error) {
-      failedCount += 1;
-      onError(
-        new PullRequestPollingError(
-          `Failed to poll pull request ${formatPullRequestLabel(pullRequest)}: ${getErrorMessage(error)}`,
-        ),
-      );
-    }
-  }
+  let nextPullRequestIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: Math.min(PULL_REQUEST_POLL_CONCURRENCY, pullRequests.length) }, async () => {
+      while (nextPullRequestIndex < pullRequests.length) {
+        const pullRequest = pullRequests[nextPullRequestIndex];
+        nextPullRequestIndex += 1;
+
+        if (!pullRequest) {
+          return;
+        }
+
+        try {
+          await pollPullRequest(githubAuth.client, pullRequest);
+          polledCount += 1;
+          getLogger().debug("Polled tracked pull request", {
+            pullRequest: formatPullRequestLabel(pullRequest),
+          });
+        } catch (error) {
+          failedCount += 1;
+          onError(
+            new PullRequestPollingError(
+              `Failed to poll pull request ${formatPullRequestLabel(pullRequest)}: ${getErrorMessage(error)}`,
+            ),
+          );
+        }
+      }
+    }),
+  );
 
   return {
     eligibleCount: pullRequests.length,

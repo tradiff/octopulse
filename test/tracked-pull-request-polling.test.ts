@@ -144,6 +144,137 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
+  it("polls every eligible pull request once with bounded concurrency", async () => {
+    const { database, repository } = createRepository();
+    const startedPullRequestIds: number[] = [];
+    const releasePolls: Array<() => void> = [];
+    let resolvePoolFull = () => {};
+    let resolveAllPollsStarted = () => {};
+    const poolFull = new Promise<void>((resolve) => {
+      resolvePoolFull = resolve;
+    });
+    const allPollsStarted = new Promise<void>((resolve) => {
+      resolveAllPollsStarted = resolve;
+    });
+    const pollPullRequest = vi.fn(async (_client: object, pullRequest: PullRequestRecord) => {
+      startedPullRequestIds.push(pullRequest.githubPullRequestId);
+
+      if (startedPullRequestIds.length === 4) {
+        resolvePoolFull();
+      }
+
+      if (startedPullRequestIds.length === 5) {
+        resolveAllPollsStarted();
+      }
+
+      await new Promise<void>((resolve) => {
+        releasePolls.push(resolve);
+      });
+    });
+
+    try {
+      for (const githubPullRequestId of [101, 202, 303, 404, 505]) {
+        repository.upsertPullRequest(
+          createPullRequestInput({
+            githubPullRequestId,
+            number: githubPullRequestId,
+            url: `https://github.com/acme/octopulse/pull/${githubPullRequestId}`,
+            lastSeenHeadSha: `sha-${githubPullRequestId}`,
+          }),
+        );
+      }
+
+      const polling = pollTrackedPullRequests(
+        database,
+        {
+          client: {},
+          currentUserLogin: "octocat",
+        },
+        {
+          pullRequestRepository: repository,
+          pollPullRequest,
+          observedAt: OBSERVED_AT,
+        },
+      );
+
+      await poolFull;
+
+      expect(startedPullRequestIds).toHaveLength(4);
+      releasePolls.splice(0).forEach((release) => release());
+      await allPollsStarted;
+
+      expect(startedPullRequestIds.sort((left, right) => left - right)).toEqual([
+        101, 202, 303, 404, 505,
+      ]);
+      releasePolls.splice(0).forEach((release) => release());
+      await expect(polling).resolves.toEqual({
+        eligibleCount: 5,
+        polledCount: 5,
+        failedCount: 0,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("continues polling other pull requests when one poll fails", async () => {
+    const { database, repository } = createRepository();
+    const polledPullRequestIds: number[] = [];
+    const onError = vi.fn();
+    const pollPullRequest = vi.fn(async (_client: object, pullRequest: PullRequestRecord) => {
+      if (pullRequest.githubPullRequestId === 202) {
+        throw new Error("temporary GitHub outage");
+      }
+
+      polledPullRequestIds.push(pullRequest.githubPullRequestId);
+    });
+
+    try {
+      for (const githubPullRequestId of [101, 202, 303]) {
+        repository.upsertPullRequest(
+          createPullRequestInput({
+            githubPullRequestId,
+            number: githubPullRequestId,
+            url: `https://github.com/acme/octopulse/pull/${githubPullRequestId}`,
+            lastSeenHeadSha: `sha-${githubPullRequestId}`,
+          }),
+        );
+      }
+
+      await expect(
+        pollTrackedPullRequests(
+          database,
+          {
+            client: {},
+            currentUserLogin: "octocat",
+          },
+          {
+            pullRequestRepository: repository,
+            pollPullRequest,
+            observedAt: OBSERVED_AT,
+            onError,
+          },
+        ),
+      ).resolves.toEqual({
+        eligibleCount: 3,
+        polledCount: 2,
+        failedCount: 1,
+      });
+
+      expect(pollPullRequest.mock.calls.map((call) => call[1].githubPullRequestId).sort()).toEqual([
+        101, 202, 303,
+      ]);
+      expect(polledPullRequestIds.sort((left, right) => left - right)).toEqual([101, 303]);
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Failed to poll pull request acme/octopulse#202: temporary GitHub outage",
+        }),
+      );
+    } finally {
+      database.close();
+    }
+  });
+
   it("ingests raw pull request activity by default during polling", async () => {
     const { database, repository } = createRepository();
     const rawEventRepository = new RawEventRepository(database);
@@ -2040,6 +2171,60 @@ describe("startRecurringTrackedPullRequestPolling", () => {
 
       expect(pollPullRequest).toHaveBeenCalledTimes(2);
       expect(polledPullRequestIds).toEqual([101, 101]);
+    } finally {
+      handle.stop();
+      database.close();
+    }
+  });
+
+  it("does not start an overlapping polling cycle", async () => {
+    vi.useFakeTimers();
+
+    const { database, repository } = createRepository();
+    let releaseFirstPoll = () => {};
+    let resolveFirstPollStarted = () => {};
+    let isFirstPoll = true;
+    const firstPollStarted = new Promise<void>((resolve) => {
+      resolveFirstPollStarted = resolve;
+    });
+    const pollPullRequest = vi.fn(async () => {
+      if (!isFirstPoll) {
+        return;
+      }
+
+      isFirstPoll = false;
+      resolveFirstPollStarted();
+      await new Promise<void>((resolve) => {
+        releaseFirstPoll = resolve;
+      });
+    });
+    repository.upsertPullRequest(createPullRequestInput());
+
+    const handle = startRecurringTrackedPullRequestPolling(
+      database,
+      {
+        client: {},
+        currentUserLogin: "octocat",
+      },
+      {
+        intervalMs: POLLING_INTERVAL_MS,
+        pullRequestRepository: repository,
+        pollPullRequest,
+      },
+    );
+
+    try {
+      vi.advanceTimersByTime(POLLING_INTERVAL_MS);
+      await firstPollStarted;
+      vi.advanceTimersByTime(POLLING_INTERVAL_MS);
+
+      expect(pollPullRequest).toHaveBeenCalledTimes(1);
+
+      releaseFirstPoll();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+
+      expect(pollPullRequest).toHaveBeenCalledTimes(2);
     } finally {
       handle.stop();
       database.close();
