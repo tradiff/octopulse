@@ -45,6 +45,10 @@ token = "ghp_replace_with_your_token"
 #level = "info"
 #retention = "14 days"
 
+# Optional raw GitHub payload retention. Normalized events and notifications remain.
+#[history]
+#raw_payload_retention = "30 days"
+
 # Optional. Used only for bot-authored comment/review classification.
 #[openai]
 #api_key = "sk_replace_with_your_key"
@@ -116,3 +120,11 @@ npm run build
 ## Operations
 
 For persistent local service setup, service management, logs, and runtime data locations, see `docs/user-service-setup.md`.
+
+To reclaim database disk space after raw payloads expire, stop the service and run:
+
+```bash
+systemctl --user stop octopulse.service
+npm run maintain:database
+systemctl --user start octopulse.service
+```

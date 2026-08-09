@@ -23,6 +23,7 @@ import { listNotificationHistory } from "./notification-history.js";
 import { resendNotificationRecord } from "./notification-dispatch.js";
 import { PullRequestRepository } from "./pull-request-repository.js";
 import { runRequestedReviewTargetsBackfill } from "./pull-request-review-target-backfill.js";
+import { pruneRawEventPayloads } from "./raw-event-retention.js";
 import { listPullRequestTimeline } from "./raw-events.js";
 import { readServerOrigin, startServer } from "./server.js";
 import {
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
   let server: Server | undefined;
   let recurringDiscovery: RecurringAuthoredPullRequestDiscoveryHandle | undefined;
   let recurringTrackedPullRequestPolling: RecurringTrackedPullRequestPollingHandle | undefined;
+  let rawEventPayloadPruningTimer: ReturnType<typeof setInterval> | undefined;
   let trayIcon: TrayIconHandle | undefined;
   let isShuttingDown = false;
 
@@ -50,6 +52,8 @@ async function main(): Promise<void> {
     recurringDiscovery = undefined;
     recurringTrackedPullRequestPolling?.stop();
     recurringTrackedPullRequestPolling = undefined;
+    clearInterval(rawEventPayloadPruningTimer);
+    rawEventPayloadPruningTimer = undefined;
     await closeTrayIconQuietly(trayIcon);
     trayIcon = undefined;
     await closeServerQuietly(server);
@@ -101,6 +105,22 @@ async function main(): Promise<void> {
     const currentDatabase = initializeDatabase(config.paths);
     const pullRequestRepository = new PullRequestRepository(currentDatabase);
     database = currentDatabase;
+    pruneRawEventPayloads(currentDatabase, config.history.rawPayloadRetentionMs);
+    rawEventPayloadPruningTimer = setInterval(() => {
+      try {
+        const prunedCount = pruneRawEventPayloads(
+          currentDatabase,
+          config.history.rawPayloadRetentionMs,
+        );
+
+        if (prunedCount > 0) {
+          logger.info("Pruned expired raw event payloads", { prunedCount });
+        }
+      } catch (error) {
+        logger.error("Failed to prune expired raw event payloads", { error });
+      }
+    }, 24 * 60 * 60_000);
+    rawEventPayloadPruningTimer.unref?.();
     const deactivatedPullRequestCount = pullRequestRepository.deactivateClosedPullRequests(
       config.timings.gracePeriodMs,
     );
@@ -208,6 +228,8 @@ async function main(): Promise<void> {
       recurringDiscovery = undefined;
       recurringTrackedPullRequestPolling?.stop();
       recurringTrackedPullRequestPolling = undefined;
+      clearInterval(rawEventPayloadPruningTimer);
+      rawEventPayloadPruningTimer = undefined;
       closeDatabaseQuietly(database);
       database = undefined;
     });
@@ -220,6 +242,7 @@ async function main(): Promise<void> {
   } catch (error) {
     recurringDiscovery?.stop();
     recurringTrackedPullRequestPolling?.stop();
+    clearInterval(rawEventPayloadPruningTimer);
     await closeTrayIconQuietly(trayIcon);
     await closeServerQuietly(server);
     closeDatabaseQuietly(database);

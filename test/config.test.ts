@@ -45,6 +45,9 @@ describe("loadConfig", () => {
       level: "info",
       retentionMs: 14 * 24 * 60 * 60_000,
     });
+    expect(config.history).toEqual({
+      rawPayloadRetentionMs: 30 * 24 * 60 * 60_000,
+    });
     expect(config.timings).toEqual({
       trackedPullRequestPollMs: 60_000,
       discoveryPollMs: 5 * 60_000,
@@ -69,6 +72,9 @@ describe("loadConfig", () => {
         'level = "debug"',
         'retention = "30 days"',
         "",
+        "[history]",
+        'raw_payload_retention = "45 days"',
+        "",
         "[timings]",
         'tracked_poll_interval = "2 minutes"',
         'discovery_poll_interval = "10m"',
@@ -84,6 +90,9 @@ describe("loadConfig", () => {
     expect(config.logging).toEqual({
       level: "debug",
       retentionMs: 30 * 24 * 60 * 60_000,
+    });
+    expect(config.history).toEqual({
+      rawPayloadRetentionMs: 45 * 24 * 60 * 60_000,
     });
     expect(config.timings).toEqual({
       trackedPullRequestPollMs: 2 * 60_000,

@@ -1,5 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
+import { PRUNED_RAW_EVENT_PAYLOAD_JSON } from "./raw-event-retention.js";
+
 export interface RawEventRecord {
   id: number;
   pullRequestId: number;
@@ -110,10 +112,11 @@ export class RawEventRepository {
             ON NormalizedEvent.raw_event_id = RawEvent.id
           WHERE RawEvent.pull_request_id = ?
             AND NormalizedEvent.id IS NULL
+            AND RawEvent.payload_json <> ?
           ORDER BY RawEvent.occurred_at ASC, RawEvent.id ASC
         `,
       )
-      .all(pullRequestId);
+      .all(pullRequestId, PRUNED_RAW_EVENT_PAYLOAD_JSON);
 
     return rows.map((row) => mapRawEventRow(row));
   }

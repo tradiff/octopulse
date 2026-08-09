@@ -5,6 +5,7 @@ import path from "node:path";
 import { parse } from "smol-toml";
 
 import { DEFAULT_LOG_RETENTION_MS, isLogLevel, type LogLevel } from "./logger.js";
+import { DEFAULT_RAW_EVENT_PAYLOAD_RETENTION_MS } from "./raw-event-retention.js";
 
 const DEFAULT_TRACKED_PULL_REQUEST_POLL_MS = 60_000;
 const DEFAULT_DISCOVERY_POLL_MS = 5 * 60_000;
@@ -35,6 +36,9 @@ export interface AppConfig {
   logging: {
     level: LogLevel;
     retentionMs: number;
+  };
+  history: {
+    rawPayloadRetentionMs: number;
   };
   timings: {
     trackedPullRequestPollMs: number;
@@ -97,7 +101,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 
 function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
   const root = requireTable(parsedConfig, "config");
-  assertAllowedKeys(root, ["github", "openai", "timings", "logging"]);
+  assertAllowedKeys(root, ["github", "openai", "timings", "logging", "history"]);
 
   const github = requireNestedTable(root, "github");
   assertAllowedKeys(github, ["token", "login"], "github");
@@ -121,6 +125,11 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
     assertAllowedKeys(logging, ["level", "retention"], "logging");
   }
 
+  const history = optionalNestedTable(root, "history");
+  if (history) {
+    assertAllowedKeys(history, ["raw_payload_retention"], "history");
+  }
+
   const openAiApiKey = openai
     ? optionalNonEmptyString(openai, "api_key", "openai.api_key")
     : undefined;
@@ -138,6 +147,14 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
         "retention",
         "logging.retention",
         DEFAULT_LOG_RETENTION_MS,
+      ),
+    },
+    history: {
+      rawPayloadRetentionMs: optionalDuration(
+        history,
+        "raw_payload_retention",
+        "history.raw_payload_retention",
+        DEFAULT_RAW_EVENT_PAYLOAD_RETENTION_MS,
       ),
     },
     timings: {
