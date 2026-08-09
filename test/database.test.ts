@@ -167,6 +167,31 @@ describe("initializeDatabase", () => {
     }
   });
 
+  it("applies indexes for polling lookups", () => {
+    const homeDir = createTempDir("octopulse-db-home-");
+    const database = initializeDatabase(resolveAppPaths({ homeDir }));
+
+    try {
+      expect(readQueryPlan(database, `
+        SELECT RawEvent.*
+        FROM RawEvent
+        LEFT JOIN NormalizedEvent
+          ON NormalizedEvent.raw_event_id = RawEvent.id
+        WHERE RawEvent.pull_request_id = 1
+          AND NormalizedEvent.id IS NULL
+      `)).toContain("USING COVERING INDEX idx_normalized_event_raw_event_id");
+      expect(readQueryPlan(database, `
+        SELECT 1 FROM PullRequestCiJobState
+        WHERE pull_request_id = 1
+          AND workflow_run_id = '1'
+          AND workflow_run_updated_at = '2026-01-01T00:00:00.000Z'
+        LIMIT 1
+      `)).toContain("USING COVERING INDEX idx_pull_request_ci_job_state_workflow_run");
+    } finally {
+      database.close();
+    }
+  });
+
   it("backfills pull request ci job head sha from workflow run raw events", () => {
     const homeDir = createTempDir("octopulse-db-home-");
     const paths = resolveAppPaths({ homeDir });
@@ -361,4 +386,12 @@ function readTableColumns(database: ReturnType<typeof initializeDatabase>, table
     .prepare(`PRAGMA table_info(${tableName})`)
     .all()
     .map((row) => String(row.name));
+}
+
+function readQueryPlan(database: ReturnType<typeof initializeDatabase>, sql: string): string {
+  return database
+    .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+    .all()
+    .map((row) => String(row.detail))
+    .join("\n");
 }
