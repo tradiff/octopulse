@@ -309,7 +309,7 @@ function App() {
   async function loadCurrentPageData(routeState: RouteState): Promise<void> {
     try {
       if (routeState.currentPage === "pull-requests") {
-        const pageData = await loadPullRequestsPageData();
+        const pageData = await loadPullRequestsPageData(routeState.uiFilters);
 
         setTrackedPullRequests(pageData.trackedPullRequests);
         setInactivePullRequests(pageData.inactivePullRequests);

@@ -17,6 +17,11 @@ import {
   PullRequestReviewStateRepository,
   type PullRequestReviewStateRecord,
 } from "./pull-request-review-state-repository.js";
+import {
+  DEFAULT_UI_FILTERS,
+  filterPullRequests,
+  type UiFilterValues,
+} from "./ui-filters.js";
 
 export interface PullRequestTimelineEntry {
   id: number;
@@ -30,6 +35,7 @@ export type PullRequestReviewStatesByPullRequest = Record<string, PullRequestRev
 export type PullRequestCiJobStatesByPullRequest = Record<string, PullRequestCiJobStateRecord[]>;
 
 export interface ListPullRequestTimelineOptions {
+  filters?: UiFilterValues;
   normalizedEventRepository?: Pick<NormalizedEventRepository, "listNormalizedEventsForPullRequest">;
   pullRequestRepository?: Pick<PullRequestRepository, "listTrackedPullRequests" | "listInactivePullRequests">;
   pullRequestReviewStateRepository?: Pick<PullRequestReviewStateRepository, "listReviewStatesForPullRequest">;
@@ -53,10 +59,13 @@ export function listPullRequestTimeline(
     options.pullRequestReviewStateRepository ?? new PullRequestReviewStateRepository(database);
   const ciJobStateRepository =
     options.ciJobStateRepository ?? new PullRequestCiJobStateRepository(database);
-  const pullRequests = [
-    ...pullRequestRepository.listTrackedPullRequests(),
-    ...pullRequestRepository.listInactivePullRequests(),
-  ];
+  const pullRequests = filterPullRequests(
+    [
+      ...pullRequestRepository.listTrackedPullRequests(),
+      ...pullRequestRepository.listInactivePullRequests(),
+    ],
+    options.filters ?? DEFAULT_UI_FILTERS,
+  );
 
   const timelineByPullRequest: PullRequestTimeline = {};
   const reviewStatesByPullRequest: PullRequestReviewStatesByPullRequest = {};

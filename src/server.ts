@@ -28,7 +28,7 @@ import {
 } from "./pull-request-state-assets.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import type { PullRequestTimeline, PullRequestTimelineResult } from "./raw-events.js";
-import { readUiFilterValues } from "./ui-filters.js";
+import { readUiFilterValues, type UiFilterValues } from "./ui-filters.js";
 
 const CLIENT_BUNDLE_PATH = new URL("../dist/public/app.js", import.meta.url);
 const SPA_DOCUMENT = [
@@ -58,7 +58,7 @@ export interface StartServerOptions {
   port?: number;
   listTrackedPullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
   listInactivePullRequests?: () => SyncOrPromise<PullRequestRecord[]>;
-  listPullRequestTimeline?: () => SyncOrPromise<PullRequestTimelineResult>;
+  listPullRequestTimeline?: (options: { filters: UiFilterValues }) => SyncOrPromise<PullRequestTimelineResult>;
   listNotificationHistory?: (
     options: ListActivityFeedOptions,
   ) => SyncOrPromise<PaginatedEntries<NotificationHistoryEntry>>;
@@ -185,7 +185,12 @@ async function handleRequest(
   }
 
   if (request.method === "GET" && pathname === "/api/pull-request-timeline") {
-    await handlePullRequestTimelineRequest(request, response, options.listPullRequestTimeline);
+    await handlePullRequestTimelineRequest(
+      request,
+      response,
+      options.listPullRequestTimeline,
+      readUiFilterValues(searchParams),
+    );
     return;
   }
 
@@ -506,6 +511,7 @@ async function handlePullRequestTimelineRequest(
   request: IncomingMessage,
   response: ServerResponse,
   listPullRequestTimeline: StartServerOptions["listPullRequestTimeline"],
+  filters: UiFilterValues,
 ): Promise<void> {
   if (!listPullRequestTimeline) {
     respond(
@@ -518,7 +524,7 @@ async function handlePullRequestTimelineRequest(
     return;
   }
 
-  const result = await listPullRequestTimeline();
+  const result = await listPullRequestTimeline({ filters });
 
   respond(
     response,

@@ -5,7 +5,7 @@ import {
   loadNotificationHistoryPageData,
   loadPullRequestsPageData,
 } from "../src/client-page-data.js";
-import { DEFAULT_UI_FILTERS } from "../src/ui-filters.js";
+import { DEFAULT_LANDING_UI_FILTERS, DEFAULT_UI_FILTERS } from "../src/ui-filters.js";
 
 describe("client page data loaders", () => {
   it("loads pull request page data through one module", async () => {
@@ -15,7 +15,7 @@ describe("client page data loaders", () => {
           return { pullRequests: [{ githubPullRequestId: 101 }] };
         case "/api/inactive-pull-requests":
           return { pullRequests: [{ githubPullRequestId: 202 }] };
-        case "/api/pull-request-timeline":
+        case "/api/pull-request-timeline?pr-state=tracked&pr-state=open":
           return {
             timelineByPullRequest: { "101": [] },
             reviewStatesByPullRequest: { "101": [] },
@@ -26,7 +26,12 @@ describe("client page data loaders", () => {
       }
     });
 
-    await expect(loadPullRequestsPageData(fetcher as unknown as typeof import("../src/client-page-data.js").apiFetch)).resolves.toEqual({
+    await expect(
+      loadPullRequestsPageData(
+        DEFAULT_LANDING_UI_FILTERS,
+        fetcher as unknown as typeof import("../src/client-page-data.js").apiFetch,
+      ),
+    ).resolves.toEqual({
       trackedPullRequests: [{ githubPullRequestId: 101 }],
       inactivePullRequests: [{ githubPullRequestId: 202 }],
       timelineByPullRequest: { "101": [] },

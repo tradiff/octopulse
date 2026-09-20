@@ -74,6 +74,14 @@ export function buildActivityApiPath(path: string, uiFilters: UiFilterValues, pa
   return search.length > 0 ? `${path}?${search}` : path;
 }
 
+export function buildPullRequestTimelineApiPath(uiFilters: UiFilterValues): string {
+  const searchParams = new URLSearchParams();
+  appendUiFilters(searchParams, PULL_REQUEST_FILTER_FIELDS, uiFilters);
+  const search = searchParams.toString();
+
+  return search.length > 0 ? `/api/pull-request-timeline?${search}` : "/api/pull-request-timeline";
+}
+
 export function countActivePageFilters(
   filters: UiFilterValues,
   page: AppPage,

@@ -134,7 +134,7 @@ export function countActiveUiFilters(filters: UiFilterValues): number {
   return count;
 }
 
-function filterPullRequests(
+export function filterPullRequests(
   pullRequests: PullRequestRecord[],
   filters: UiFilterValues,
 ): PullRequestRecord[] {

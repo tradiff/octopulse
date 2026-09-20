@@ -107,6 +107,7 @@ describe("startServer", () => {
   });
 
   it("serves pull request timeline API", async () => {
+    let timelineFilters: unknown;
     const timelineByPullRequest = {
       101: [
         {
@@ -143,17 +144,27 @@ describe("startServer", () => {
     const server = await startServer({
       host: "127.0.0.1",
       port: 0,
-      listPullRequestTimeline: async () => ({ timelineByPullRequest, reviewStatesByPullRequest, ciJobStatesByPullRequest }),
+      listPullRequestTimeline: async ({ filters }) => {
+        timelineFilters = filters;
+        return { timelineByPullRequest, reviewStatesByPullRequest, ciJobStatesByPullRequest };
+      },
     });
     servers.push(server);
 
-    const response = await fetch(`${readServerOrigin(server)}/api/pull-request-timeline`);
+    const response = await fetch(
+      `${readServerOrigin(server)}/api/pull-request-timeline?pr-state=tracked&pr-state=open`,
+    );
 
     expect(response.status).toBe(200);
     expect((await response.json()) as unknown).toEqual({
       timelineByPullRequest,
       reviewStatesByPullRequest,
       ciJobStatesByPullRequest,
+    });
+    expect(timelineFilters).toEqual({
+      pullRequestStates: ["tracked", "open"],
+      repository: "",
+      actorClass: "",
     });
   });
 

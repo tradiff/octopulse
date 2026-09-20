@@ -14,6 +14,7 @@ import {
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
 import { listPullRequestTimeline } from "../src/raw-events.js";
+import { DEFAULT_LANDING_UI_FILTERS } from "../src/ui-filters.js";
 
 const tempDirs: string[] = [];
 
@@ -24,6 +25,39 @@ afterEach(() => {
 });
 
 describe("listPullRequestTimeline", () => {
+  it("returns only pull requests matching the requested filters", () => {
+    const { database, pullRequest } = createPullRequest();
+    const pullRequestRepository = new PullRequestRepository(database);
+
+    try {
+      pullRequestRepository.upsertPullRequest(
+        createPullRequestInput({
+          githubPullRequestId: 202,
+          number: 8,
+          tracking: {
+            isTracked: false,
+            trackingReason: "manual",
+            isStickyUntracked: true,
+          },
+        }),
+      );
+
+      const result = listPullRequestTimeline(database, { filters: DEFAULT_LANDING_UI_FILTERS });
+
+      expect(Object.keys(result.timelineByPullRequest)).toEqual([
+        String(pullRequest.githubPullRequestId),
+      ]);
+      expect(Object.keys(result.reviewStatesByPullRequest)).toEqual([
+        String(pullRequest.githubPullRequestId),
+      ]);
+      expect(Object.keys(result.ciJobStatesByPullRequest)).toEqual([
+        String(pullRequest.githubPullRequestId),
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("omits redundant review-submitted entries while preserving top-level review comments", () => {
     const { database, pullRequest } = createPullRequest();
     const normalizedEventRepository = new NormalizedEventRepository(database);

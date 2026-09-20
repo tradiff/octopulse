@@ -5,9 +5,11 @@ import type { PullRequestRecord } from "./pull-request-repository.js";
 import {
   buildActivityApiPath,
   buildLogsApiPath,
+  buildPullRequestTimelineApiPath,
   type LogLevelFilter,
   type RouteState,
 } from "./client-route-state.js";
+import { DEFAULT_LANDING_UI_FILTERS, type UiFilterValues } from "./ui-filters.js";
 
 export interface PaginationState {
   page: number;
@@ -47,6 +49,7 @@ export async function loadPullRequestBasePageData(
 }
 
 export async function loadPullRequestsPageData(
+  uiFilters: UiFilterValues = DEFAULT_LANDING_UI_FILTERS,
   fetcher: typeof apiFetch = apiFetch,
 ): Promise<PullRequestsPageData> {
   const [baseData, pullRequestTimelineResponse] = await Promise.all([
@@ -55,7 +58,7 @@ export async function loadPullRequestsPageData(
       timelineByPullRequest: PullRequestTimeline;
       reviewStatesByPullRequest: PullRequestReviewStatesByPullRequest;
       ciJobStatesByPullRequest: PullRequestCiJobStatesByPullRequest;
-    }>("/api/pull-request-timeline"),
+    }>(buildPullRequestTimelineApiPath(uiFilters)),
   ]);
 
   return {

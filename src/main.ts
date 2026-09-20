@@ -160,7 +160,7 @@ async function main(): Promise<void> {
     server = await startServer({
       listTrackedPullRequests: async () => pullRequestRepository.listTrackedPullRequests(),
       listInactivePullRequests: async () => pullRequestRepository.listInactivePullRequests(),
-      listPullRequestTimeline: async () => listPullRequestTimeline(currentDatabase),
+      listPullRequestTimeline: ({ filters }) => listPullRequestTimeline(currentDatabase, { filters }),
       listNotificationHistory: async ({ filters, page, pageSize }) =>
         listNotificationHistory(currentDatabase, {
           ...(filters ? { filters } : {}),
