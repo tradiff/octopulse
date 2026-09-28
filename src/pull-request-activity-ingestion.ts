@@ -31,6 +31,7 @@ const SUPPORTED_TIMELINE_EVENT_TYPES = new Set([
   "merged",
   "reopened",
   "ready_for_review",
+  "review_requested",
   "convert_to_draft",
   "committed",
 ]);

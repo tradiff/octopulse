@@ -47,11 +47,15 @@ import type { NotificationHistoryEntry } from "./notification-history.js";
 import { resolvePullRequestStateAssetUrlPath } from "./pull-request-state.js";
 import type { PullRequestRecord } from "./pull-request-repository.js";
 import {
+  buildPullRequestInteractionGroups,
+  type PullRequestInteractionGroupKind,
+} from "./pull-request-interaction-groups.js";
+import {
   doesPullRequestNeedMyReview,
   isPullRequestAuthoredByCurrentUser,
   isPullRequestInReviewRequestedQueue,
 } from "./pull-request-review-targeting.js";
-import type { PullRequestReviewStateRecord, ReviewState } from "./pull-request-review-state-repository.js";
+import type { PullRequestReviewStateRecord } from "./pull-request-review-state-repository.js";
 import type { PullRequestCiJobStateRecord } from "./pull-request-ci-job-state-repository.js";
 import type {
   PullRequestTimeline,
@@ -113,27 +117,6 @@ const RAW_EVENT_JSON_THEME = {
     color: "#cbd5e1",
   },
 };
-const PULL_REQUEST_COMMENTER_EVENT_TYPES = new Set([
-  "issue_comment",
-  "review_inline_comment",
-  "review_submitted",
-  "review_approved",
-  "review_changes_requested",
-]);
-
-type PullRequestInteractionGroupKind = "approvers" | "commenters" | "decliners";
-
-interface PullRequestInteractionActor {
-  login: string;
-  avatarUrl: string | null;
-}
-
-interface PullRequestInteractionGroup {
-  kind: PullRequestInteractionGroupKind;
-  label: string;
-  actors: PullRequestInteractionActor[];
-}
-
 if (!(ROOT instanceof HTMLElement)) {
   throw new Error("Missing root element");
 }
@@ -1230,7 +1213,7 @@ function PullRequestListItem({
           </div>
           <PullRequestMergeReadinessIndicator pullRequest={pullRequest} />
         </div>
-        <PullRequestInteractionGroups entries={timelineEntries} reviewStates={reviewStates} />
+        <PullRequestInteractionGroups entries={timelineEntries} reviewStates={reviewStates} pullRequest={pullRequest} />
         <span className="pull-request-timeline-summary">
           {formatPullRequestTimelineSummaryLabel(timelineEntries.length)}
           {timelineEntries[0] ? (
@@ -1649,11 +1632,13 @@ function resolveCiJobOutcome(job: PullRequestCiJobStateRecord): string {
 function PullRequestInteractionGroups({
   entries,
   reviewStates,
+  pullRequest,
 }: {
   entries: PullRequestTimelineEntry[];
   reviewStates: PullRequestReviewStateRecord[];
+  pullRequest: PullRequestRecord;
 }) {
-  const groups = buildPullRequestInteractionGroups(entries, reviewStates);
+  const groups = buildPullRequestInteractionGroups(entries, reviewStates, pullRequest);
 
   if (groups.length === 0) {
     return null;
@@ -1690,84 +1675,6 @@ function PullRequestInteractionGroups({
   );
 }
 
-function buildPullRequestInteractionGroups(
-  entries: PullRequestTimelineEntry[],
-  reviewStates: PullRequestReviewStateRecord[],
-): PullRequestInteractionGroup[] {
-  const approvers = collectActorsWithReviewState(reviewStates, "APPROVED");
-  const decliners = collectActorsWithReviewState(reviewStates, "CHANGES_REQUESTED");
-
-  const formalReviewerLogins = new Set([
-    ...approvers.map((a) => a.login),
-    ...decliners.map((d) => d.login),
-  ]);
-
-  const commenters = collectPullRequestInteractionActors(
-    entries,
-    PULL_REQUEST_COMMENTER_EVENT_TYPES,
-    formalReviewerLogins,
-  );
-
-  const groups: PullRequestInteractionGroup[] = [];
-
-  if (approvers.length > 0) {
-    groups.push({ kind: "approvers", label: "Approvers", actors: approvers });
-  }
-
-  if (commenters.length > 0) {
-    groups.push({ kind: "commenters", label: "Commenters / Reviewers", actors: commenters });
-  }
-
-  if (decliners.length > 0) {
-    groups.push({ kind: "decliners", label: "Decliners", actors: decliners });
-  }
-
-  return groups;
-}
-
-function collectActorsWithReviewState(
-  reviewStates: PullRequestReviewStateRecord[],
-  state: ReviewState,
-): PullRequestInteractionActor[] {
-  return reviewStates
-    .filter((r) => r.reviewState === state && !isBotActorLogin(r.reviewerLogin))
-    .map((r) => ({ login: r.reviewerLogin, avatarUrl: r.reviewerAvatarUrl }));
-}
-
-function collectPullRequestInteractionActors(
-  entries: PullRequestTimelineEntry[],
-  eventTypes: ReadonlySet<string>,
-  excludeLogins: ReadonlySet<string> = new Set(),
-): PullRequestInteractionActor[] {
-  const actors = new Map<string, PullRequestInteractionActor>();
-
-  for (const entry of entries) {
-    const actorLogin = entry.paragraph.actorLogin;
-
-    if (actorLogin === null || !eventTypes.has(entry.eventType) || isBotActorLogin(actorLogin) || excludeLogins.has(actorLogin)) {
-      continue;
-    }
-
-    const actorAvatarUrl = entry.paragraph.actorAvatarUrl;
-    const existingActor = actors.get(actorLogin);
-
-    if (existingActor === undefined) {
-      actors.set(actorLogin, { login: actorLogin, avatarUrl: actorAvatarUrl });
-      continue;
-    }
-
-    if (existingActor.avatarUrl === null && actorAvatarUrl !== null) {
-      actors.set(actorLogin, { login: actorLogin, avatarUrl: actorAvatarUrl });
-    }
-  }
-
-  return [...actors.values()];
-}
-
-function isBotActorLogin(login: string): boolean {
-  return /\[bot\]$/i.test(login);
-}
-
 function PullRequestInteractionGroupIcon({ kind }: { kind: PullRequestInteractionGroupKind }) {
   if (kind === "approvers") {
     return (
@@ -1795,6 +1702,15 @@ function PullRequestInteractionGroupIcon({ kind }: { kind: PullRequestInteractio
           strokeLinecap="round"
           strokeLinejoin="round"
         />
+      </svg>
+    );
+  }
+
+  if (kind === "requested") {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2.5 10c1.75-2.75 4.25-4.25 7.5-4.25s5.75 1.5 7.5 4.25c-1.75 2.75-4.25 4.25-7.5 4.25S4.25 12.75 2.5 10Z" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="10" cy="10" r="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
       </svg>
     );
   }
@@ -3095,6 +3011,10 @@ const APP_STYLES = `
 
   .pull-request-interaction-group-decliners {
     --interaction-group-accent: var(--pr-changes-requested);
+  }
+
+  .pull-request-interaction-group-requested {
+    --interaction-group-accent: var(--accent);
   }
 
   .pull-request-interaction-group-icon {

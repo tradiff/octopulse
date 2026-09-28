@@ -64,9 +64,18 @@ interface WorkflowRunHistoryEntry {
   snapshot: WorkflowRunSnapshot;
 }
 
+interface RawEventNormalizationContext {
+  pullRequest: Pick<PullRequestRecord, "state" | "mergedAt" | "requestedReviewerLogins">;
+  currentUserLogin: string;
+  reviewRequestNotificationsSince: number;
+}
+
 export function normalizePullRequestActivity(
   database: DatabaseSync,
-  pullRequest: Pick<PullRequestRecord, "id" | "lastSeenHeadSha" | "authorLogin">,
+  pullRequest: Pick<
+    PullRequestRecord,
+    "id" | "lastSeenHeadSha" | "authorLogin" | "state" | "mergedAt" | "requestedReviewerLogins"
+  >,
   currentUserLogin: string,
   options: NormalizePullRequestActivityOptions = {},
 ): NormalizePullRequestActivityResult {
@@ -74,6 +83,26 @@ export function normalizePullRequestActivity(
   const normalizedEventRepository =
     options.normalizedEventRepository ?? new NormalizedEventRepository(database);
   const rawEvents = rawEventRepository.listUnnormalizedRawEventsForPullRequest(pullRequest.id);
+  const reviewRequestNotificationsSince = readReviewRequestNotificationsSince(database);
+  const discoveryReviewRequest = rawEvents.some((event) => event.eventType === "review_requested")
+    ? normalizedEventRepository.listNormalizedEventsForPullRequest(pullRequest.id)
+        .find((event) => event.eventType === "review_requested" && event.rawEventId === null)
+    : undefined;
+  const discoveryReviewRequestAt = discoveryReviewRequest === undefined
+    ? -Infinity
+    : Date.parse(discoveryReviewRequest.occurredAt);
+
+  if (discoveryReviewRequest !== undefined && !Number.isFinite(discoveryReviewRequestAt)) {
+    throw new PullRequestActivityNormalizationError(
+      `Discovery review request ${discoveryReviewRequest.id} must have a valid timestamp`,
+    );
+  }
+  const reviewRequestNotificationCutoff = Math.max(reviewRequestNotificationsSince, discoveryReviewRequestAt);
+  const context: RawEventNormalizationContext = {
+    pullRequest,
+    currentUserLogin,
+    reviewRequestNotificationsSince: reviewRequestNotificationCutoff,
+  };
   let normalizedCount = 0;
   let skippedCount = 0;
 
@@ -86,7 +115,7 @@ export function normalizePullRequestActivity(
         continue;
       }
 
-      const normalizedEvent = normalizeRawEvent(rawEvent, currentUserLogin);
+      const normalizedEvent = normalizeRawEvent(rawEvent, context);
 
       if (normalizedEvent === undefined) {
         skippedCount += 1;
@@ -156,7 +185,7 @@ export function classifyActor(input: ActorClassificationInput): ActorClass {
 
 function normalizeRawEvent(
   rawEvent: RawEventRecord,
-  currentUserLogin: string,
+  context: RawEventNormalizationContext,
 ): InsertNormalizedEventInput | undefined {
   const payload = parseRawPayload(rawEvent);
   const eventType = mapNormalizedEventType(rawEvent, payload);
@@ -166,10 +195,18 @@ function normalizeRawEvent(
   }
 
   const actorClass = classifyActor({
-    currentUserLogin,
+    currentUserLogin: context.currentUserLogin,
     actorLogin: rawEvent.actorLogin,
     actorType: readActorType(payload),
   });
+  const decisionState = eventType === "review_requested"
+    ? resolveReviewRequestDecisionState(
+        rawEvent,
+        payload,
+        actorClass,
+        context,
+      )
+    : resolveDecisionState(eventType, actorClass);
 
   return {
     rawEventId: rawEvent.id,
@@ -177,8 +214,10 @@ function normalizeRawEvent(
     eventType,
     actorLogin: rawEvent.actorLogin,
     actorClass,
-    decisionState: resolveDecisionState(eventType, actorClass),
-    notificationTiming: resolveNotificationTiming(eventType, actorClass),
+    decisionState,
+    notificationTiming: eventType === "review_requested"
+      ? (decisionState === "notified" ? "immediate" : null)
+      : resolveNotificationTiming(eventType, actorClass),
     payloadJson: serializeNormalizedPayload(rawEvent, buildNormalizedPayload(rawEvent, payload)),
     occurredAt: rawEvent.occurredAt,
   };
@@ -247,6 +286,8 @@ function mapNormalizedEventType(
       return "pr_reopened";
     case "ready_for_review":
       return "ready_for_review";
+    case "review_requested":
+      return "review_requested";
     case "convert_to_draft":
     case "converted_to_draft":
       return "converted_to_draft";
@@ -451,6 +492,71 @@ function resolveDecisionState(eventType: string, actorClass: ActorClass): Decisi
   }
 
   return "notified";
+}
+
+function resolveReviewRequestDecisionState(
+  rawEvent: RawEventRecord,
+  payload: Record<string, unknown>,
+  actorClass: ActorClass,
+  context: RawEventNormalizationContext,
+): DecisionState {
+  const requestedReviewer = readOptionalRecord(payload.requested_reviewer);
+
+  if (
+    requestedReviewer === null &&
+    (payload.requested_reviewer !== null || readOptionalRecord(payload.requested_team) === null)
+  ) {
+    throw new PullRequestActivityNormalizationError(
+      `Raw event ${rawEvent.id} review request must include requested_reviewer or requested_team`,
+    );
+  }
+
+  const requestedReviewerLogin = requestedReviewer === null
+    ? null
+    : readRequiredNormalizedString(
+        requestedReviewer.login,
+        rawEvent,
+        "review request.requested_reviewer.login",
+      );
+  const occurredAtMs = Date.parse(rawEvent.occurredAt);
+
+  if (!Number.isFinite(occurredAtMs)) {
+    throw new PullRequestActivityNormalizationError(
+      `Raw event ${rawEvent.id} review request.occurred_at must be a valid timestamp`,
+    );
+  }
+
+  const actorDecisionState = resolveDecisionState("review_requested", actorClass);
+
+  if (actorDecisionState !== "notified") {
+    return actorDecisionState;
+  }
+
+  if (
+    occurredAtMs <= context.reviewRequestNotificationsSince ||
+    requestedReviewerLogin !== normalizeLogin(context.currentUserLogin) ||
+    context.pullRequest.state !== "open" ||
+    context.pullRequest.mergedAt !== null ||
+    !context.pullRequest.requestedReviewerLogins.some((login) => normalizeLogin(login) === requestedReviewerLogin)
+  ) {
+    return "suppressed_rule";
+  }
+
+  return "notified";
+}
+
+function readReviewRequestNotificationsSince(database: DatabaseSync): number {
+  const row = database.prepare("SELECT value FROM AppState WHERE key = 'review_request_notifications_since'").get();
+  const value = row?.value;
+  const timestamp = typeof value === "string" ? Date.parse(value) : NaN;
+
+  if (!Number.isFinite(timestamp)) {
+    throw new PullRequestActivityNormalizationError(
+      "AppState.review_request_notifications_since must be a valid timestamp",
+    );
+  }
+
+  return timestamp;
 }
 
 function resolveCiOutcomeDecisionState(input: {

@@ -4,18 +4,24 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { discoverOpenAuthoredPullRequests } from "../src/authored-pull-request-discovery.js";
 import { resolveAppPaths } from "../src/config.js";
 import { initializeDatabase } from "../src/database.js";
 import { NotificationRecordRepository } from "../src/notification-record-repository.js";
+import { NormalizedEventRepository } from "../src/normalized-event-repository.js";
 import {
   PullRequestRepository,
   type PullRequestRecord,
   type UpsertPullRequestInput,
 } from "../src/pull-request-repository.js";
+import { PullRequestReviewStateRepository } from "../src/pull-request-review-state-repository.js";
+import { RawEventRepository } from "../src/raw-event-repository.js";
+import { mapPullRequestSnapshot } from "../src/pull-request-snapshot.js";
 import { processTrackedPullRequestActivity } from "../src/tracked-pull-request-activity.js";
 import {
   createIssueCommentFixture,
   createReviewFixture,
+  createTimelineEventFixture,
 } from "./fixtures/github-pull-request-activity.js";
 
 const tempDirs: string[] = [];
@@ -125,6 +131,172 @@ describe("processTrackedPullRequestActivity", () => {
       database.close();
     }
   });
+
+  it("notifies the requested reviewer on an existing PR without replaying old or unrelated requests", async () => {
+    const { database, pullRequest } = createPullRequest({ authorLogin: "wenottingham" });
+    database.prepare("UPDATE AppState SET value = ? WHERE key = 'review_request_notifications_since'")
+      .run("2026-04-10T12:00:00.000Z");
+    const notificationDispatcher = { dispatchNotification: vi.fn().mockResolvedValue(undefined) };
+    const reviewRequest = (id: number, reviewerLogin: string, createdAt: string) => ({
+      ...createTimelineEventFixture({ id, actorLogin: "wenottingham", event: "review_requested", createdAt }),
+      requested_reviewer: { login: reviewerLogin },
+      requested_team: null,
+    });
+    const client = {
+      request: vi.fn(async (route: string) => {
+        switch (route) {
+          case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+            return createPullRequestDetailResponse({ requestedReviewerLogins: ["tradiff"] });
+          case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+            return {
+              data: [createReviewFixture({
+                actorLogin: "tradiff",
+                state: "CHANGES_REQUESTED",
+                submittedAt: "2026-04-10T12:05:00.000Z",
+              })],
+            };
+          case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+            return {
+              data: [
+                reviewRequest(4001, "tradiff", "2026-04-10T11:58:00.000Z"),
+                reviewRequest(4002, "someone-else", "2026-04-10T12:07:00.000Z"),
+                {
+                  ...createTimelineEventFixture({
+                    id: 4004,
+                    actorLogin: "wenottingham",
+                    event: "review_requested",
+                    createdAt: "2026-04-10T12:08:00.000Z",
+                  }),
+                  requested_reviewer: null,
+                  requested_team: { slug: "platform" },
+                },
+                reviewRequest(4003, "tradiff", "2026-04-10T12:10:00.000Z"),
+              ],
+            };
+          case "GET /repos/{owner}/{repo}/actions/runs":
+            return { data: { workflow_runs: [] } };
+          case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+          case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+            return { data: [] };
+          default:
+            throw new Error(`Unexpected GitHub route: ${route}`);
+        }
+      }),
+    };
+
+    try {
+      const options = {
+        currentUserLogin: "tradiff",
+        notificationDispatcher,
+        notificationDispatchedAt: "2026-04-10T12:11:00.000Z",
+      };
+      await processTrackedPullRequestActivity(database, client, pullRequest, options);
+      await processTrackedPullRequestActivity(database, client, pullRequest, options);
+
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(1);
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledWith(expect.objectContaining({
+        body: "wenottingham: 👀 review requested",
+        sticky: true,
+      }));
+      expect(new PullRequestRepository(database).getPullRequestById(pullRequest.id)?.requestedReviewerLogins)
+        .toEqual(["tradiff"]);
+      expect(new PullRequestReviewStateRepository(database).listReviewStatesForPullRequest(pullRequest.id))
+        .toEqual([expect.objectContaining({ reviewerLogin: "tradiff", reviewState: "CHANGES_REQUESTED" })]);
+      expect(new RawEventRepository(database).listRawEventsForPullRequest(pullRequest.id)
+        .filter((event) => event.eventType === "review_requested")).toHaveLength(4);
+      expect(new NormalizedEventRepository(database).listNormalizedEventsForPullRequest(pullRequest.id)
+        .filter((event) => event.eventType === "review_requested")
+        .map((event) => ({ decisionState: event.decisionState, notificationTiming: event.notificationTiming })))
+        .toEqual([
+          { decisionState: "suppressed_rule", notificationTiming: null },
+          { decisionState: "suppressed_rule", notificationTiming: null },
+          { decisionState: "suppressed_rule", notificationTiming: null },
+          { decisionState: "notified", notificationTiming: "immediate" },
+        ]);
+      expect(new NotificationRecordRepository(database).listNotificationRecordsForPullRequest(pullRequest.id))
+        .toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not duplicate the first request notification sent by discovery", async () => {
+    const { database, repository } = createRepository();
+    database.prepare("UPDATE AppState SET value = ? WHERE key = 'review_request_notifications_since'")
+      .run("2026-04-10T12:00:00.000Z");
+    const notificationDispatcher = { dispatchNotification: vi.fn().mockResolvedValue(undefined) };
+    const coordinates = { repositoryOwner: "acme", repositoryName: "octopulse", number: 7 };
+    const detail = createPullRequestDetailResponse({ requestedReviewerLogins: ["tradiff"] });
+    detail.data.user = { login: "wenottingham", avatar_url: null };
+
+    try {
+      await discoverOpenAuthoredPullRequests(database, { client: {}, currentUserLogin: "tradiff" }, {
+        searchOpenAuthoredPullRequests: async () => [],
+        searchOpenReviewRequestedPullRequests: async () => [coordinates],
+        fetchPullRequestDetail: async () => mapPullRequestSnapshot(detail.data, coordinates, (message) => new Error(message)),
+        observedAt: "2026-04-10T12:12:00.000Z",
+        notificationDispatcher,
+      });
+
+      const pullRequest = repository.getPullRequestByGitHubPullRequestId(101)!;
+      const timelineEvents = [{
+        ...createTimelineEventFixture({
+          actorLogin: "wenottingham",
+          event: "review_requested",
+          createdAt: "2026-04-10T12:10:00.000Z",
+        }),
+        requested_reviewer: { login: "tradiff" },
+        requested_team: null,
+      }];
+      const client = {
+        request: vi.fn(async (route: string) => {
+          switch (route) {
+            case "GET /repos/{owner}/{repo}/pulls/{pull_number}":
+              return detail;
+            case "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline":
+              return { data: timelineEvents };
+            case "GET /repos/{owner}/{repo}/actions/runs":
+              return { data: { workflow_runs: [] } };
+            case "GET /repos/{owner}/{repo}/issues/{issue_number}/comments":
+            case "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews":
+            case "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments":
+              return { data: [] };
+            default:
+              throw new Error(`Unexpected GitHub route: ${route}`);
+          }
+        }),
+      };
+
+      await processTrackedPullRequestActivity(database, client, pullRequest, {
+        currentUserLogin: "tradiff",
+        notificationDispatcher,
+      });
+
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(1);
+      expect(new NormalizedEventRepository(database).listNormalizedEventsForPullRequest(pullRequest.id)
+        .filter((event) => event.eventType === "review_requested")
+        .map((event) => event.decisionState)).toEqual(["suppressed_rule", "notified"]);
+
+      timelineEvents.push({
+        ...createTimelineEventFixture({
+          id: 4002,
+          actorLogin: "wenottingham",
+          event: "review_requested",
+          createdAt: "2026-04-10T12:14:00.000Z",
+        }),
+        requested_reviewer: { login: "tradiff" },
+        requested_team: null,
+      });
+      await processTrackedPullRequestActivity(database, client, pullRequest, {
+        currentUserLogin: "tradiff",
+        notificationDispatcher,
+      });
+
+      expect(notificationDispatcher.dispatchNotification).toHaveBeenCalledTimes(2);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createRepository(): {
@@ -193,6 +365,7 @@ function createPullRequestDetailResponse(
     headSha?: string | null;
     mergeable?: boolean | null;
     mergeableState?: string | null;
+    requestedReviewerLogins?: string[];
     requestedReviewTeamSlugs?: string[];
   } = {},
 ): {
@@ -218,7 +391,7 @@ function createPullRequestDetailResponse(
       mergeable_state: overrides.mergeableState ?? "clean",
       closed_at: overrides.closedAt ?? null,
       merged_at: overrides.mergedAt ?? null,
-      requested_reviewers: [],
+      requested_reviewers: (overrides.requestedReviewerLogins ?? []).map((login) => ({ login })),
       requested_teams: (overrides.requestedReviewTeamSlugs ?? []).map((slug) => ({ slug })),
       head: {
         sha: overrides.headSha ?? "def456",
