@@ -6,7 +6,6 @@ import { resolveAppPaths, type ResolveAppPathsOptions } from "./config.js";
 import { DESKTOP_ENTRY_FILE_NAME, renderDesktopEntry } from "./desktop-entry.js";
 
 const SERVICE_NAME = "octopulse.service";
-const SYSTEM_NODE_EXECUTABLE_PATH = "/usr/bin/node";
 
 export interface InstallUserServicePaths {
   repoRoot: string;
@@ -53,7 +52,10 @@ export function resolveInstallUserServicePaths(
   };
 }
 
-export function renderUserServiceUnit(repoRoot: string): string {
+export function renderUserServiceUnit(
+  repoRoot: string,
+  nodeExecutablePath = process.execPath,
+): string {
   const entryPointPath = path.join(repoRoot, "dist", "main.js");
 
   return [
@@ -66,7 +68,7 @@ export function renderUserServiceUnit(repoRoot: string): string {
     "[Service]",
     "Type=simple",
     `WorkingDirectory=${repoRoot}`,
-    `ExecStart=${SYSTEM_NODE_EXECUTABLE_PATH} ${entryPointPath}`,
+    `ExecStart=${nodeExecutablePath} ${entryPointPath}`,
     "Restart=on-failure",
     "RestartSec=5",
     "StandardOutput=journal",
@@ -143,7 +145,7 @@ export function installUserService(
 
   let createdConfig = false;
   if (!existsSync(paths.configPath)) {
-    writeFileSync(paths.configPath, renderExampleConfig(), "utf8");
+    writeFileSync(paths.configPath, renderExampleConfig(), { encoding: "utf8", mode: 0o600 });
     createdConfig = true;
   }
 

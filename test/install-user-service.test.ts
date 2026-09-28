@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -20,8 +20,9 @@ afterEach(() => {
 
 describe("installUserService", () => {
   it("renders a graphical-session-bound user service unit", () => {
-    const serviceUnit = renderUserServiceUnit("/tmp/octopulse");
+    const serviceUnit = renderUserServiceUnit("/tmp/octopulse", "/tmp/node");
 
+    expect(serviceUnit).toContain("ExecStart=/tmp/node /tmp/octopulse/dist/main.js");
     expect(serviceUnit).toContain("After=network-online.target graphical-session.target");
     expect(serviceUnit).toContain("Wants=network-online.target");
     expect(serviceUnit).toContain("PartOf=graphical-session.target");
@@ -43,7 +44,7 @@ describe("installUserService", () => {
 
     expect(serviceContents).toContain(`WorkingDirectory=${repoRoot}`);
     expect(serviceContents).toContain(
-      `ExecStart=/usr/bin/node ${path.join(repoRoot, "dist", "main.js")}`,
+      `ExecStart=${process.execPath} ${path.join(repoRoot, "dist", "main.js")}`,
     );
     expect(serviceContents).toContain("After=network-online.target graphical-session.target");
     expect(serviceContents).toContain("PartOf=graphical-session.target");
@@ -53,6 +54,7 @@ describe("installUserService", () => {
     expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("Icon=");
     expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("X-GNOME-UsesNotifications=true");
     expect(existsSync(result.paths.configPath)).toBe(true);
+    expect(statSync(result.paths.configPath).mode & 0o777).toBe(0o600);
     expect(readFileSync(result.paths.configPath, "utf8")).toContain('[github]');
     expect(readFileSync(result.paths.configPath, "utf8")).toContain('token = "ghp_replace_with_your_token"');
     expect(result.createdConfig).toBe(true);
