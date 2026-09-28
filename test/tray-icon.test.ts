@@ -56,32 +56,23 @@ describe("startTrayIcon", () => {
     expect(trayIcon.isVisible).toBe(true);
     expect(createTray).toHaveBeenCalledWith({
       menu: {
-        icon: expect.any(String),
-        title: "",
+        icon: expect.stringMatching(/assets\/tray\/github-invertocat-white-clearspace\.png$/),
         tooltip: "Octopulse",
         items: [
           {
             title: "Open Octopulse",
-            tooltip: "Open Octopulse UI",
-            checked: false,
             enabled: true,
           },
           {
             title: "Open Logs",
-            tooltip: "Open Octopulse logs",
-            checked: false,
             enabled: true,
           },
           {
             title: "Quit",
-            tooltip: "Quit Octopulse",
-            checked: false,
             enabled: true,
           },
         ],
       },
-      debug: false,
-      copyDir: false,
     });
     expect(clickListener).toBeTypeOf("function");
 

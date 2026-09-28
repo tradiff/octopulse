@@ -1,8 +1,13 @@
-import { readFile } from "node:fs/promises";
-
-import { SysTray, type ClickEvent, type Conf, type Menu } from "node-systray-v2";
+import { fileURLToPath } from "node:url";
 
 import { APP_ICON_PNG_URL } from "./app-icon.js";
+import {
+  createLinuxTray,
+  type TrayClickEvent,
+  type TrayConfiguration,
+  type TrayMenu,
+  type TrayRuntime,
+} from "./linux-tray.js";
 import { getLogger } from "./logger.js";
 import { openUrl } from "./open-url.js";
 
@@ -11,17 +16,7 @@ const OPEN_LOGS_TITLE = "Open Logs";
 const QUIT_TITLE = "Quit";
 const TRAY_TOOLTIP = "Octopulse";
 
-let trayIconBase64Promise: Promise<string> | undefined;
-
-type TrayRuntime = {
-  onReady(listener: () => void): void;
-  onClick(listener: (action: ClickEvent) => void | Promise<void>): void;
-  onError(listener: (error: Error) => void): void;
-  onExit(listener: (code: number | null, signal: string | null) => void): void;
-  kill(): void;
-};
-
-type CreateTray = (configuration: Conf) => TrayRuntime;
+type CreateTray = (configuration: TrayConfiguration) => TrayRuntime;
 
 export interface TrayIconHandle {
   isVisible: boolean;
@@ -46,15 +41,13 @@ export async function startTrayIcon(options: StartTrayIconOptions): Promise<Tray
     return createDisabledTrayIconHandle();
   }
 
-  const createTray = options.createTray ?? createDefaultTray;
+  const createTray = options.createTray ?? createLinuxTray;
   const openUrlImpl = options.openUrl ?? openUrl;
   let isStopping = false;
 
   try {
     const tray = createTray({
-      menu: createTrayMenu(await readTrayIconBase64()),
-      debug: false,
-      copyDir: false,
+      menu: createTrayMenu(fileURLToPath(APP_ICON_PNG_URL)),
     });
 
     await waitForTrayReady(tray, {
@@ -64,15 +57,12 @@ export async function startTrayIcon(options: StartTrayIconOptions): Promise<Tray
           error,
         });
       },
-      onRuntimeExit: (code, signal) => {
+      onRuntimeExit: () => {
         if (isStopping) {
           return;
         }
 
-        getLogger().warn("Tray icon exited", {
-          code,
-          signal,
-        });
+        getLogger().warn("Tray icon disconnected");
       },
     });
     tray.onClick(async (action) => {
@@ -103,7 +93,7 @@ export async function startTrayIcon(options: StartTrayIconOptions): Promise<Tray
         }
 
         isStopping = true;
-        tray.kill();
+        await tray.kill();
       },
     };
   } catch (error) {
@@ -119,28 +109,21 @@ function hasGraphicalSession(environment: NodeJS.ProcessEnv): boolean {
   return Boolean(environment.DISPLAY || environment.WAYLAND_DISPLAY);
 }
 
-function createTrayMenu(icon: string): Menu {
+function createTrayMenu(icon: string): TrayMenu {
   return {
     icon,
-    title: "",
     tooltip: TRAY_TOOLTIP,
     items: [
       {
         title: OPEN_APP_TITLE,
-        tooltip: "Open Octopulse UI",
-        checked: false,
         enabled: true,
       },
       {
         title: OPEN_LOGS_TITLE,
-        tooltip: "Open Octopulse logs",
-        checked: false,
         enabled: true,
       },
       {
         title: QUIT_TITLE,
-        tooltip: "Quit Octopulse",
-        checked: false,
         enabled: true,
       },
     ],
@@ -148,7 +131,7 @@ function createTrayMenu(icon: string): Menu {
 }
 
 async function handleTrayAction(
-  action: ClickEvent,
+  action: TrayClickEvent,
   options: {
     serverOrigin: string;
     openUrl: (url: string) => Promise<void>;
@@ -170,28 +153,11 @@ async function handleTrayAction(
   }
 }
 
-function createDefaultTray(configuration: Conf): TrayRuntime {
-  return new SysTray(configuration);
-}
-
-async function readTrayIconBase64(): Promise<string> {
-  if (!trayIconBase64Promise) {
-    trayIconBase64Promise = readFile(APP_ICON_PNG_URL)
-      .then((buffer) => buffer.toString("base64"))
-      .catch((error) => {
-        trayIconBase64Promise = undefined;
-        throw error;
-      });
-  }
-
-  return trayIconBase64Promise;
-}
-
 async function waitForTrayReady(
   tray: TrayRuntime,
   options: {
     onRuntimeError: (error: Error) => void;
-    onRuntimeExit: (code: number | null, signal: string | null) => void;
+    onRuntimeExit: () => void;
   },
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -229,21 +195,15 @@ async function waitForTrayReady(
 
       rejectStartup(error);
     });
-    tray.onExit((code, signal) => {
+    tray.onExit(() => {
       if (isReady) {
-        options.onRuntimeExit(code, signal);
+        options.onRuntimeExit();
         return;
       }
 
-      rejectStartup(new Error(renderTrayStartupExitMessage(code, signal)));
+      rejectStartup(new Error("Tray connection closed before ready"));
     });
   });
-}
-
-function renderTrayStartupExitMessage(code: number | null, signal: string | null): string {
-  const reason = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
-
-  return `Tray process exited before ready with ${reason}`;
 }
 
 function createDisabledTrayIconHandle(): TrayIconHandle {
