@@ -191,6 +191,39 @@ describe("normalizePullRequestActivity", () => {
     }
   });
 
+  it("suppresses a team review request when GitHub omits requested_reviewer", () => {
+    const { database, pullRequest } = createPullRequest();
+
+    try {
+      new RawEventRepository(database).insertRawEvent({
+        pullRequestId: pullRequest.id,
+        source: "github_issue_timeline",
+        sourceId: "4002",
+        eventType: "review_requested",
+        actorLogin: "alice",
+        payloadJson: JSON.stringify({
+          ...createTimelineEventFixture({ id: 4002, actorLogin: "alice", event: "review_requested" }),
+          requested_team: { slug: "platform" },
+        }),
+        occurredAt: "2026-04-10T12:05:00.000Z",
+      });
+
+      expect(normalizePullRequestActivity(database, pullRequest, "octocat")).toEqual({
+        processedCount: 1,
+        normalizedCount: 1,
+        skippedCount: 0,
+      });
+      expect(new NormalizedEventRepository(database).listNormalizedEventsForPullRequest(pullRequest.id))
+        .toEqual([expect.objectContaining({
+          eventType: "review_requested",
+          decisionState: "suppressed_rule",
+          notificationTiming: null,
+        })]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("persists comment, review, and ci payload needed for later rules", () => {
     const { database, pullRequest } = createPullRequest();
     const rawEventRepository = new RawEventRepository(database);

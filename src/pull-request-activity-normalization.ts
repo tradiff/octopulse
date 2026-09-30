@@ -500,12 +500,13 @@ function resolveReviewRequestDecisionState(
   actorClass: ActorClass,
   context: RawEventNormalizationContext,
 ): DecisionState {
-  const requestedReviewer = readOptionalRecord(payload.requested_reviewer);
+  const reviewerValue = payload.requested_reviewer;
+  const requestedReviewer = readOptionalRecord(reviewerValue);
+  const hasValidTarget = reviewerValue === null || reviewerValue === undefined
+    ? readOptionalRecord(payload.requested_team) !== null
+    : requestedReviewer !== null;
 
-  if (
-    requestedReviewer === null &&
-    (payload.requested_reviewer !== null || readOptionalRecord(payload.requested_team) === null)
-  ) {
+  if (!hasValidTarget) {
     throw new PullRequestActivityNormalizationError(
       `Raw event ${rawEvent.id} review request must include requested_reviewer or requested_team`,
     );
@@ -533,16 +534,16 @@ function resolveReviewRequestDecisionState(
   }
 
   if (
-    occurredAtMs <= context.reviewRequestNotificationsSince ||
-    requestedReviewerLogin !== normalizeLogin(context.currentUserLogin) ||
-    context.pullRequest.state !== "open" ||
-    context.pullRequest.mergedAt !== null ||
-    !context.pullRequest.requestedReviewerLogins.some((login) => normalizeLogin(login) === requestedReviewerLogin)
+    occurredAtMs > context.reviewRequestNotificationsSince &&
+    requestedReviewerLogin === normalizeLogin(context.currentUserLogin) &&
+    context.pullRequest.state === "open" &&
+    context.pullRequest.mergedAt === null &&
+    context.pullRequest.requestedReviewerLogins.some((login) => normalizeLogin(login) === requestedReviewerLogin)
   ) {
-    return "suppressed_rule";
+    return "notified";
   }
 
-  return "notified";
+  return "suppressed_rule";
 }
 
 function readReviewRequestNotificationsSince(database: DatabaseSync): number {
