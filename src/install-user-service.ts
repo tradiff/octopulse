@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { resolveAppPaths, type ResolveAppPathsOptions } from "./config.js";
 import { DESKTOP_ENTRY_FILE_NAME, renderDesktopEntry } from "./desktop-entry.js";
+import { DEFAULT_SYSTEM_ONE_MODEL } from "./system-one.js";
 
 const SERVICE_NAME = "octopulse.service";
 
@@ -90,9 +91,11 @@ export function renderExampleConfig(): string {
     '#level = "info"',
     '#retention = "14 days"',
     "",
-    "# Optional. Use only if bot comment/review classification is enabled.",
-    "#[openai]",
-    '#api_key = "sk_replace_with_your_key"',
+    "# Optional bot comment/review classification with a System One compatible provider.",
+    "#[system_one]",
+    '#base_url = "https://openrouter.ai/api/v1"',
+    '#api_key = "replace_with_your_provider_key"',
+    `#model = "${DEFAULT_SYSTEM_ONE_MODEL}"`,
     "",
     "# Optional timing overrides.",
     "#[timings]",

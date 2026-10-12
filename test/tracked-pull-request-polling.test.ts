@@ -1137,7 +1137,7 @@ describe("pollTrackedPullRequests", () => {
     }
   });
 
-  it("marks bot comments for fallback notify when no OpenAI classifier is configured", async () => {
+  it("marks bot comments for fallback notify when no System One classifier is configured", async () => {
     const { database, repository } = createRepository();
     const eventBundleRepository = new EventBundleRepository(database);
     const normalizedEventRepository = new NormalizedEventRepository(database);
@@ -1218,7 +1218,7 @@ describe("pollTrackedPullRequests", () => {
             commentId: 9701,
             bodyText: "Routine dependency bump",
             url: "https://github.com/acme/octopulse/pull/7#issuecomment-9701",
-            aiFallbackReason: "OpenAI classification unavailable: api key not configured",
+            aiFallbackReason: "System One classification unavailable: provider not configured",
           },
         },
       ]);

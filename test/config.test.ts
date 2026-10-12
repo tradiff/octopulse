@@ -40,7 +40,7 @@ describe("loadConfig", () => {
     const config = loadConfig({ homeDir });
 
     expect(config.githubToken).toBe("ghp_test_123");
-    expect(config.openAiApiKey).toBeUndefined();
+    expect(config.systemOne).toBeUndefined();
     expect(config.logging).toEqual({
       level: "info",
       retentionMs: 14 * 24 * 60 * 60_000,
@@ -56,7 +56,7 @@ describe("loadConfig", () => {
     expect(config.paths).toEqual(resolveAppPaths({ homeDir }));
   });
 
-  it("applies optional OpenAI and timing overrides", () => {
+  it("applies optional System One and timing overrides", () => {
     const homeDir = createTempHome();
 
     writeConfig(
@@ -65,7 +65,8 @@ describe("loadConfig", () => {
         "[github]",
         'token = "ghp_override_123"',
         "",
-        "[openai]",
+        "[system_one]",
+        'base_url = "https://openrouter.ai/api/v1"',
         'api_key = "sk-test-456"',
         "",
         "[logging]",
@@ -86,7 +87,9 @@ describe("loadConfig", () => {
     const config = loadConfig({ homeDir });
 
     expect(config.githubToken).toBe("ghp_override_123");
-    expect(config.openAiApiKey).toBe("sk-test-456");
+    expect(config.systemOne).toEqual({
+      baseUrl: "https://openrouter.ai/api/v1", apiKey: "sk-test-456", model: "jev-latest",
+    });
     expect(config.logging).toEqual({
       level: "debug",
       retentionMs: 30 * 24 * 60 * 60_000,
@@ -124,7 +127,8 @@ describe("loadConfig", () => {
         "[github]",
         'token = "   "',
         "",
-        "[openai]",
+        "[system_one]",
+        'base_url = "https://openrouter.ai/api/v1"',
         'api_key = "sk-live-secret"',
         "",
       ].join("\n"),
@@ -156,6 +160,48 @@ describe("loadConfig", () => {
     );
   });
 
+  it("accepts other providers and a model override, trimming surrounding whitespace", () => {
+    const homeDir = createTempHome();
+    writeConfig(homeDir, [
+      "[github]", 'token = "github-test"', "[system_one]",
+      'base_url = " https://api.typesafe.ai/v1/ "', 'api_key = " other-key "',
+      'model = " jev-1.13.0 "',
+    ].join("\n"));
+    expect(loadConfig({ homeDir }).systemOne).toEqual({
+      baseUrl: "https://api.typesafe.ai/v1/", apiKey: "other-key", model: "jev-1.13.0",
+    });
+  });
+
+  it.each([
+    ['api_key = "key"', "system_one.base_url"],
+    ['base_url = "https://provider.example/v1"', "system_one.api_key"],
+    ['base_url = " "\napi_key = "key"', "system_one.base_url"],
+    ['base_url = "https://provider.example"\napi_key = " "', "system_one.api_key"],
+    ['base_url = "https://provider.example"\napi_key = "key"\nmodel = " "', "system_one.model"],
+    ['base_url = "not a URL"\napi_key = "key"', "system_one.base_url"],
+    ['base_url = "file:///tmp/provider"\napi_key = "key"', "system_one.base_url"],
+    ['base_url = "https://user:secret@provider.example"\napi_key = "key"', "system_one.base_url"],
+    ['base_url = "https://provider.example?api_key=secret"\napi_key = "key"', "system_one.base_url"],
+    ['base_url = "https://provider.example#secret"\napi_key = "key"', "system_one.base_url"],
+  ])("rejects invalid System One config without echoing secrets: %s", (section, field) => {
+    const homeDir = createTempHome();
+    writeConfig(homeDir, `[github]\ntoken = "github-test"\n[system_one]\n${section}`);
+    let thrownError: unknown;
+    try {
+      loadConfig({ homeDir });
+    } catch (error) {
+      thrownError = error;
+    }
+    expect(thrownError).toBeInstanceOf(ConfigError);
+    expect((thrownError as Error).message).toContain(field);
+    expect((thrownError as Error).message).not.toContain("secret");
+  });
+
+  it("reports how to migrate the removed OpenAI config", () => {
+    const homeDir = createTempHome();
+    writeConfig(homeDir, '[github]\ntoken = "github-test"\n[openai]\napi_key = "secret"');
+    expect(() => loadConfig({ homeDir })).toThrow("Replace [openai] with [system_one]");
+  });
 });
 
 function createTempHome(): string {

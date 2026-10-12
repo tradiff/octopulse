@@ -1,28 +1,19 @@
 import { DatabaseSync } from "node:sqlite";
 
+import { APIError, choice, TypeSafeClient } from "@typesafe-ai/sdk";
+
 import {
   NormalizedEventRepository,
   type DecisionState,
   type NormalizedEventRecord,
 } from "./normalized-event-repository.js";
+import { DEFAULT_SYSTEM_ONE_MODEL, normalizeSystemOneBaseUrl } from "./system-one.js";
 
-const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
-const DEFAULT_OPENAI_TIMEOUT_MS = 10_000;
-const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
-const OPENAI_CLASSIFICATION_PROMPT = [
-  "You classify automated pull request comments.",
-  "Your job is to decide whether the comment warrants user attention.",
-  "Notify when the message is negative, blocking, or action-oriented,",
-  "such as asking for a change, requesting follow-up, reporting a failure,",
-  "saying something is broken, rejected, blocked,",
-  "or otherwise needs human intervention,",
-  "including a failing Sonar quality gate.",
-  "Suppress when the message is positive, approving, or purely informational,",
-  "such as LGTM, approval, praise, all checks passing,",
-  "successful Sonar or CI results,",
-  "Jira ticket creation or links",
-  'Reply with strict JSON only: {"decision":"notify"|"suppress","reason":"short explanation"}.',
-].join(" ");
+const DEFAULT_SYSTEM_ONE_TIMEOUT_MS = 10_000;
+const SYSTEM_ONE_CLASSIFICATION_CRITERIA = {
+  notify: "The message is negative, blocking, or action-oriented: asking for a change, requesting follow-up, reporting a failure, saying something is broken, rejected, or blocked, or otherwise needs human intervention, including a failing Sonar quality gate.",
+  suppress: "The message is positive, approving, or purely informational: LGTM, approval, praise, all checks passing, successful Sonar or CI results, Jira ticket creation or links.",
+};
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 
@@ -59,7 +50,8 @@ export interface ClassifyBotPullRequestActivityResult {
   fallbackCount: number;
 }
 
-export interface CreateOpenAiBotActivityClassifierOptions {
+export interface CreateSystemOneBotActivityClassifierOptions {
+  baseUrl: string;
   apiKey: string;
   model?: string;
   timeoutMs?: number;
@@ -116,7 +108,7 @@ export async function classifyBotPullRequestActivity(
 
     if (!options.botActivityClassifier) {
       persistFallbackDecision(normalizedEventRepository, event, payload, {
-        reason: "OpenAI classification unavailable: api key not configured",
+        reason: "System One classification unavailable: provider not configured",
       });
       fallbackCount += 1;
       notifiedCount += 1;
@@ -129,7 +121,7 @@ export async function classifyBotPullRequestActivity(
       classification = await options.botActivityClassifier(bodyText);
     } catch (error) {
       persistFallbackDecision(normalizedEventRepository, event, payload, {
-        reason: `OpenAI classification failed: ${getErrorMessage(error)}`,
+        reason: `System One classification failed: ${getErrorMessage(error)}`,
       });
       fallbackCount += 1;
       notifiedCount += 1;
@@ -172,68 +164,60 @@ export async function classifyBotPullRequestActivity(
   };
 }
 
-export function createOpenAiBotActivityClassifier(
-  options: CreateOpenAiBotActivityClassifierOptions,
+export function createSystemOneBotActivityClassifier(
+  options: CreateSystemOneBotActivityClassifierOptions,
 ): BotActivityClassifier {
   const apiKey = options.apiKey.trim();
 
   if (apiKey.length === 0) {
-    throw new BotActivityClassificationError("OpenAI api key must be a non-empty string");
+    throw new BotActivityClassificationError("System One api key must be a non-empty string");
   }
 
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const model = options.model ?? DEFAULT_OPENAI_MODEL;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_OPENAI_TIMEOUT_MS;
+  const model = (options.model ?? DEFAULT_SYSTEM_ONE_MODEL).trim();
+  if (model.length === 0) {
+    throw new BotActivityClassificationError("System One model must be a non-empty string");
+  }
+  let client: TypeSafeClient;
+  try {
+    client = new TypeSafeClient({
+      apiKey,
+      baseURL: normalizeSystemOneBaseUrl(options.baseUrl),
+      defaultModel: model,
+      timeout: options.timeoutMs ?? DEFAULT_SYSTEM_ONE_TIMEOUT_MS,
+      retry: { maxRetries: 0 },
+      logLevel: "off",
+      fetch: (input, init) => fetchImpl(input, { ...init, redirect: "error" }),
+    });
+  } catch (error) {
+    throw new BotActivityClassificationError(getErrorMessage(error));
+  }
 
   return async (text: string): Promise<BotActivityAiClassification> => {
-    let response: Response;
-
-    try {
-      response = await fetchImpl(OPENAI_CHAT_COMPLETIONS_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0,
-          messages: [
-            {
-              role: "system",
-              content: OPENAI_CLASSIFICATION_PROMPT,
-            },
-            {
-              role: "user",
-              content: text,
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      throw new BotActivityClassificationError(
-        `OpenAI request failed: ${getErrorMessage(error)}`,
-      );
-    }
-
-    if (!response.ok) {
-      throw new BotActivityClassificationError(
-        `OpenAI request failed with status ${response.status}`,
-      );
-    }
-
     let responseBody: unknown;
 
     try {
-      responseBody = (await response.json()) as unknown;
+      responseBody = await client.systemOne({
+        state: text,
+        questions: {
+          notification: choice(
+            "Decide whether this automated pull request comment warrants user attention.",
+            SYSTEM_ONE_CLASSIFICATION_CRITERIA,
+          ),
+        },
+      });
     } catch (error) {
+      if (error instanceof APIError && error.status !== undefined) {
+        throw new BotActivityClassificationError(
+          `System One request failed with status ${error.status}`,
+        );
+      }
       throw new BotActivityClassificationError(
-        `OpenAI response was not valid JSON: ${getErrorMessage(error)}`,
+        `System One request failed: ${getErrorMessage(error)}`,
       );
     }
 
-    return parseOpenAiClassificationResponse(responseBody);
+    return parseSystemOneClassificationResponse(responseBody);
   };
 }
 
@@ -322,86 +306,35 @@ function persistFallbackDecision(
   }
 }
 
-function parseOpenAiClassificationResponse(responseBody: unknown): BotActivityAiClassification {
-  const content = readOpenAiMessageContent(responseBody);
-  return parseOpenAiClassificationContent(content);
-}
+function parseSystemOneClassificationResponse(responseBody: unknown): BotActivityAiClassification {
+  const response = requireObject(responseBody, "System One response");
+  const answers = requireObject(response.answers, "System One response answers");
+  const answer = requireObject(answers.notification, "System One response answers.notification");
+  const decision = answer.choice;
 
-function readOpenAiMessageContent(responseBody: unknown): string {
-  const responseObject = requireObject(responseBody, "OpenAI response");
-  const choices = responseObject.choices;
-
-  if (!Array.isArray(choices) || choices.length === 0) {
-    throw new BotActivityClassificationError("OpenAI response must include at least one choice");
+  if (answer.type !== "choice" || (decision !== "notify" && decision !== "suppress")) {
+    throw new BotActivityClassificationError('System One response must include a notify or suppress Choice answer');
   }
 
-  const firstChoice = requireObject(choices[0], "OpenAI response choice");
-  const message = requireObject(firstChoice.message, "OpenAI response choice.message");
-  const content = message.content;
-
-  if (typeof content === "string" && content.trim().length > 0) {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    const textParts = content.flatMap((part) => {
-      if (typeof part !== "object" || part === null || Array.isArray(part)) {
-        return [];
-      }
-
-      const value = part as Record<string, unknown>;
-      return value.type === "text" && typeof value.text === "string" ? [value.text] : [];
-    });
-
-    if (textParts.length > 0) {
-      return textParts.join("\n");
-    }
-  }
-
-  throw new BotActivityClassificationError("OpenAI response message content must be a non-empty string");
-}
-
-function parseOpenAiClassificationContent(content: string): BotActivityAiClassification {
-  const parsed = extractJsonObject(content);
-  const decision = parsed.decision;
-  const reason = parsed.reason;
-
-  if (decision !== "notify" && decision !== "suppress") {
-    throw new BotActivityClassificationError(
-      'OpenAI response decision must be "notify" or "suppress"',
-    );
-  }
-
-  if (typeof reason !== "string" || reason.trim().length === 0) {
-    throw new BotActivityClassificationError("OpenAI response reason must be a non-empty string");
+  const probabilities = requireObject(answer.probabilities, "System One response probabilities");
+  const notify = requireProbability(probabilities.notify, "notify probability");
+  const suppress = requireProbability(probabilities.suppress, "suppress probability");
+  const confidence = requireProbability(answer.confidence, "confidence");
+  if (Math.abs(notify + suppress - 1) > 0.001) {
+    throw new BotActivityClassificationError("System One response probabilities must sum to 1");
   }
 
   return {
     decision,
-    reason: reason.trim(),
+    reason: `System One selected ${decision} (probability: ${probabilities[decision]}, confidence: ${confidence}).`,
   };
 }
 
-function extractJsonObject(content: string): Record<string, unknown> {
-  const trimmedContent = content.trim();
-  const firstBraceIndex = trimmedContent.indexOf("{");
-  const lastBraceIndex = trimmedContent.lastIndexOf("}");
-
-  if (firstBraceIndex === -1 || lastBraceIndex < firstBraceIndex) {
-    throw new BotActivityClassificationError("OpenAI response must contain a JSON object");
+function requireProbability(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new BotActivityClassificationError(`System One response ${field} must be a number between 0 and 1`);
   }
-
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(trimmedContent.slice(firstBraceIndex, lastBraceIndex + 1)) as unknown;
-  } catch (error) {
-    throw new BotActivityClassificationError(
-      `OpenAI response JSON could not be parsed: ${getErrorMessage(error)}`,
-    );
-  }
-
-  return requireObject(parsed, "OpenAI response JSON");
+  return value;
 }
 
 function requireObject(value: unknown, fieldName: string): Record<string, unknown> {

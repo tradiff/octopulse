@@ -55,8 +55,12 @@ describe("installUserService", () => {
     expect(readFileSync(result.paths.desktopEntryPath, "utf8")).toContain("X-GNOME-UsesNotifications=true");
     expect(existsSync(result.paths.configPath)).toBe(true);
     expect(statSync(result.paths.configPath).mode & 0o777).toBe(0o600);
-    expect(readFileSync(result.paths.configPath, "utf8")).toContain('[github]');
-    expect(readFileSync(result.paths.configPath, "utf8")).toContain('token = "ghp_replace_with_your_token"');
+    const configContents = readFileSync(result.paths.configPath, "utf8");
+    expect(configContents).toContain('[github]');
+    expect(configContents).toContain('token = "ghp_replace_with_your_token"');
+    expect(configContents).toContain("#[system_one]");
+    expect(configContents).toContain('#base_url = "https://openrouter.ai/api/v1"');
+    expect(configContents).toContain('#model = "jev-latest"');
     expect(result.createdConfig).toBe(true);
   });
 

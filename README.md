@@ -13,7 +13,7 @@ Octopulse is a local Linux app that tracks GitHub pull request activity, stores 
 - polls closed PRs every 15 minutes during their configured grace period; post-close notifications can be delayed by up to 15 minutes
 - bundles most notifications per pull request while sending review approvals and change requests immediately
 - sends immediate desktop notifications when newly discovered pull requests request your review
-- optionally uses OpenAI to classify bot-authored comments and reviews before notifying
+- optionally uses Jev through a System One compatible provider to classify bot-authored comments and reviews before notifying
 
 ## Requirements
 
@@ -22,7 +22,7 @@ Octopulse is a local Linux app that tracks GitHub pull request activity, stores 
 - `mise`
 - Node.js 22 via `mise`
 - a GitHub personal access token that can read the repositories you want to track
-- optional: an OpenAI API key for bot-comment and bot-review classification
+- optional: a System One compatible provider's base URL and API key (such as OpenRouter or TypeSafe) for bot-comment and bot-review classification
 - optional: `notify-send` support for desktop notifications
 
 ## Local Setup
@@ -50,8 +50,10 @@ token = "ghp_replace_with_your_token"
 #raw_payload_retention = "30 days"
 
 # Optional. Used only for bot-authored comment/review classification.
-#[openai]
-#api_key = "sk_replace_with_your_key"
+#[system_one]
+#base_url = "https://openrouter.ai/api/v1"
+#api_key = "replace_with_your_provider_key"
+#model = "jev-latest"
 
 # Optional timing overrides.
 #[timings]
@@ -59,6 +61,19 @@ token = "ghp_replace_with_your_token"
 #discovery_poll_interval = "5m"
 #grace_period = "7 days"
 ```
+
+### Bot activity classification
+
+Uncomment `[system_one]`, `base_url`, and `api_key` to enable classification. Any provider implementing the [TypeSafe System One API](https://docs.typesafe.ai/api) is supported through the official `@typesafe-ai/sdk`; this is not the OpenAI chat-completions API.
+
+- OpenRouter: `base_url = "https://openrouter.ai/api/v1"`, with an OpenRouter API key.
+- TypeSafe directly: `base_url = "https://api.typesafe.ai/v1"`, with a TypeSafe API key.
+- API roots without `/v1` are also accepted (for example, `https://openrouter.ai/api`). Requests append `/v1/systemone` to the API root; trailing slashes are accepted.
+- `model` is optional and defaults to `jev-latest`, supported by both providers. Override it to pin a version or use another System One model.
+
+Only bot comment/review text is sent as state. A typed Choice answer selects `notify` or `suppress`; the selected probability and confidence are stored as the decision summary instead of generated prose. Confidence is recorded, not used as an additional suppression threshold. Missing configuration, request failures, or malformed responses keep the existing fallback: notify rather than silently suppress. Requests time out after 10 seconds with no retries.
+
+**Migrating:** replace the old `[openai]` section with `[system_one]`, set the provider's base URL, and use its API key. Existing `[openai]` configuration is rejected with a migration message; keys are not reused for a different provider. Restart the app after editing the config. Keys remain in the local config file; restrict its permissions with `chmod 600 ~/.config/octopulse/config.toml`.
 
 Default paths:
 

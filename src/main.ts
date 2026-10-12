@@ -6,7 +6,7 @@ import {
   startRecurringAuthoredPullRequestDiscovery,
   type RecurringAuthoredPullRequestDiscoveryHandle,
 } from "./authored-pull-request-discovery.js";
-import { createOpenAiBotActivityClassifier } from "./bot-activity-classification.js";
+import { createSystemOneBotActivityClassifier } from "./bot-activity-classification.js";
 import { loadCurrentUserReviewContext } from "./current-user-review-context.js";
 import { loadConfig, resolveAppPaths } from "./config.js";
 import { initializeDatabase } from "./database.js";
@@ -92,8 +92,8 @@ async function main(): Promise<void> {
       logRetentionMs: config.logging.retentionMs,
     });
     const githubAuth = await initializeGitHubAuth(config);
-    const botActivityClassifier = config.openAiApiKey
-      ? createOpenAiBotActivityClassifier({ apiKey: config.openAiApiKey })
+    const botActivityClassifier = config.systemOne
+      ? createSystemOneBotActivityClassifier(config.systemOne)
       : undefined;
     const currentUserReviewContext = await loadCurrentUserReviewContext(githubAuth.client).catch((error) => {
       logger.warn("Failed to load current user review context", { error });

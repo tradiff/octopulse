@@ -6,6 +6,11 @@ import { parse } from "smol-toml";
 
 import { DEFAULT_LOG_RETENTION_MS, isLogLevel, type LogLevel } from "./logger.js";
 import { DEFAULT_RAW_EVENT_PAYLOAD_RETENTION_MS } from "./raw-event-retention.js";
+import {
+  DEFAULT_SYSTEM_ONE_MODEL,
+  normalizeSystemOneBaseUrl,
+  type SystemOneProviderConfig,
+} from "./system-one.js";
 
 const DEFAULT_TRACKED_PULL_REQUEST_POLL_MS = 60_000;
 const DEFAULT_DISCOVERY_POLL_MS = 5 * 60_000;
@@ -32,7 +37,7 @@ export interface AppConfig {
   paths: AppPaths;
   githubToken: string;
   githubLogin?: string;
-  openAiApiKey?: string;
+  systemOne?: SystemOneProviderConfig;
   logging: {
     level: LogLevel;
     retentionMs: number;
@@ -101,14 +106,30 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 
 function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
   const root = requireTable(parsedConfig, "config");
-  assertAllowedKeys(root, ["github", "openai", "timings", "logging", "history"]);
+  if (root.openai !== undefined) {
+    throw new ConfigError("Replace [openai] with [system_one] and configure base_url and api_key for a System One compatible provider");
+  }
+  assertAllowedKeys(root, ["github", "system_one", "timings", "logging", "history"]);
 
   const github = requireNestedTable(root, "github");
   assertAllowedKeys(github, ["token", "login"], "github");
 
-  const openai = optionalNestedTable(root, "openai");
-  if (openai) {
-    assertAllowedKeys(openai, ["api_key"], "openai");
+  const systemOneTable = optionalNestedTable(root, "system_one");
+  let systemOne: SystemOneProviderConfig | undefined;
+  if (systemOneTable) {
+    assertAllowedKeys(systemOneTable, ["base_url", "api_key", "model"], "system_one");
+    const baseUrl = requireNonEmptyString(systemOneTable, "base_url", "system_one.base_url").trim();
+    try {
+      normalizeSystemOneBaseUrl(baseUrl);
+    } catch (error) {
+      throw new ConfigError(`system_one.base_url: ${getErrorMessage(error)}`);
+    }
+    systemOne = {
+      baseUrl,
+      apiKey: requireNonEmptyString(systemOneTable, "api_key", "system_one.api_key").trim(),
+      model: optionalNonEmptyString(systemOneTable, "model", "system_one.model")?.trim()
+        ?? DEFAULT_SYSTEM_ONE_MODEL,
+    };
   }
 
   const timings = optionalNestedTable(root, "timings");
@@ -130,16 +151,13 @@ function validateConfig(parsedConfig: unknown, paths: AppPaths): AppConfig {
     assertAllowedKeys(history, ["raw_payload_retention"], "history");
   }
 
-  const openAiApiKey = openai
-    ? optionalNonEmptyString(openai, "api_key", "openai.api_key")
-    : undefined;
   const githubLogin = optionalNonEmptyString(github, "login", "github.login");
 
   return {
     paths,
     githubToken: requireNonEmptyString(github, "token", "github.token"),
     ...(githubLogin ? { githubLogin } : {}),
-    ...(openAiApiKey ? { openAiApiKey } : {}),
+    ...(systemOne ? { systemOne } : {}),
     logging: {
       level: optionalLogLevel(logging, "level", "logging.level", "info"),
       retentionMs: optionalDuration(
