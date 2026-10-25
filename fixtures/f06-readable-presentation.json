@@ -1,0 +1,18 @@
+{
+  "version": 1, "id": "F-06/readable-markdown-html-and-entities",
+  "requirements": ["P-27", "P-28", "A-42", "A-43"],
+  "time": "2026-10-22T12:00:00Z", "pullRequests": {},
+  "steps": [
+    { "action": "text", "body": "[![Quality Gate failed](https://badges.example/failed.svg)](https://quality.example/project)" },
+    { "action": "text", "body": "# Heading\n\n- [x] **Fixed** [bug](https://example.com)\n- [ ] _Needs work_\n\n> Check `value`" },
+    { "action": "text", "body": "<div>Hello <b>world</b><p>Next &amp; &#169; &#x1F600;</p><!-- private --><script>alert('bad')</script></div>" },
+    { "action": "text", "body": "Before\n\n```ts\nsecret();\n```\n\nAfter" },
+    { "action": "text", "body": "| Check | Result |\n| --- | --- |\n| Build | Failed |" },
+    { "action": "text", "body": "Invalid &#x110000; &#0; &#xD800; remains inert" },
+    { "action": "text", "body": "<style>body{display:none}</style><img src='https://example.com/x' alt='build passing'>" },
+    { "action": "expect", "state": { "texts": [
+      "Quality Gate failed", "Heading Fixed bug Needs work Check value", "Hello world Next & © 😀", "Before After", "Check Result Build Failed",
+      "Invalid &#x110000; &#0; &#xD800; remains inert", "build passing"
+    ], "notifications": [], "submissions": [] } }
+  ]
+}

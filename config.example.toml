@@ -1,0 +1,14 @@
+[github]
+token = "REPLACE_WITH_A_GITHUB_TOKEN"
+
+[timings]
+tracked_poll_interval = "1m"
+discovery_poll_interval = "5m"
+grace_period = "7 days"
+
+[logging]
+level = "info"
+retention = "14 days"
+
+[history]
+raw_payload_retention = "30 days"

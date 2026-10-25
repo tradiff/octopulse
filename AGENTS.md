@@ -2,7 +2,7 @@
 
 ## Project
 - Octopulse is a local Linux app for tracking GitHub pull request activity and surfacing noteworthy events.
-- The intended stack is Node.js with TypeScript, React for the local UI, SQLite for persistence, Octokit for GitHub access, `@typesafe-ai/sdk` for limited bot-comment classification through System One compatible providers, `dbus-native` for StatusNotifierItem/DBusMenu tray integration, and DBus or `libnotify` for desktop notifications.
+- The stack is Node.js with TypeScript, a static browser UI, `better-sqlite3` for persistence, direct GitHub HTTP access, optional System One bot-comment classification, and `@jellybrick/dbus-next` for desktop notifications and StatusNotifierItem/DBusMenu tray integration.
 
 ## Runtime Targets
 - Linux only
@@ -20,5 +20,6 @@
 - Do not use this file as a temporary backlog, implementation diary, or planning scratchpad.
 
 ## Verification
-- Run the repo's `test`, `typecheck`, and `build` commands when those commands exist and are relevant to the change.
+- Run `npm run check`, `npm test`, and `npm run build` for implementation changes. Browser tests require Playwright Chromium; desktop integration tests require `dbus-run-session`.
 - Keep automated test coverage aligned with the current implementation.
+- Use disposable profiles and simulated service management for verification. Live deployment and legacy state migration are separate operations; the rewrite cannot open the legacy database schema.

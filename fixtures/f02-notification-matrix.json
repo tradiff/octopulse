@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "id": "F-02/actor-ownership-grouping",
+  "requirements": ["R-01", "P-05", "P-24", "P-25", "P-26", "P-29", "A-37", "A-38", "A-39", "A-41", "A-44", "A-46", "A-61"],
+  "time": "2026-10-22T12:00:00Z",
+  "classifier": true,
+  "pullRequests": {
+    "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "Own PR", "author": "Alex" },
+    "B": { "id": "B", "repository": "acme/widget", "number": 8, "title": "Other PR", "author": "bea" }
+  },
+  "steps": [
+    { "action": "track", "pr": "A" }, { "action": "track", "pr": "B" },
+    { "action": "observe", "pr": "A" }, { "action": "observe", "pr": "B" },
+    { "action": "provider", "responses": [
+      { "type": "Choice", "choice": "notify", "probabilities": { "notify": 0.9, "suppress": 0.1 }, "confidence": 0.9 },
+      { "type": "Choice", "choice": "suppress", "probabilities": { "notify": 0.49, "suppress": 0.51 }, "confidence": 0.01 }
+    ] },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "review", "id": "a-bot-change", "kind": "changes_requested", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "service", "bot": true }, "body": "Fix the failure" },
+      { "source": "review", "id": "b-bot-approve", "kind": "approval", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "checks[BOT]" }, "body": "LGTM" },
+      { "source": "review", "id": "human-approval", "kind": "approval", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "bea" }, "body": "Looks good" },
+      { "source": "review", "id": "human-changes", "kind": "changes_requested", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "cam" }, "body": "Please rename" },
+      { "source": "issue_comment", "id": "human", "kind": "comment", "occurredAt": "2026-10-22T12:00:01Z", "actor": { "login": "bea" }, "body": "A comment" },
+      { "source": "issue_comment", "id": "self", "kind": "comment", "occurredAt": "2026-10-22T12:00:01Z", "actor": { "login": "aLeX", "bot": true }, "body": "My comment" },
+      { "source": "ci", "id": "failure", "kind": "ci_failure", "occurredAt": "2026-10-22T12:00:02Z", "actor": { "login": "alex" } },
+      { "source": "timeline", "id": "commit", "kind": "commit", "occurredAt": "2026-10-22T12:00:03Z", "actor": { "login": "bea" } }
+    ] },
+    { "action": "observe", "pr": "B", "events": [
+      { "source": "issue_comment", "id": "bot", "kind": "comment", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "checks[bot]" }, "body": "Fix this" },
+      { "source": "review", "id": "bot-review", "kind": "changes_requested", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "checks[bot]" }, "body": "Fix this too" },
+      { "source": "issue_comment", "id": "unknown", "kind": "comment", "occurredAt": "2026-10-22T12:00:01Z", "body": "Unknown actor" },
+      { "source": "ci", "id": "failure", "kind": "ci_failure", "occurredAt": "2026-10-22T12:00:02Z" },
+      { "source": "timeline", "id": "commit", "kind": "commit", "occurredAt": "2026-10-22T12:00:03Z", "actor": { "login": "bea" } }
+    ] },
+    { "action": "deliver" },
+    { "action": "expect", "state": {
+      "providerCalls": ["Fix the failure", "LGTM"],
+      "prs": {
+        "A": { "activities": [
+          { "key": "review:a-bot-change", "delivery": "bundle", "classification": { "choice": "notify" } },
+          { "key": "review:b-bot-approve", "decision": "classified_suppress", "delivery": "none" },
+          { "key": "review:human-approval", "delivery": "immediate" },
+          { "key": "review:human-changes", "delivery": "immediate" },
+          { "key": "issue_comment:human", "delivery": "bundle" },
+          { "key": "issue_comment:self", "actorType": "self", "decision": "self" },
+          { "key": "ci:failure", "decision": "eligible" },
+          { "key": "timeline:commit", "decision": "commit_timeline_only", "delivery": "none" }
+        ] },
+        "B": { "activities": [
+          { "decision": "bot_non_owned", "classification": null },
+          { "decision": "bot_non_owned", "classification": null },
+          { "actorType": "human_other", "decision": "eligible" },
+          { "decision": "non_owned_ci" }, { "decision": "commit_timeline_only" }
+        ] }
+      },
+      "notifications": [
+        { "prId": "A", "kind": "immediate", "events": ["review:human-approval"], "sound": "approval", "expiryMs": 0, "status": "sent" },
+        { "prId": "A", "kind": "immediate", "events": ["review:human-changes"], "sound": null, "expiryMs": 0, "status": "sent" },
+        { "prId": "A", "kind": "bundled", "events": ["review:a-bot-change", "issue_comment:human", "ci:failure"], "sound": "comment", "expiryMs": 0, "status": "sent" },
+        { "prId": "B", "kind": "bundled", "events": ["issue_comment:unknown"], "sound": null, "expiryMs": 10000, "status": "sent" }
+      ], "submissions": [{}, {}, {}, {}]
+    } },
+    { "action": "restart" },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "review", "id": "a-bot-change", "kind": "changes_requested", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "service", "bot": true }, "body": "An edit" }
+    ] },
+    { "action": "deliver" },
+    { "action": "expect", "state": { "providerCalls": ["Fix the failure", "LGTM"], "notifications": [{}, {}, {}, {}], "submissions": [{}, {}, {}, {}] } }
+  ]
+}

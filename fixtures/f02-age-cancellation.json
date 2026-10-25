@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "id": "F-02/pending-age-limit-and-untrack",
+  "requirements": ["R-02", "P-13", "A-49", "A-63"],
+  "time": "2026-10-22T12:00:00Z",
+  "pullRequests": {
+    "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "Own", "author": "alex" },
+    "B": { "id": "B", "repository": "acme/widget", "number": 8, "title": "Other", "author": "bea" }
+  },
+  "steps": [
+    { "action": "track", "pr": "A" }, { "action": "observe", "pr": "A" },
+    { "action": "track", "pr": "B" }, { "action": "observe", "pr": "B" },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "issue_comment", "id": "c", "kind": "comment", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "bea" } }
+    ] },
+    { "action": "observe", "pr": "B", "events": [
+      { "source": "issue_comment", "id": "c", "kind": "comment", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "bea" } }
+    ] },
+    { "action": "untrack", "pr": "B" },
+    { "action": "restart" },
+    { "action": "clock", "at": "2026-10-23T12:00:00Z" },
+    { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [
+      { "status": "failed", "attempts": 0, "reason": "expired", "nextAttemptAt": null },
+      { "status": "pending", "attempts": 0, "reason": "untracked", "automatic": false }
+    ], "submissions": [] } },
+    { "action": "desktop", "results": ["transient"] },
+    { "action": "resend", "notification": 1 },
+    { "action": "untrack", "pr": "A" },
+    { "action": "clock", "at": "2026-10-23T12:01:00Z" },
+    { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [
+      { "status": "failed", "attempts": 1, "reason": "untracked", "nextAttemptAt": null },
+      { "status": "pending", "attempts": 0, "reason": "untracked" }
+    ], "submissions": [{}] } },
+    { "action": "resend", "notification": 2 },
+    { "action": "expect", "state": {
+      "prs": { "B": { "tracked": false, "manualUntracked": true } },
+      "notifications": [{ "reason": "untracked" }, { "status": "sent", "attempts": 1, "reason": null }],
+      "submissions": [{}, {}]
+    } }
+  ]
+}

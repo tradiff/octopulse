@@ -1,0 +1,28 @@
+{
+  "version": 1, "id": "F-05/independent-active-grace-and-failure-schedules",
+  "requirements": ["P-14", "P-15", "A-13", "A-14", "A-16", "A-18"],
+  "time": "2026-10-22T12:00:00Z",
+  "pullRequests": {
+    "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "Active", "author": "alex" },
+    "B": { "id": "B", "repository": "acme/widget", "number": 8, "title": "Grace", "author": "bea", "state": "closed", "closedAt": "2026-10-20T12:00:00Z" }
+  },
+  "steps": [
+    { "action": "track", "pr": "A", "origin": "discovery" }, { "action": "observe", "pr": "A" },
+    { "action": "track", "pr": "B" }, { "action": "observe", "pr": "B" },
+    { "action": "startScheduler", "activeMs": 120000 }, { "action": "tick" },
+    { "action": "expect", "state": { "polls": [], "prs": { "B": { "tracked": false, "graceUntil": "2026-10-27T12:00:00.000Z" } } } },
+    { "action": "clock", "at": "2026-10-22T12:02:00Z" }, { "action": "tick" },
+    { "action": "clock", "at": "2026-10-22T12:04:00Z" }, { "action": "tick" },
+    { "action": "clock", "at": "2026-10-22T12:15:00Z" }, { "action": "tick" },
+    { "action": "expect", "state": { "polls": [{ "prId": "A" }, { "prId": "A" }, { "prId": "A" }], "schedule": { "grace": "2026-10-22T12:15:01.000Z" } } },
+    { "action": "clock", "at": "2026-10-22T12:15:01Z" }, { "action": "tick", "fail": ["B"] },
+    { "action": "expect", "state": { "errors": ["B"], "schedule": { "grace": "2026-10-22T12:16:01.000Z" } } },
+    { "action": "clock", "at": "2026-10-22T12:16:01Z" }, { "action": "tick" },
+    { "action": "clock", "at": "2026-10-22T12:16:02Z" }, { "action": "tick" },
+    { "action": "expect", "state": { "polls": [{ "prId": "A" }, { "prId": "A" }, { "prId": "A" }, { "prId": "B" }, { "prId": "A" }, { "prId": "B" }], "schedule": { "grace": "2026-10-22T12:31:02.000Z" } } },
+    { "action": "restart" },
+    { "action": "expect", "state": { "prs": { "B": { "graceUntil": "2026-10-27T12:00:00.000Z", "origin": "manual" } } } },
+    { "action": "stop" }, { "action": "clock", "at": "2026-10-22T13:00:00Z" }, { "action": "tick" },
+    { "action": "expect", "state": { "polls": [{}, {}, {}, {}, {}, {}] } }
+  ]
+}

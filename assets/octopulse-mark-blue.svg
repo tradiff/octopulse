@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 448" fill="none" color="#82aaff" role="img" aria-labelledby="title">
+  <title id="title">Octopulse octopus circuit mark, blue</title>
+  <g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M74 220C90 247 110 265 139 265C161 265 179 252 187 236C155 212 139 180 139 143C139 78 191 22 256 22C321 22 373 78 373 143C373 180 357 212 325 236C333 252 351 265 373 265C402 265 422 247 438 220" stroke-width="44"/>
+    <path d="M196 378C229 351 246 330 256 277C266 330 283 351 316 378" stroke-width="44"/>
+  </g>
+  <g fill="currentColor">
+    <rect x="202" y="131" width="32" height="55" rx="16"/>
+    <rect x="278" y="131" width="32" height="55" rx="16"/>
+    <path d="M78 302H137C168 302 190 291 207 270C210 307 187 338 143 338H78Z"/>
+    <path d="M434 302H375C344 302 322 291 305 270C302 307 325 338 369 338H434Z"/>
+  </g>
+  <g stroke="currentColor" stroke-width="34">
+    <circle cx="54" cy="185" r="29"/>
+    <circle cx="458" cy="185" r="29"/>
+    <circle cx="46" cy="319" r="29"/>
+    <circle cx="466" cy="319" r="29"/>
+    <circle cx="166" cy="400" r="29"/>
+    <circle cx="346" cy="400" r="29"/>
+  </g>
+</svg>

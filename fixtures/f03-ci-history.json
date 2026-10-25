@@ -1,0 +1,59 @@
+{
+  "version": 1, "id": "F-03/current-attempt-ci-history",
+  "requirements": ["R-05", "R-06", "P-22", "P-23", "A-32", "A-33", "A-34", "A-35", "A-36", "A-58"],
+  "time": "2026-10-22T12:00:00Z",
+  "pullRequests": { "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "CI", "author": "alex", "head": "h1" } },
+  "steps": [
+    { "action": "track", "pr": "A" },
+    { "action": "observe", "pr": "A", "workflows": [
+      { "id": "r1", "workflowId": "build", "trigger": "pull_request", "runNumber": 1, "attempt": 1, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T11:50:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [
+        { "id": "j1", "name": "Test", "runId": "r1", "attempt": 1, "head": "h1", "status": "completed", "conclusion": "failure" }
+      ] }
+    ] },
+    { "action": "restart" },
+    { "action": "observe", "pr": "A", "workflows": [
+      { "id": "r1", "workflowId": "build", "trigger": "pull_request", "runNumber": 1, "attempt": 1, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T11:50:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [
+        { "id": "j1", "name": "Test", "runId": "r1", "attempt": 1, "head": "h1", "status": "completed", "conclusion": "failure" }
+      ] }
+    ] },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": "failure", "uncertain": false, "counts": { "failing": 1 } }, "activities": [{ "key": "ci:h1:1:failure", "decision": "baseline" }] } }, "notifications": [] } },
+    { "action": "clock", "at": "2026-10-22T12:01:00Z" },
+    { "action": "observe", "pr": "A", "workflows": [
+      { "id": "r2", "workflowId": "build", "trigger": "pull_request", "runNumber": 2, "attempt": 1, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T12:01:00Z", "status": "completed", "conclusion": "success", "jobsComplete": true, "jobs": [
+        { "id": "j2", "name": "Test", "runId": "r2", "attempt": 1, "head": "h1", "status": "completed", "conclusion": "success" }
+      ] },
+      { "id": "r1", "workflowId": "build", "trigger": "pull_request", "runNumber": 1, "attempt": 1, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T12:01:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [
+        { "id": "j1", "name": "Test", "runId": "r1", "attempt": 1, "head": "h1", "status": "completed", "conclusion": "failure" }
+      ] }
+    ] },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": "success", "counts": { "failing": 0, "passing": 1 }, "workflows": [{ "run": "r2", "attempt": 1 }] } } }, "notifications": [{ "events": ["ci:h1:2:success"], "expiryMs": 10000, "sound": null }] } },
+    { "action": "clock", "at": "2026-10-22T12:02:00Z" },
+    { "action": "observe", "pr": "A", "workflows": [
+      { "id": "r3", "workflowId": "other-build", "trigger": "pull_request", "runNumber": 1, "attempt": 1, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T12:02:00Z", "status": "completed", "conclusion": "timed_out", "jobsComplete": true, "jobs": [
+        { "id": "j3", "name": "Test", "runId": "r3", "attempt": 1, "head": "h1", "status": "completed", "conclusion": "timed_out" }
+      ] }
+    ] },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": "failure", "counts": { "failing": 1, "passing": 1 }, "workflows": [{ "run": "r2" }, { "run": "r3" }] } } }, "notifications": [{}, { "events": ["ci:h1:3:failure"] }] } },
+    { "action": "clock", "at": "2026-10-22T12:03:00Z" },
+    { "action": "observe", "pr": "A", "workflows": [
+      { "id": "r3", "workflowId": "other-build", "trigger": "pull_request", "runNumber": 1, "attempt": 2, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T12:03:00Z", "status": "in_progress", "conclusion": null, "jobsComplete": true, "jobs": [
+        { "id": "j4", "name": "Test", "runId": "r3", "attempt": 2, "head": "h1", "status": "queued", "conclusion": null }
+      ] }
+    ] },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": null, "counts": { "failing": 0, "pending": 1, "passing": 1 }, "workflows": [{ "run": "r2" }, { "run": "r3", "attempt": 2, "jobs": [{ "name": "Test", "state": "pending" }] }] } } }, "notifications": [{}, {}] } },
+    { "action": "clock", "at": "2026-10-22T12:04:00Z" },
+    { "action": "observe", "pr": "A", "workflows": [
+      { "id": "r3", "workflowId": "other-build", "trigger": "pull_request", "runNumber": 1, "attempt": 2, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T12:04:00Z", "status": "completed", "conclusion": "neutral", "jobsComplete": true, "jobs": [
+        { "id": "j4", "name": "Test", "runId": "r3", "attempt": 2, "head": "h1", "status": "completed", "conclusion": "neutral" }
+      ] }
+    ] },
+    { "action": "deliver" },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": "success", "counts": { "skipped": 1, "passing": 1 } } } }, "notifications": [{ "status": "sent" }, { "status": "sent" }, { "events": ["ci:h1:5:success"], "status": "sent" }] } },
+    { "action": "observe", "pr": "A", "workflows": [
+      { "id": "unknown", "workflowId": "build", "trigger": "pull_request", "runNumber": null, "attempt": 1, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T12:04:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [] }
+    ] },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": "success", "uncertain": true, "counts": { "passing": 1, "skipped": 1 } } } }, "notifications": [{}, {}, {}] } },
+    { "action": "observe", "pr": "A", "snapshot": { "head": "h2" }, "workflows": [] },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": null, "uncertain": false, "workflows": [], "counts": { "failing": 0, "pending": 0, "passing": 0, "skipped": 0 } } } }, "submissions": [{}, {}, {}] } }
+  ]
+}

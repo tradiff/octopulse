@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "id": "F-02/durable-bounded-retries-and-resend",
+  "requirements": ["R-02", "P-30", "A-49", "A-63"],
+  "time": "2026-10-22T12:00:00Z",
+  "pullRequests": { "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "Retry", "author": "alex" } },
+  "steps": [
+    { "action": "track", "pr": "A" }, { "action": "observe", "pr": "A" },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "issue_comment", "id": "c", "kind": "comment", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "bea" }, "body": "Please fix" }
+    ] },
+    { "action": "desktop", "results": ["transient", "transient", "transient", "transient", "transient"] },
+    { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [{ "status": "failed", "attempts": 1, "nextAttemptAt": "2026-10-22T12:01:00.000Z", "deliveredAt": null }], "submissions": [{}] } },
+    { "action": "restart" },
+    { "action": "clock", "at": "2026-10-22T12:00:59.999Z" },
+    { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [{ "attempts": 1 }], "submissions": [{}] } },
+    { "action": "clock", "at": "2026-10-22T12:01:00Z" },
+    { "action": "observe", "pr": "A", "sources": { "comments": "unchanged", "reviews": "unchanged", "inlineComments": "unchanged", "timeline": "unchanged", "workflows": "unchanged", "jobs": "unchanged" } },
+    { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [{ "attempts": 2, "nextAttemptAt": "2026-10-22T12:06:00.000Z" }] } },
+    { "action": "clock", "at": "2026-10-22T12:06:00Z" }, { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [{ "attempts": 3, "nextAttemptAt": "2026-10-22T12:21:00.000Z" }] } },
+    { "action": "clock", "at": "2026-10-22T12:21:00Z" }, { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [{ "attempts": 4, "nextAttemptAt": "2026-10-22T13:21:00.000Z" }] } },
+    { "action": "restart" },
+    { "action": "clock", "at": "2026-10-22T13:21:00Z" }, { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [{ "status": "failed", "attempts": 5, "reason": "exhausted", "nextAttemptAt": null, "automatic": false }], "submissions": [{}, {}, {}, {}, {}] } },
+    { "action": "clock", "at": "2026-10-22T14:00:00Z" }, { "action": "deliver" },
+    { "action": "resend", "notification": 1, "simultaneous": 2 },
+    { "action": "expect", "state": { "notifications": [{
+      "status": "sent", "attempts": 1, "preparedAt": "2026-10-22T14:00:00.000Z", "deliveredAt": "2026-10-22T14:00:00.000Z", "nextAttemptAt": null,
+      "attemptResults": ["transient", "transient", "transient", "transient", "transient", "sent"]
+    }], "submissions": [{}, {}, {}, {}, {}, {}], "providerCalls": [] } },
+    { "action": "desktop", "results": ["permanent"] },
+    { "action": "resend", "notification": 1 },
+    { "action": "restart" },
+    { "action": "clock", "at": "2026-10-24T14:00:00Z" }, { "action": "deliver" },
+    { "action": "expect", "state": { "notifications": [{ "status": "failed", "reason": "permanent", "nextAttemptAt": null, "deliveredAt": null }], "submissions": [{}, {}, {}, {}, {}, {}, {}] } }
+  ]
+}

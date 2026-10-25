@@ -1,0 +1,36 @@
+{
+  "version": 1, "id": "F-03/unchanged-first-page-changed-later-page",
+  "requirements": ["P-18", "R-05", "A-22", "A-23", "A-33"],
+  "time": "2026-10-22T12:00:00Z",
+  "pullRequests": { "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "Pages", "author": "alex", "head": "h1" } },
+  "steps": [
+    { "action": "track", "pr": "A" }, { "action": "observe", "pr": "A", "workflows": [] },
+    { "action": "fetch", "pr": "A", "responses": [
+      { "request": { "resource": "detail", "page": 1, "validator": null }, "response": { "status": 200, "validator": "detail-v1", "next": null, "items": [{ "id": "A", "repository": "acme/widget", "number": 7, "title": "Pages", "author": "alex", "head": "h1" }] } },
+      { "request": { "resource": "comments", "page": 1 }, "response": { "status": 200, "validator": null, "next": null, "items": [] } },
+      { "request": { "resource": "inlineComments", "page": 1 }, "response": { "status": 200, "validator": null, "next": null, "items": [] } },
+      { "request": { "resource": "timeline", "page": 1 }, "response": { "status": 200, "validator": null, "next": null, "items": [] } },
+      { "request": { "resource": "reviews", "page": 1 }, "response": { "status": 200, "validator": null, "next": null, "items": [] } },
+      { "request": { "resource": "workflows", "page": 1, "head": "h1", "validator": null }, "response": { "status": 200, "validator": "runs-page1", "next": 2, "items": [
+        { "id": "r1", "workflowId": "build", "trigger": "push", "runNumber": 1, "attempt": 1, "head": "h1", "name": "Build", "updatedAt": "2026-10-22T12:00:00Z", "status": "completed", "conclusion": "success" }
+      ] } },
+      { "request": { "resource": "workflows", "page": 2, "head": "h1", "validator": null }, "response": { "status": 200, "validator": "runs-page2-v1", "next": null, "items": [
+        { "id": "r2", "workflowId": "test", "trigger": "push", "runNumber": 1, "attempt": 1, "head": "h1", "name": "Test", "updatedAt": "2026-10-22T12:00:00Z", "status": "completed", "conclusion": "failure" }
+      ] } },
+      { "request": { "resource": "jobs", "runId": "r1", "attempt": 1, "page": 1 }, "response": { "status": 200, "validator": null, "next": null, "items": [] } },
+      { "request": { "resource": "jobs", "runId": "r2", "attempt": 1, "page": 1 }, "response": { "status": 200, "validator": null, "next": null, "items": [] } }
+    ] },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": "failure" } } }, "notifications": [{ "events": ["ci:h1:1:failure"] }] } },
+    { "action": "restart" }, { "action": "clock", "at": "2026-10-22T12:01:00Z" },
+    { "action": "fetch", "pr": "A", "responses": [
+      { "request": { "resource": "detail", "page": 1, "validator": "detail-v1" }, "response": { "status": 304 } },
+      { "request": { "resource": "workflows", "page": 1, "validator": "runs-page1", "head": "h1" }, "response": { "status": 304 } },
+      { "request": { "resource": "workflows", "page": 2, "validator": "runs-page2-v1", "head": "h1" }, "response": { "status": 200, "validator": "runs-page2-v2", "next": null, "items": [
+        { "id": "r2", "workflowId": "test", "trigger": "push", "runNumber": 1, "attempt": 1, "head": "h1", "name": "Test", "updatedAt": "2026-10-22T12:01:00Z", "status": "completed", "conclusion": "success" }
+      ] } },
+      { "request": { "resource": "jobs", "runId": "r2", "attempt": 1, "page": 1, "validator": null }, "response": { "status": 200, "validator": null, "next": null, "items": [] } }
+    ] },
+    { "action": "deliver" },
+    { "action": "expect", "state": { "prs": { "A": { "ci": { "outcome": "success" } } }, "notifications": [{ "events": ["ci:h1:1:failure"], "status": "sent" }, { "events": ["ci:h1:2:success"], "status": "sent" }] } }
+  ]
+}

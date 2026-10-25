@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "id": "F-02/blank-body-bypass-and-negative-probability",
+  "requirements": ["R-01", "P-25", "A-40", "A-41"],
+  "time": "2026-10-22T12:00:00Z",
+  "classifier": true,
+  "pullRequests": { "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "Own", "author": "alex" } },
+  "steps": [
+    { "action": "track", "pr": "A" }, { "action": "observe", "pr": "A" },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "issue_comment", "id": "blank-comment", "kind": "comment", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "checks[bot]" }, "body": " \n\t " }
+    ] },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "review", "id": "blank-changes", "kind": "changes_requested", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "checks[bot]" }, "body": "" }
+    ] },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "review", "id": "blank-approval", "kind": "approval", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "checks[bot]" }, "body": " " }
+    ] },
+    { "action": "expect", "state": {
+      "providerCalls": [],
+      "prs": { "A": { "activities": [
+        { "classification": null, "decision": "eligible" },
+        { "classification": null, "decision": "eligible" },
+        { "classification": null, "decision": "eligible" }
+      ] } },
+      "notifications": [{ "sound": "comment" }, { "sound": null }, { "sound": "approval" }]
+    } },
+    { "action": "provider", "responses": [
+      { "type": "Choice", "choice": "suppress", "probabilities": { "notify": -0.0005, "suppress": 1 }, "confidence": 1 }
+    ] },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "issue_comment", "id": "invalid-answer", "kind": "comment", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "checks[bot]" }, "body": "Action needed" }
+    ] },
+    { "action": "deliver" },
+    { "action": "expect", "state": {
+      "providerCalls": ["Action needed"],
+      "prs": { "A": { "activities": [
+        {}, {}, {}, { "decision": "eligible", "classification": { "type": "fallback", "reason": "invalid_answer" } }
+      ] } },
+      "notifications": [{ "status": "sent" }, { "status": "sent" }, { "status": "sent" }, { "events": ["issue_comment:invalid-answer"], "status": "sent" }],
+      "submissions": [{}, {}, {}, {}]
+    } }
+  ]
+}

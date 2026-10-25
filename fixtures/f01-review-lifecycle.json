@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "id": "F-01/review-lifecycle",
+  "requirements": ["R-06", "P-13", "P-20", "P-21", "P-33", "A-25", "A-26", "A-27", "A-28", "A-29"],
+  "time": "2026-10-22T12:00:00Z",
+  "classifier": true,
+  "pullRequests": {
+    "B": { "id": "B", "repository": "acme/widget", "number": 8, "title": "Review this change", "author": "bea", "requestedReviewers": ["Alex"] }
+  },
+  "steps": [
+    { "action": "track", "pr": "B", "origin": "discovery" },
+    { "action": "track", "pr": "B", "origin": "discovery" },
+    { "action": "observe", "pr": "B", "events": [
+      { "source": "timeline", "id": "original", "kind": "review_requested", "occurredAt": "2026-10-22T11:58:00Z", "actor": { "login": "bea" }, "targetUser": "alex" },
+      { "source": "issue_comment", "id": "old", "kind": "comment", "occurredAt": "2020-01-01T00:00:00Z", "actor": { "login": "checks[bot]" }, "body": "Old blocking issue" }
+    ] },
+    { "action": "deliver" },
+    { "action": "restart" },
+    { "action": "track", "pr": "B", "origin": "discovery" },
+    { "action": "expect", "state": {
+      "providerCalls": [],
+      "prs": { "B": { "baselineComplete": true, "queue": "needs-my-review", "reviewers": { "alex": "requested" }, "activities": [
+        { "key": "issue_comment:old", "decision": "baseline" },
+        { "key": "timeline:original", "decision": "baseline" }
+      ] } },
+      "notifications": [{ "events": ["timeline:current-review:1"], "kind": "immediate", "expiryMs": 0, "sound": null, "status": "sent" }],
+      "submissions": [{ "destination": "https://github.com/acme/widget/pull/8" }]
+    } },
+    { "action": "clock", "at": "2026-10-22T12:01:00Z" },
+    { "action": "observe", "pr": "B", "snapshot": { "requestedReviewers": [] }, "reviews": [
+      { "id": "r1", "reviewer": { "login": "ALEX" }, "state": "changes_requested", "submittedAt": "2026-10-22T12:01:00Z" }
+    ], "events": [
+      { "source": "review", "id": "r1", "kind": "changes_requested", "occurredAt": "2026-10-22T12:01:00Z", "actor": { "login": "ALEX", "bot": true }, "body": "Please fix" }
+    ] },
+    { "action": "expect", "state": { "prs": { "B": { "queue": "review-requests", "reviewers": { "alex": "changes_requested" } } } } },
+    { "action": "clock", "at": "2026-10-22T12:03:00Z" },
+    { "action": "observe", "pr": "B", "snapshot": { "requestedReviewers": ["alex"], "draft": true }, "reviews": [
+      { "id": "r1", "reviewer": { "login": "ALEX" }, "state": "changes_requested", "submittedAt": "2026-10-22T12:01:00Z" }
+    ], "events": [
+      { "source": "timeline", "id": "request2", "kind": "review_requested", "occurredAt": "2026-10-22T12:02:00Z", "actor": { "login": "bea" }, "targetUser": "alex" },
+      { "source": "timeline", "id": "request3", "kind": "review_requested", "occurredAt": "2026-10-22T12:03:00Z", "actor": { "login": "bea" }, "targetUser": "ALEx" }
+    ] },
+    { "action": "deliver" },
+    { "action": "expect", "state": {
+      "prs": { "B": { "queue": "needs-my-review", "reviewers": { "alex": "requested" }, "activities": [
+        { "decision": "baseline" }, { "decision": "baseline" }, { "decision": "self" },
+        { "key": "timeline:request2", "decision": "superseded_request" },
+        { "key": "timeline:request3", "decision": "eligible", "delivery": "immediate" }
+      ] } },
+      "notifications": [{ "status": "sent" }, { "events": ["timeline:request3"], "expiryMs": 0, "status": "sent" }]
+    } },
+    { "action": "observe", "pr": "B", "snapshot": { "requestedReviewers": [], "requestedTeams": ["acme/platform"] }, "reviews": [
+      { "id": "r1", "reviewer": { "login": "alex" }, "state": "changes_requested", "submittedAt": "2026-10-22T12:01:00Z" }
+    ], "events": [
+      { "source": "timeline", "id": "team", "kind": "review_requested", "occurredAt": "2026-10-22T12:03:00Z", "targetTeam": "acme/platform" }
+    ] },
+    { "action": "expect", "state": { "prs": { "B": { "queue": "needs-my-review", "reviewers": { "alex": "changes_requested" } } }, "notifications": [{}, {}] } },
+    { "action": "observe", "pr": "B", "snapshot": { "state": "closed", "requestedReviewers": ["alex"] }, "reviews": [
+      { "id": "r1", "reviewer": { "login": "alex" }, "state": "changes_requested", "submittedAt": "2026-10-22T12:01:00Z" }
+    ] },
+    { "action": "expect", "state": { "prs": { "B": { "queue": "review-requests", "reviewers": { "alex": "changes_requested" } } } } },
+    { "action": "untrack", "pr": "B" },
+    { "action": "untrack", "pr": "B" },
+    { "action": "restart" },
+    { "action": "track", "pr": "B", "origin": "discovery", "snapshot": { "state": "open", "requestedTeams": [] } },
+    { "action": "expect", "state": { "prs": { "B": { "tracked": false, "manualUntracked": true } }, "notifications": [{}, {}] } },
+    { "action": "clock", "at": "2026-10-22T13:00:00Z" },
+    { "action": "track", "pr": "B" },
+    { "action": "observe", "pr": "B", "events": [
+      { "source": "issue_comment", "id": "inactive-backlog", "kind": "comment", "occurredAt": "2026-10-22T12:30:00Z", "actor": { "login": "bea" }, "body": "While untracked" },
+      { "source": "timeline", "id": "request3", "kind": "review_requested", "occurredAt": "2026-10-22T12:03:00Z", "actor": { "login": "bea" }, "targetUser": "alex" }
+    ] },
+    { "action": "deliver" },
+    { "action": "restart" },
+    { "action": "track", "pr": "B" },
+    { "action": "expect", "state": {
+      "prs": { "B": { "tracked": true, "manualUntracked": false, "baselineComplete": true, "activities": [
+        {}, {}, {}, {}, {}, { "key": "timeline:team", "decision": "review_request_ineligible" },
+        { "key": "issue_comment:inactive-backlog", "decision": "baseline" }
+      ] } },
+      "notifications": [{ "status": "sent" }, { "status": "sent" }, { "events": ["timeline:current-review:3"], "status": "sent", "expiryMs": 0 }],
+      "submissions": [{}, {}, {}], "providerCalls": []
+    } }
+  ]
+}

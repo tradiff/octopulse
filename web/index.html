@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Octopulse</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="Octopulse"><img class="brand-symbol" src="/icon.svg" alt="" width="48" height="42"><span class="brand-wordmark" aria-hidden="true">octopulse</span></a>
+    <nav aria-label="Pages">
+      <a href="/">Pull Requests</a><a href="/notification-history">Notification History</a><a href="/logs">Logs</a>
+    </nav>
+    <span id="identity" class="muted">Loading identity…</span>
+  </header>
+  <main aria-label="Pull Requests">
+    <div id="workbar" class="workbar">
+      <nav id="tabs" aria-label="Pull request queues"></nav>
+      <div id="page-actions" class="actions page-actions"><button id="refresh" type="button">Refresh</button><button id="track" class="primary" type="button" data-requires-identity data-focus-key="track" disabled>＋ Track PR</button></div>
+    </div>
+    <div id="error" role="alert" hidden><span></span> <button id="retry" type="button">Retry</button></div>
+    <div id="filter-bar" class="filter-bar"><section id="filters" aria-label="Filters"></section></div>
+    <div class="results-meta"><div id="result-summary" class="result-summary" hidden></div><p id="status" role="status" aria-live="polite" class="muted">Loading local state…</p></div>
+    <section id="content" tabindex="-1" aria-label="Results"></section>
+  </main>
+  <dialog id="track-dialog" aria-labelledby="track-title">
+    <form id="track-form">
+      <h2 id="track-title">Add pull request</h2>
+      <label for="pr-url">GitHub pull request URL</label>
+      <input id="pr-url" name="url" type="url" required placeholder="https://github.com/owner/repo/pull/123" autocomplete="off">
+      <p id="track-error" role="alert"></p>
+      <div class="actions"><button id="cancel-track" type="button">Cancel</button><button type="submit" class="primary" data-requires-identity disabled>Track pull request</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

@@ -1,0 +1,38 @@
+{
+  "version": 1, "id": "F-08/strict-retention-reclaim-and-profile-restart",
+  "requirements": ["R-04", "P-39", "P-40", "A-57", "A-59", "A-65"],
+  "time": "2026-10-22T12:00:00Z",
+  "pullRequests": { "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "Retention", "author": "alex" } },
+  "steps": [
+    { "action": "identity", "login": "Alex" },
+    { "action": "track", "pr": "A" }, { "action": "observe", "pr": "A" },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "issue_comment", "id": "old", "kind": "comment", "occurredAt": "2026-09-22T11:59:59.999Z", "actor": { "login": "bea" }, "body": "Old" },
+      { "source": "issue_comment", "id": "boundary", "kind": "comment", "occurredAt": "2026-09-22T12:00:00Z", "actor": { "login": "bea" }, "body": "Boundary" },
+      { "source": "issue_comment", "id": "new", "kind": "comment", "occurredAt": "2026-09-22T12:00:00.001Z", "actor": { "login": "bea" }, "body": "New" }
+    ] },
+    { "action": "deliver" },
+    { "action": "observe", "pr": "A", "sources": { "comments": "complete", "reviews": "incomplete", "inlineComments": "complete", "timeline": "complete", "workflows": "complete", "jobs": "complete" }, "events": [
+      { "source": "issue_comment", "id": "unfinished", "kind": "comment", "occurredAt": "2020-01-01T00:00:00Z", "actor": { "login": "bea" }, "body": "Unfinished" }
+    ] },
+    { "action": "prune", "retentionMs": 2592000000 }, { "action": "prune", "retentionMs": 2592000000 },
+    { "action": "reclaim" }, { "action": "restart" },
+    { "action": "expect", "state": {
+      "identity": "alex", "reviewBaseline": "2026-10-22T12:00:00.000Z",
+      "prs": { "A": { "rawEvents": ["issue_comment:boundary", "issue_comment:new", "issue_comment:unfinished"], "pendingObservations": 1,
+        "activities": [{ "key": "issue_comment:old" }, { "key": "issue_comment:boundary" }, { "key": "issue_comment:new" }] } },
+      "notifications": [{ "status": "sent", "events": ["issue_comment:old", "issue_comment:boundary", "issue_comment:new"] }]
+    } },
+    { "action": "clock", "at": "2026-10-22T13:00:00Z" }, { "action": "identity", "login": "ALEX" },
+    { "action": "observe", "pr": "A", "events": [
+      { "source": "issue_comment", "id": "old", "kind": "comment", "occurredAt": "2026-09-22T11:59:59.999Z", "actor": { "login": "bea" }, "body": "Edited upstream" }
+    ] },
+    { "action": "deliver" }, { "action": "untrack", "pr": "A" }, { "action": "restart" },
+    { "action": "expect", "state": {
+      "identity": "alex", "reviewBaseline": "2026-10-22T12:00:00.000Z",
+      "prs": { "A": { "manualUntracked": true, "pendingObservations": 0,
+        "activities": [{ "body": "Old" }, { "body": "Boundary" }, { "body": "New" }, { "body": "Unfinished" }] } },
+      "notifications": [{ "status": "sent" }, { "status": "sent", "events": ["issue_comment:unfinished"] }], "submissions": [{}, {}]
+    } }
+  ]
+}

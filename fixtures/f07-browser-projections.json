@@ -1,0 +1,28 @@
+{
+  "version": 1, "id": "F-07/filters-queues-and-history-projections",
+  "requirements": ["P-31", "P-32", "P-33", "P-37", "A-50", "A-51", "A-52", "A-53", "A-54"],
+  "time": "2026-10-22T12:00:00Z",
+  "pullRequests": {
+    "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "Mine", "author": "Alex" },
+    "B": { "id": "B", "repository": "acme/widget", "number": 8, "title": "Direct", "author": "bea", "draft": true, "requestedReviewers": ["alex"] },
+    "C": { "id": "C", "repository": "acme/service", "number": 9, "title": "Other", "author": "cam" }
+  },
+  "steps": [
+    { "action": "track", "pr": "A" }, { "action": "observe", "pr": "A" },
+    { "action": "track", "pr": "B" }, { "action": "observe", "pr": "B" },
+    { "action": "track", "pr": "C" }, { "action": "observe", "pr": "C" },
+    { "action": "view", "page": "pulls" },
+    { "action": "untrack", "pr": "B" },
+    { "action": "view", "page": "pulls" },
+    { "action": "view", "page": "pulls", "query": "pr-state=all&repo=acme/widget" },
+    { "action": "view", "page": "history", "query": "pr-state=inactive&page=999" },
+    { "action": "view", "page": "history", "query": "repo=missing/repo&page=999" },
+    { "action": "expect", "state": { "views": [
+      { "counts": { "my-prs": 1, "needs-my-review": 1, "review-requested": 1 } },
+      { "counts": { "my-prs": 1, "needs-my-review": 0, "review-requested": 1 } },
+      { "counts": { "my-prs": 1, "needs-my-review": 1, "review-requested": 0 }, "items": [{ "id": "B", "tracked": false, "state": "draft" }, { "id": "A" }] },
+      { "total": 1, "page": 1, "pages": 1, "items": [{ "intent": { "prId": "B" }, "pr": { "tracked": false } }] },
+      { "total": 0, "page": 1, "pages": 1, "items": [] }
+    ] } }
+  ]
+}

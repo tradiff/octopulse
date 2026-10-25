@@ -1,0 +1,43 @@
+{
+  "version": 1, "id": "F-04/shared-associations-concurrent-replay",
+  "requirements": ["R-03", "P-17", "A-24", "A-62"],
+  "time": "2026-10-22T12:00:00Z",
+  "pullRequests": {
+    "A": { "id": "A", "repository": "acme/widget", "number": 7, "title": "First", "author": "alex", "head": "shared" },
+    "B": { "id": "B", "repository": "acme/widget", "number": 8, "title": "Other", "author": "bea", "head": "shared" },
+    "C": { "id": "C", "repository": "acme/widget", "number": 9, "title": "Second", "author": "alex", "head": "shared" }
+  },
+  "steps": [
+    { "action": "track", "pr": "A" }, { "action": "track", "pr": "B" }, { "action": "track", "pr": "C" },
+    { "action": "observe", "pr": "A", "workflows": [] }, { "action": "observe", "pr": "B", "workflows": [] }, { "action": "observe", "pr": "C", "workflows": [] },
+    { "action": "observeTogether", "observations": [
+      { "action": "observe", "pr": "A", "events": [{ "source": "timeline", "id": "shared", "kind": "commit", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "bea" } }], "workflows": [
+        { "id": "run", "workflowId": "build", "trigger": "push", "runNumber": 1, "attempt": 1, "head": "shared", "name": "Build", "updatedAt": "2026-10-22T12:00:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [] }
+      ] },
+      { "action": "observe", "pr": "C", "events": [{ "source": "timeline", "id": "shared", "kind": "commit", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "bea" } }], "workflows": [
+        { "id": "run", "workflowId": "build", "trigger": "push", "runNumber": 1, "attempt": 1, "head": "shared", "name": "Build", "updatedAt": "2026-10-22T12:00:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [] }
+      ] },
+      { "action": "observe", "pr": "B", "events": [{ "source": "timeline", "id": "shared", "kind": "commit", "occurredAt": "2026-10-22T12:00:00Z", "actor": { "login": "bea" } }], "workflows": [
+        { "id": "run", "workflowId": "build", "trigger": "push", "runNumber": 1, "attempt": 1, "head": "shared", "name": "Build", "updatedAt": "2026-10-22T12:00:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [] }
+      ] }
+    ] },
+    { "action": "deliver" },
+    { "action": "restart" },
+    { "action": "observe", "pr": "C", "workflows": [
+      { "id": "run", "workflowId": "build", "trigger": "push", "runNumber": 1, "attempt": 1, "head": "shared", "name": "Build", "updatedAt": "2026-10-22T12:00:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [] }
+    ] },
+    { "action": "observe", "pr": "A", "workflows": [
+      { "id": "run", "workflowId": "build", "trigger": "push", "runNumber": 1, "attempt": 1, "head": "shared", "name": "Build", "updatedAt": "2026-10-22T12:00:00Z", "status": "completed", "conclusion": "failure", "jobsComplete": true, "jobs": [] }
+    ] },
+    { "action": "expect", "state": {
+      "prs": {
+        "A": { "activities": [{ "key": "ci:shared:1:failure", "decision": "eligible" }, { "key": "timeline:shared", "decision": "commit_timeline_only" }] },
+        "C": { "activities": [{ "key": "ci:shared:1:failure", "decision": "eligible" }, { "key": "timeline:shared", "decision": "commit_timeline_only" }] },
+        "B": { "activities": [{ "key": "ci:shared:1:failure", "decision": "non_owned_ci" }, { "key": "timeline:shared", "decision": "commit_timeline_only" }] }
+      },
+      "notificationCounts": { "A": 1, "B": 0, "C": 1 },
+      "notifications": [{ "events": ["ci:shared:1:failure"], "status": "sent" }, { "events": ["ci:shared:1:failure"], "status": "sent" }],
+      "submissions": [{}, {}]
+    } }
+  ]
+}

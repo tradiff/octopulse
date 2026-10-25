@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "F-01/request-cutoffs-and-equal-time-ordering",
+  "requirements": ["P-21", "R-06", "A-25", "A-27"],
+  "time": "2026-10-22T12:00:00Z",
+  "reviewCutoff": "2026-10-22T11:00:00Z",
+  "pullRequests": { "B": { "id": "B", "repository": "acme/widget", "number": 8, "title": "Review", "author": "bea" } },
+  "steps": [
+    { "action": "track", "pr": "B", "origin": "discovery" },
+    { "action": "observe", "pr": "B" },
+    { "action": "observe", "pr": "B", "snapshot": { "requestedReviewers": ["alex"] }, "events": [
+      { "source": "timeline", "id": "before", "kind": "review_requested", "occurredAt": "2026-10-22T10:59:59.999Z", "targetUser": "alex" },
+      { "source": "timeline", "id": "equal", "kind": "review_requested", "occurredAt": "2026-10-22T13:00:00+02:00", "targetUser": "alex" },
+      { "source": "timeline", "id": "after", "kind": "review_requested", "occurredAt": "2026-10-22T11:00:00.001Z", "targetUser": "alex" }
+    ] },
+    { "action": "expect", "state": {
+      "prs": { "B": { "activities": [
+        { "key": "timeline:before", "decision": "review_request_ineligible" },
+        { "key": "timeline:equal", "decision": "review_request_ineligible" },
+        { "key": "timeline:after", "decision": "eligible" }
+      ] } }, "notifications": [{ "events": ["timeline:after"], "kind": "immediate" }]
+    } },
+    { "action": "observe", "pr": "B", "events": [
+      { "source": "timeline", "id": "z-last", "kind": "review_requested", "occurredAt": "2026-10-22T11:30:00Z", "targetUser": "alex" },
+      { "source": "timeline", "id": "a-first", "kind": "review_requested", "occurredAt": "2026-10-22T11:30:00Z", "targetUser": "alex" },
+      { "source": "timeline", "id": "other", "kind": "review_requested", "occurredAt": "2026-10-22T11:40:00Z", "targetUser": "cam" },
+      { "source": "timeline", "id": "self", "kind": "review_requested", "occurredAt": "2026-10-22T11:50:00Z", "targetUser": "alex", "actor": { "login": "Alex" } }
+    ] },
+    { "action": "restart" },
+    { "action": "observe", "pr": "B", "events": [
+      { "source": "timeline", "id": "a-first", "kind": "review_requested", "occurredAt": "2026-10-22T11:30:00Z", "targetUser": "alex" },
+      { "source": "timeline", "id": "z-last", "kind": "review_requested", "occurredAt": "2026-10-22T11:30:00Z", "targetUser": "alex" }
+    ] },
+    { "action": "deliver" },
+    { "action": "expect", "state": {
+      "prs": { "B": { "activities": [
+        {}, {}, {}, { "key": "timeline:a-first", "decision": "superseded_request" },
+        { "key": "timeline:z-last", "decision": "eligible" },
+        { "key": "timeline:other", "decision": "review_request_ineligible" }, { "key": "timeline:self", "decision": "self" }
+      ] } },
+      "notifications": [{ "events": ["timeline:after"], "status": "sent" }, { "events": ["timeline:z-last"], "status": "sent" }],
+      "submissions": [{}, {}]
+    } }
+  ]
+}
