@@ -10,7 +10,7 @@ export async function navigation(page, capture) {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await go('/');
-  check(await page.locator('#identity').textContent() === '@alex', 'Identity is visible');
+  check(await page.locator('#identity > span').last().textContent() === '@alex', 'Identity is visible');
   check(await page.getByRole('button', { name: 'Needs My Review (2)', exact: true }).count() === 1, 'Queue counts reflect direct and team requests');
   const summary = page.locator('[data-pr="A"] > summary');
   await summary.focus(); await page.keyboard.press('Enter');
@@ -76,7 +76,7 @@ export async function navigation(page, capture) {
   await page.getByText('Synthetic identity failure', { exact: true }).waitFor();
   check(await page.locator('#identity').textContent() === 'Identity unavailable', 'Identity failure is explicit');
   await page.unroute('**/api/me'); await page.getByRole('button', { name: 'Retry', exact: true }).click(); await ready();
-  check(await page.locator('#identity').textContent() === '@alex', 'Identity failure can recover');
+  check(await page.locator('#identity > span').last().textContent() === '@alex', 'Identity failure can recover');
 
   await go('/?tab=needs-my-review');
   await page.getByRole('button', { name: '＋ Track PR', exact: true }).click();

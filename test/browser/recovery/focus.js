@@ -40,7 +40,7 @@ export async function focusAndRecovery(page, capture) {
     await page.getByRole('alert').filter({ hasText: 'Synthetic local read failure' }).waitFor();
     check(JSON.stringify(await page.locator('.pr').allTextContents()) === JSON.stringify(before), 'Failed refresh retains the displayed PRs');
     check(await page.locator('#tabs').textContent() === counts, 'Retained counts still describe the retained PRs');
-    check(await page.locator('#identity').textContent() === '@alex', 'Data failure does not invalidate a successful identity read');
+    check(await page.locator('#identity > span').last().textContent() === '@alex', 'Data failure does not invalidate a successful identity read');
     check((await page.locator('#status').textContent()).includes('previous'), 'Retained results are explicitly marked as previous results');
     check(await page.getByRole('button', { name: '＋ Track PR', exact: true }).isEnabled(), 'Valid identity keeps Track available after a data-only failure');
     await page.unroute('**/api/pull-request-timeline*', failedData);

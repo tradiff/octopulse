@@ -461,7 +461,14 @@ async function load(): Promise<void> {
       || !me.teams.every(team => typeof team === 'string') || !('actionToken' in me) || typeof me.actionToken !== 'string') {
       element('identity').textContent = 'Identity unavailable'; throw new Error('Identity response is invalid');
     }
-    identity = { login: me.login, teams: me.teams, actionToken: me.actionToken }; element('identity').textContent = identity.login ? `@${identity.login}` : 'Local profile';
+    identity = { login: me.login, teams: me.teams, actionToken: me.actionToken };
+    const identityLabel = element('identity');
+    identityLabel.replaceChildren(node('span', identity.login ? `@${identity.login}` : 'Local profile'));
+    if (identity.login) {
+      const picture = avatar(identity.login, `https://github.com/${encodeURIComponent(identity.login)}.png?size=64`);
+      picture.setAttribute('aria-hidden', 'true');
+      identityLabel.prepend(picture);
+    }
     const dataResult = await dataRequest;
     if (version !== sequence || current.signal.aborted) return;
     if (dataResult.status === 'rejected') throw dataResult.reason;

@@ -35,6 +35,7 @@ const avatars = Object.fromEntries([
   ['cache-goblin', '<rect width="64" height="64" fill="#244b4a"/><ellipse cx="32" cy="38" rx="25" ry="20" fill="#b5dc76"/><circle cx="18" cy="22" r="11" fill="#b5dc76"/><circle cx="46" cy="22" r="11" fill="#b5dc76"/><circle cx="18" cy="22" r="7" fill="#f2f7dd"/><circle cx="46" cy="22" r="7" fill="#f2f7dd"/><circle cx="20" cy="23" r="4" fill="#243b34"/><circle cx="44" cy="23" r="4" fill="#243b34"/><path d="M22 41q10 10 20 0" fill="none" stroke="#47663b" stroke-width="3" stroke-linecap="round"/>'],
   ['merge-owl', '<rect width="64" height="64" fill="#694331"/><path d="M10 13l15 7h14l15-7v27q0 18-22 18T10 40Z" fill="#ffc777"/><circle cx="23" cy="32" r="12" fill="#fff0cf"/><circle cx="41" cy="32" r="12" fill="#fff0cf"/><circle cx="24" cy="32" r="6" fill="#49342e"/><circle cx="40" cy="32" r="6" fill="#49342e"/><circle cx="26" cy="30" r="2" fill="#fff"/><circle cx="42" cy="30" r="2" fill="#fff"/><path d="M27 40h10l-5 8Z" fill="#d57645"/>'],
 ].map(([login, shapes]) => [avatarUrl(login), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${shapes}</svg>`]));
+avatars['https://github.com/byte-bot.png?size=64'] = avatars[avatarUrl('byte-bot')];
 let local;
 try {
   const titles = [
@@ -136,14 +137,14 @@ try {
     const angle = 16 * Math.PI / 180;
     const gap = 32;
     const across = { x: (1140 + gap) * Math.cos(angle), y: -(1140 + gap) * Math.sin(angle) };
-    const down = { x: (690 + gap) * Math.sin(angle), y: (690 + gap) * Math.cos(angle) };
     const upper = { x: 470, y: 180 };
     const lower = { x: 450, y: upper.y + (690 + gap - (450 - upper.x) * Math.sin(angle)) / Math.cos(angle) };
+    const rowStep = { x: lower.x - upper.x, y: lower.y - upper.y };
     const rows = [
-      { x: upper.x - down.x, y: upper.y - down.y, image: detail },
+      { x: upper.x - rowStep.x, y: upper.y - rowStep.y, image: detail },
       { ...upper, image: queue },
       { ...lower, image: detail },
-      { x: lower.x + down.x, y: lower.y + down.y, image: detail },
+      { x: lower.x + rowStep.x, y: lower.y + rowStep.y, image: detail },
     ];
     const panels = rows.flatMap((row, index) => [-1, 0, 1].map(column => [
       column === 0 ? row.image : (row.image === queue ? detail : queue),
@@ -153,7 +154,7 @@ try {
     ]));
     await artwork.setContent('<!doctype html><html lang="en"><meta charset="utf-8"><style>' + css + '</style><main class="art">' + panels.map(([src, x, y, secondary]) => '<div class="panel' + (secondary ? ' secondary' : '') + '" style="left:' + x + 'px;top:' + y + 'px"><img alt="Fictional Octopulse interface" src="' + src + '"></div>').join('') + '</main></html>');
     await artwork.locator('img').evaluateAll(images => Promise.all(images.map(image => image.decode())));
-    await artwork.screenshot({ path: ${JSON.stringify(capture)}, omitBackground: true, clip: { x: 320, y: 20, width: 1420, height: 1850 } });
+    await artwork.screenshot({ path: ${JSON.stringify(capture)}, omitBackground: true, clip: { x: 350, y: 20, width: 1360, height: 1780 } });
     if (errors.length) throw new Error('Browser capture failed: ' + errors.join('; '));
     await artwork.close();
     return 'Created screenshot collage.';

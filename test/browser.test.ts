@@ -17,9 +17,11 @@ import { filterLayout } from './browser/layout/filters.js';
 import { queueLayout } from './browser/layout/queue.js';
 import { themeAndAccessibility } from './browser/layout/theme.js';
 import { pagination } from './browser/pagination.js';
+import { identity } from './browser/identity.js';
 
 type Capture = (name: string, options?: { fullPage?: boolean }) => Promise<void>;
 const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number; status: string }>][] = [
+  ['current user avatar and fallback', identity],
   ['navigation, mutations and request races', navigation],
   ['repository search and keyboard interaction', repositories],
   ['shared PR summaries', prSummary],

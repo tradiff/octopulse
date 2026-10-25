@@ -48,7 +48,7 @@ nav { display: flex; gap: 28px; }
 .masthead nav a:hover { color: var(--ink); text-decoration: none; }
 .masthead nav a[aria-current=page] { color: var(--ink); }
 .masthead nav a[aria-current=page]::after { content: ''; position: absolute; bottom: -1px; inset-inline: 0; height: 2px; background: var(--accent); }
-#identity { margin-left: auto; font-size: var(--text-label); color: var(--muted); white-space: nowrap; }
+#identity { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font-size: var(--text-label); color: var(--muted); white-space: nowrap; }
 main { max-width: 1416px; margin: 24px auto; padding: 0 44px; }
 .workbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
 .page-actions { margin-left: auto; flex-shrink: 0; }
