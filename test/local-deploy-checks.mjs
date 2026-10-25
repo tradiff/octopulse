@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deployUserService } from '../scripts/deploy-user-service.mjs';
 import { installPackage } from '../scripts/install.mjs';
+import { installUserService } from '../scripts/install-user-service.mjs';
 
 await mkdir(join(tmpdir(), 'opencode'), { recursive: true });
 const work = await mkdtemp(join(tmpdir(), 'opencode/octopulse-deploy-check-'));
@@ -19,6 +20,7 @@ async function setup(name) {
   await writeFile(join(root, 'dist/src/daemon.js'), 'console.log(JSON.stringify(process.argv.slice(2)));');
   await writeFile(join(root, 'web/index.html'), '<!doctype html>');
   await writeFile(join(root, 'assets/octopulse-mark-small-white.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  await writeFile(join(root, 'config.example.toml'), '[github]\ntoken="REPLACE_WITH_A_GITHUB_TOKEN"\n');
   await writeFile(config, '[github]\ntoken="synthetic-secret"\n');
   await writeFile(join(profile, 'state.sqlite'), 'existing synthetic state');
   const bundle = join(base, 'bundle'); await mkdir(bundle);
@@ -35,6 +37,35 @@ const healthy = async url => {
 const managedFiles = fixture => [fixture.unit, fixture.launcher, fixture.identity];
 const contents = fixture => Promise.all(managedFiles(fixture).map(path => readFile(path, 'utf8')));
 try {
+  const fresh = await setup('fresh-install');
+  const installPaths = [...managedFiles(fresh), fresh.config];
+  for (const path of installPaths) await rm(path);
+  const installCalls = [];
+  const installRun = async (file, args) => { installCalls.push([file, args]); return { stdout: '', stderr: '' }; };
+  const installed = await installUserService(fresh.root, fresh.home, { run: installRun });
+  assert.deepEqual(installed.created, installPaths);
+  assert.equal(installed.config, fresh.config);
+  assert.equal(await readFile(fresh.config, 'utf8'), await readFile(join(fresh.root, 'config.example.toml'), 'utf8'));
+  for (const path of installPaths) assert.equal((await stat(path)).mode & 0o777, path === fresh.launcher ? 0o700 : 0o600);
+  assert.deepEqual(installCalls, [['systemctl', ['--user', 'daemon-reload']]]);
+  assert.equal((await deployUserService(fresh.root, fresh.home, { run: installRun, request: healthy })).metadataChanged, false);
+  const installedLaunch = spawnSync(fresh.launcher, ['--probe'], { encoding: 'utf8' });
+  assert.equal(installedLaunch.status, 0, installedLaunch.stderr);
+  assert.deepEqual(JSON.parse(installedLaunch.stdout), ['--instance', 'octopulse', '--port', '3000', '--config', fresh.config, '--profile', fresh.profile, '--probe']);
+  for (const path of installPaths) await writeFile(path, 'User-owned content');
+  const installTimes = await Promise.all(installPaths.map(async path => (await stat(path, { bigint: true })).mtimeNs));
+  installCalls.length = 0;
+  assert.deepEqual((await installUserService(fresh.root, fresh.home, { run: installRun })).created, []);
+  assert.deepEqual(await Promise.all(installPaths.map(path => readFile(path, 'utf8'))), installPaths.map(() => 'User-owned content'));
+  assert.deepEqual(await Promise.all(installPaths.map(async path => (await stat(path, { bigint: true })).mtimeNs)), installTimes);
+  assert.deepEqual(installCalls, []);
+  await rm(fresh.config);
+  assert.deepEqual((await installUserService(fresh.root, fresh.home, { run: installRun })).created, [fresh.config]);
+  assert.deepEqual(installCalls, []);
+  assert.equal(await readFile(fresh.unit, 'utf8'), 'User-owned content');
+  assert.equal(await readFile(join(fresh.profile, 'state.sqlite'), 'utf8'), 'existing synthetic state');
+  await assert.rejects(installUserService('relative', fresh.home, { run: installRun }), /Absolute single-line/);
+
   const fixture = await setup('migration');
   const before = await contents(fixture);
   const calls = [];
