@@ -1,5 +1,5 @@
 import { filters } from './filters.js';
-import type { HistoryPage, PrPage, PrView } from './views.js';
+import type { ActivityPage, HistoryPage, PrPage, PrView } from './views.js';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const content = element<HTMLElement>('content');
@@ -16,6 +16,12 @@ let dialogEpoch = 0;
 let renderedView: string | undefined;
 let showingPrevious = false;
 const expanded = new Set<string>();
+const activityControllers = new Set<AbortController>();
+
+function clearContent(): void {
+  for (const request of activityControllers) request.abort();
+  activityControllers.clear(); content.replaceChildren();
+}
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
   const result = document.createElement(tag);
@@ -109,7 +115,7 @@ function filterControls(repositories: string[], isHistory: boolean): void {
           const next = all.includes(value) ? all.filter(item => item !== value) : [...all, value];
           query.delete('pr-state'); (next.length ? next : ['all']).forEach(item => query.append('pr-state', item));
         }
-      }, isHistory);
+      }, true);
       }, selected.includes(value));
       control.dataset.focusKey = `filter:${title}:${value}`; choices.append(control);
     }
@@ -142,7 +148,7 @@ function filterControls(repositories: string[], isHistory: boolean): void {
   };
   const choose = (value: string) => {
     close(); input.value = value;
-    changeQuery(query => { query.set('repo', value); }, isHistory);
+    changeQuery(query => { query.set('repo', value); }, true);
   };
   const show = (query = '') => {
     const search = query.trim().toLowerCase();
@@ -172,7 +178,7 @@ function filterControls(repositories: string[], isHistory: boolean): void {
   });
   picker.addEventListener('focusout', event => { if (!(event.relatedTarget instanceof Node) || !picker.contains(event.relatedTarget)) close(); });
   picker.append(input, list); repositoryFilter.append(label, picker); controls.append(repositoryFilter);
-  const clear = button('Clear filters', () => changeQuery(query => { query.delete('pr-state'); query.set('pr-state', 'all'); query.delete('repo'); query.delete('actor-type'); }, isHistory));
+  const clear = button('Clear filters', () => changeQuery(query => { query.delete('pr-state'); query.set('pr-state', 'all'); query.delete('repo'); query.delete('actor-type'); }, true));
   clear.className = 'clear-filters'; clear.dataset.focusKey = 'clear-filters'; controls.append(clear);
   if (restoreRepositoryFocus) { input.focus(); close(); }
 }
@@ -203,7 +209,9 @@ function prSummary(pr: Pick<PrView, 'snapshot' | 'state' | 'tracked'>, activityC
 }
 function prCard(pr: PrView): HTMLElement {
   const card = node('details', undefined, 'pr'); card.open = expanded.has(pr.id); card.dataset.pr = pr.id;
-  card.addEventListener('toggle', () => { if (card.open) expanded.add(pr.id); else expanded.delete(pr.id); });
+  card.addEventListener('toggle', () => {
+    if (card.open) { expanded.add(pr.id); if (!loaded) void loadActivity(); } else expanded.delete(pr.id);
+  });
   const summary = node('summary'); summary.setAttribute('aria-label', `Details for ${pr.snapshot.repository} #${pr.snapshot.number}: ${pr.snapshot.title}`);
   const review = node('div', undefined, 'review-status');
   const direct = pr.groups.requested.some(person => person.login.toLowerCase() === identity?.login.toLowerCase());
@@ -250,22 +258,56 @@ function prCard(pr: PrView): HTMLElement {
   const columns = node('div', undefined, 'detail-columns');
   const activitySection = node('section', undefined, 'activity-section'); activitySection.append(node('h3', 'Activity timeline'));
   const timeline = node('ol', undefined, 'timeline');
-  for (const activity of pr.timeline) {
-    const item = node('li'); const header = node('div', undefined, 'meta');
-    if (activity.event.actor) header.append(avatar(activity.event.actor.login, activity.event.actor.avatar ?? null));
-    header.append(node('strong', `${activity.event.actor?.login ? `${activity.event.actor.login}: ` : ''}${activity.event.kind.replaceAll('_', ' ')}`),
-      time(activity.event.occurredAt));
-    if (activity.decision !== 'eligible') header.append(node('span', activity.decision.replaceAll('_', ' '), 'badge'));
-    item.append(header);
-    if (activity.bodyHtml) {
-      const body = node('div', undefined, 'comment-body');
-      // Only the server's allowlisted Markdown output enters this HTML sink.
-      body.innerHTML = activity.bodyHtml; item.append(body);
-    } else if (activity.event.body) item.append(node('p', activity.event.body));
-    timeline.append(item);
+  const activityStatus = node('p', 'Expand to load saved activity.', 'muted'); activityStatus.setAttribute('role', 'status');
+  let loaded = false;
+  let loading = false;
+  let nextCursor: string | null = null;
+  const more = button('Load more activity', () => { void loadActivity(); }); more.hidden = true;
+  async function loadActivity(): Promise<void> {
+    if (loading || !card.isConnected) return;
+    const restoreFocus = document.activeElement === more;
+    const request = new AbortController(); activityControllers.add(request);
+    loading = true; more.disabled = true; activitySection.setAttribute('aria-busy', 'true'); activityStatus.textContent = 'Loading saved activity…';
+    try {
+      const query = nextCursor ? `?${new URLSearchParams({ cursor: nextCursor })}` : '';
+      const response = await api(`/api/pull-requests/${encodeURIComponent(pr.id)}/activity${query}`, { signal: request.signal });
+      if (request.signal.aborted || !card.isConnected) return;
+      if (!response || typeof response !== 'object' || !('items' in response) || !Array.isArray(response.items)
+        || !('total' in response) || !Number.isSafeInteger(response.total)
+        || !('nextCursor' in response) || !(response.nextCursor === null || typeof response.nextCursor === 'string')) {
+        throw new Error('Activity response is invalid');
+      }
+      const page = response as ActivityPage;
+      for (const activity of page.items) {
+        const item = node('li'); const header = node('div', undefined, 'meta');
+        if (activity.event.actor) header.append(avatar(activity.event.actor.login, activity.event.actor.avatar ?? null));
+        header.append(node('strong', `${activity.event.actor?.login ? `${activity.event.actor.login}: ` : ''}${activity.event.kind.replaceAll('_', ' ')}`),
+          time(activity.event.occurredAt));
+        if (activity.decision !== 'eligible') header.append(node('span', activity.decision.replaceAll('_', ' '), 'badge'));
+        item.append(header);
+        if (activity.bodyHtml) {
+          const body = node('div', undefined, 'comment-body');
+          // Only the server's allowlisted Markdown output enters this HTML sink.
+          body.innerHTML = activity.bodyHtml; item.append(body);
+        } else if (activity.event.body) item.append(node('p', activity.event.body));
+        timeline.append(item);
+      }
+      loaded = true; nextCursor = page.nextCursor;
+      activityStatus.textContent = page.total ? `${timeline.childElementCount} of ${page.total} activities loaded.` : 'No saved activity.';
+      more.textContent = 'Load more activity'; more.hidden = nextCursor === null;
+    } catch (error) {
+      if (!card.isConnected) return;
+      activityStatus.textContent = `Unable to load activity. ${error instanceof Error ? error.message : 'Try again.'}`;
+      more.textContent = 'Retry loading activity'; more.hidden = false;
+    } finally {
+      activityControllers.delete(request);
+      loading = false; more.disabled = false; activitySection.removeAttribute('aria-busy');
+      if (restoreFocus && card.isConnected && document.activeElement === document.body) {
+        activitySection.tabIndex = -1; (more.hidden ? activitySection : more).focus({ preventScroll: true });
+      }
+    }
   }
-  activitySection.append(timeline);
-  if (!pr.timeline.length) activitySection.append(node('p', 'No saved activity.', 'muted'));
+  activitySection.append(timeline, activityStatus, more);
   const ciSection = node('section', undefined, 'ci-section'); ciSection.append(node('h3', 'Current-head CI'));
   if (pr.ci.uncertain) ciSection.append(node('p', 'Workflow ordering is uncertain. Last established results are retained.', 'muted'));
   if (!pr.ci.workflows.length) ciSection.append(node('p', 'No current-head workflow results.', 'muted'));
@@ -281,15 +323,15 @@ function renderPrs(data: PrPage): void {
   const selected = new URLSearchParams(location.search).get('tab');
   const tab = selected === 'needs-my-review' || selected === 'review-requested' ? selected : 'my-prs';
   for (const [key, label] of [['my-prs', 'My PRs'], ['needs-my-review', 'Needs My Review'], ['review-requested', 'Review Requests']] as const) {
-    const queue = button('', () => changeQuery(query => query.set('tab', key)), key === tab);
+    const queue = button('', () => changeQuery(query => query.set('tab', key), true), key === tab);
     queue.setAttribute('aria-label', `${label} (${data.counts[key]})`);
     queue.dataset.focusKey = `queue:${key}`;
     queue.append(node('span', label), node('span', String(data.counts[key]), 'queue-count')); tabs.append(queue);
   }
-  const items = data.items.filter(item => item.queue === (tab === 'review-requested' ? 'review-requests' : tab));
+  const items = data.items;
   const summary = element('result-summary'); summary.hidden = false;
-  summary.replaceChildren(node('span', `${items.length} pull ${items.length === 1 ? 'request' : 'requests'}`));
-  content.replaceChildren();
+  summary.replaceChildren(node('span', `${data.total} pull ${data.total === 1 ? 'request' : 'requests'}`));
+  clearContent();
   if (items.length) {
     const headings = node('div', undefined, 'list-headings'); headings.setAttribute('aria-hidden', 'true');
     for (const label of ['', 'Pull request', 'Review', 'Current-head CI', 'Reviewers', 'Updated ↓']) headings.append(node('span', label));
@@ -299,9 +341,17 @@ function renderPrs(data: PrPage): void {
     const empty = node('div', undefined, 'empty'); empty.append(node('span', '✓', 'empty-symbol'), node('h2', 'No matching pull requests'),
       node('p', 'No pull requests match this queue and its filters.'), node('p', 'Try another queue or adjust the filters above.', 'empty-hint')); content.append(empty);
   }
+  if (data.pages > 1) content.append(pagination(data, 'Pull request pages'));
+}
+function pagination(data: Pick<HistoryPage, 'page' | 'pages' | 'from' | 'to' | 'total'>, label: string): HTMLElement {
+  const result = node('nav', undefined, 'pagination'); result.setAttribute('aria-label', label); result.tabIndex = -1;
+  const previous = button('Previous', () => changeQuery(query => query.set('page', String(data.page - 1)))); previous.disabled = data.page <= 1;
+  const next = button('Next', () => changeQuery(query => query.set('page', String(data.page + 1)))); next.disabled = data.page >= data.pages;
+  previous.dataset.focusKey = 'page:previous'; next.dataset.focusKey = 'page:next';
+  result.append(previous, node('span', `${data.from}–${data.to} of ${data.total} · Page ${data.page} of ${data.pages}`), next); return result;
 }
 function renderHistory(data: HistoryPage): void {
-  filterControls(data.repositories, true); tabs.replaceChildren(); content.replaceChildren();
+  filterControls(data.repositories, true); tabs.replaceChildren(); clearContent();
   for (const record of data.items) {
     const card = node('details', undefined, 'notification'); const header = node('summary', undefined, 'notification-header');
     const snapshot = record.pr.snapshot;
@@ -323,14 +373,10 @@ function renderHistory(data: HistoryPage): void {
     body.append(preview, delivery); card.append(header, body); content.append(card);
   }
   if (!data.items.length) content.append(node('p', 'No notifications match these filters.', 'empty'));
-  const pagination = node('nav', undefined, 'pagination'); pagination.setAttribute('aria-label', 'Notification pages'); pagination.tabIndex = -1;
-  const previous = button('Previous', () => changeQuery(query => query.set('page', String(data.page - 1)))); previous.disabled = data.page <= 1;
-  const next = button('Next', () => changeQuery(query => query.set('page', String(data.page + 1)))); next.disabled = data.page >= data.pages;
-  previous.dataset.focusKey = 'page:previous'; next.dataset.focusKey = 'page:next';
-  pagination.append(previous, node('span', `${data.from}–${data.to} of ${data.total} · Page ${data.page} of ${data.pages}`), next); content.append(pagination);
+  content.append(pagination(data, 'Notification pages'));
 }
 function renderLogs(data: { items: { at: string; level: string; message: string; context?: unknown }[] }): void {
-  tabs.replaceChildren(); controls.replaceChildren(); content.replaceChildren();
+  tabs.replaceChildren(); controls.replaceChildren(); clearContent();
   const label = node('label', 'Exact level'); const select = node('select'); select.setAttribute('aria-label', 'Log level');
   select.dataset.focusKey = 'log-level';
   for (const level of ['', 'debug', 'info', 'warn', 'error']) { const option = node('option', level || 'All'); option.value = level; select.append(option); }
@@ -356,7 +402,7 @@ async function load(): Promise<void> {
   const path = location.pathname;
   const title = path === '/logs' ? 'Logs' : path === '/notification-history' ? 'Notification History' : 'Pull Requests';
   if (!renderedView || new URL(renderedView).pathname !== path) {
-    renderedView = undefined; content.replaceChildren(); controls.replaceChildren(); tabs.replaceChildren(); element('result-summary').hidden = true;
+    renderedView = undefined; clearContent(); controls.replaceChildren(); tabs.replaceChildren(); element('result-summary').hidden = true;
     element('identity').textContent = 'Loading identity…';
   }
   document.querySelector('main')!.setAttribute('aria-label', title); document.title = `${title} · Octopulse`; element('track').hidden = path !== '/';

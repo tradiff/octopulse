@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { request } from 'node:http';
 import { test } from 'node:test';
 import { filters } from '../src/filters.js';
-import { pullRequests, notificationHistory } from '../src/views.js';
+import { pullRequests, pullRequestActivity, notificationHistory } from '../src/views.js';
 import { listenLocal } from '../src/server.js';
-import { Event } from '../src/model.js';
+import { Activity, Event, Snapshot } from '../src/model.js';
+import { ActivityCursor } from '../src/store.js';
 import { startApplication } from '../src/application.js';
 import { parseConfig } from '../src/config.js';
 import { Profile } from '../src/profile.js';
@@ -30,13 +31,14 @@ test('PR projection partitions queues, groups reviewers, separates blocked teams
   assert.equal(own.ci.counts.pending, 1, 'Conflict-free mergeability does not imply finished CI');
   let page = pullRequests(store, monitor, new URLSearchParams());
   assert.deepEqual(page.counts, { 'my-prs': 1, 'needs-my-review': 2, 'review-requested': 1 });
-  assert.equal(page.items.find(pr => pr.id === 'B')!.state, 'draft');
-  const team = page.items.find(pr => pr.id === 'C')!;
+  const reviewPage = pullRequests(store, monitor, new URLSearchParams('tab=needs-my-review'));
+  assert.equal(reviewPage.items.find(pr => pr.id === 'B')!.state, 'draft');
+  const team = reviewPage.items.find(pr => pr.id === 'C')!;
   assert.equal(team.merge, 'Blocked by rules'); assert.deepEqual(team.pendingTeams, ['acme/platform']);
   assert.equal(page.items.find(pr => pr.id === 'A')!.ci.counts.pending, 1);
   monitor.untrack('B');
   page = pullRequests(store, monitor, new URLSearchParams('pr-state=all'));
-  assert.equal(page.items.find(pr => pr.id === 'B')!.queue, 'needs-my-review');
+  assert.equal(pullRequests(store, monitor, new URLSearchParams('pr-state=all&tab=needs-my-review')).items.find(pr => pr.id === 'B')!.queue, 'needs-my-review');
   assert.equal(page.items.find(pr => pr.id === 'E')!.merge, null);
   const pr = store.pr('A')!;
   await monitor.observe({ snapshot: { ...pr.snapshot, head: 'h2', requestedReviewers: ['CAM', 'robot'], requestedActors: [{ login: 'robot', bot: true }] },
@@ -44,7 +46,7 @@ test('PR projection partitions queues, groups reviewers, separates blocked teams
   const changed = pullRequests(store, monitor, new URLSearchParams()).items.find(pr => pr.id === 'A')!;
   assert.deepEqual(changed.groups.approvers, []); assert.deepEqual(changed.groups.requested.map(person => person.login.toLowerCase()), ['cam']);
   assert.deepEqual(changed.ci.workflows, []);
-  assert.ok(changed.timeline.some(item => item.decision === 'self'));
+  assert.ok(pullRequestActivity(store, store.pr('A')!, null).items.some(item => item.decision === 'self'));
   assert.ok(changed.groups.commenters.some(person => person.login === 'alex'));
 });
 
@@ -71,6 +73,79 @@ test('history filters before counting, clamps pages, preserves bundles and uses 
   const inactive = notificationHistory(store, new URLSearchParams('pr-state=inactive&pr-state=closed'));
   assert.ok(inactive.total > 50); assert.equal(inactive.items[0]!.pr.snapshot.title, 'Renamed current PR');
   assert.notEqual(inactive.items[0]!.intent.title, 'Renamed current PR');
+});
+
+test('PR pages filter and count queues in storage with stable ordering and bounded projections', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  const { store, monitor } = fixture;
+  for (let i = 0; i < 105; i++) monitor.track(Snapshot.parse({ id: `page-${i}`, repository: 'acme/pages', number: i + 1,
+    title: `Page PR ${i}`, author: 'ALEX' }), 'manual');
+  t.mock.method(store, 'prs', () => { throw new Error('Unbounded PR read'); });
+  t.mock.method(store, 'activities', () => { throw new Error('Unbounded activity read'); });
+  const projections = t.mock.method(store, 'activitySummary');
+  const first = pullRequests(store, monitor, new URLSearchParams('repo=acme/pages'));
+  assert.deepEqual([first.total, first.pages, first.items.length, projections.mock.callCount()], [105, 3, 50, 50]);
+  assert.deepEqual(first.items.slice(0, 2).map(pr => pr.id), ['page-104', 'page-103']);
+  const second = pullRequests(store, monitor, new URLSearchParams('repo=acme/pages&page=2'));
+  const last = pullRequests(store, monitor, new URLSearchParams('repo=acme/pages&page=9999'));
+  assert.equal(last.page, 3); assert.equal(last.items.length, 5);
+  assert.equal(new Set([...first.items, ...second.items, ...last.items].map(pr => pr.id)).size, 105);
+  assert.deepEqual(first.counts, { 'my-prs': 105, 'needs-my-review': 0, 'review-requested': 0 });
+  const empty = pullRequests(store, monitor, new URLSearchParams('repo=acme/pages&tab=needs-my-review&page=99'));
+  assert.deepEqual([empty.page, empty.pages, empty.total, empty.items.length], [1, 1, 0, 0]);
+  for (const invalid of ['0', '-1', 'NaN', '1.5', 'Infinity']) {
+    assert.equal(pullRequests(store, monitor, new URLSearchParams(`repo=acme/pages&page=${invalid}`)).page, 1);
+  }
+});
+
+test('activity is fetched separately in visible, ordered pages without parsing full histories', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  const { store, monitor } = fixture;
+  const original = store.activities('A')[0]!;
+  store.transaction(() => {
+    for (let i = 0; i < 120; i++) store.saveActivity('A', Activity.parse({ ...original, event: { ...original.event,
+      id: `paged:${String(i).padStart(3, '0')}`, body: '**On demand only**', occurredAt: '2026-10-23T12:00:00Z' } }));
+    store.saveActivity('A', { ...original, visible: false, event: { ...original.event, id: 'hidden', occurredAt: '2026-10-24T12:00:00Z' } });
+  });
+  t.mock.method(store, 'activities', () => { throw new Error('Unbounded activity read'); });
+  const summary = pullRequests(store, monitor, new URLSearchParams()).items[0]!;
+  assert.equal(summary.activityCount, 123); assert.equal(summary.latestAt, '2026-10-23T12:00:00Z');
+  assert.doesNotMatch(JSON.stringify(summary), /On demand only|bodyHtml|timeline/);
+  const first = await (await fetch(fixture.local.origin + '/api/pull-requests/A/activity')).json() as ReturnType<typeof pullRequestActivity>;
+  assert.equal(first.items.length, 50); assert.equal(first.total, 123); assert.ok(first.nextCursor);
+  assert.equal(first.items[0]!.event.id, 'paged:119'); assert.match(first.items[0]!.bodyHtml, /<strong>On demand only<\/strong>/);
+  store.saveActivity('A', { ...original, event: { ...original.event, id: 'newer', occurredAt: '2026-10-24T12:00:00Z' } });
+  const second = pullRequestActivity(store, store.pr('A')!, ActivityCursor.parse(JSON.parse(first.nextCursor!)));
+  const last = pullRequestActivity(store, store.pr('A')!, ActivityCursor.parse(JSON.parse(second.nextCursor!)));
+  const items = [...first.items, ...second.items, ...last.items];
+  assert.equal(new Set(items.map(item => item.event.id)).size, 123); assert.ok(items.every(item => item.visible));
+  assert.ok(items.every(item => item.event.id !== 'newer'), 'New arrivals do not shift or duplicate older activity pages');
+  assert.equal(last.nextCursor, null);
+  assert.equal((await fetch(fixture.local.origin + '/api/pull-requests/missing/activity')).status, 404);
+  assert.equal((await fetch(fixture.local.origin + '/api/pull-requests/%ZZ/activity')).status, 400);
+  for (const cursor of ['bad', '{}', 'null', '{"at":"not-a-date","key":"x"}']) {
+    assert.equal((await fetch(fixture.local.origin + '/api/pull-requests/A/activity?' + new URLSearchParams({ cursor }))).status, 400);
+  }
+});
+
+test('indexed actor summaries preserve latest profiles, historical bot flags and commenter membership', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  const { store } = fixture;
+  const original = store.activities('A')[0]!;
+  for (const [id, kind, actor] of [
+    ['first', 'comment', { login: 'DEV', bot: false, avatar: 'https://example.com/old.png' }],
+    ['latest', 'approval', { login: 'dev', bot: false, avatar: 'https://example.com/latest.png' }],
+    ['bot-first', 'comment', { login: 'automation', bot: true }],
+    ['bot-latest', 'comment', { login: 'AUTOMATION', bot: false }],
+  ] as const) store.saveActivity('A', { ...original, event: { ...original.event, id, kind, actor: { ...actor } } });
+  const people = store.activitySummary('A').people;
+  const dev = people.find(person => person.actor.login === 'dev')!;
+  assert.deepEqual(dev, { actor: { login: 'dev', bot: false, avatar: 'https://example.com/latest.png' }, bot: false, commenter: true });
+  assert.equal(people.filter(person => person.actor.login.toLowerCase() === 'dev').length, 1);
+  assert.equal(people.find(person => person.actor.login === 'AUTOMATION')!.bot, true);
+  const view = pullRequests(store, fixture.monitor, new URLSearchParams()).items[0]!;
+  assert.ok(view.groups.commenters.some(person => person.login === 'dev'));
+  assert.ok(Object.values(view.groups).flat().every(person => person.login.toLowerCase() !== 'automation'));
 });
 
 test('local routes, HEAD, mutation statuses, validation and same-origin protection', async t => {

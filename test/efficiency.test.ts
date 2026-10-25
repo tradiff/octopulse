@@ -10,9 +10,10 @@ import { Delivery } from '../src/delivery.js';
 import { AvatarCache, DesktopAdapter } from '../src/desktop.js';
 import type { DesktopMessage } from '../src/desktop.js';
 import { Monitor } from '../src/monitor.js';
-import { Notification, Snapshot } from '../src/model.js';
+import { Activity, Notification, Snapshot } from '../src/model.js';
 import { Scheduler } from '../src/scheduler.js';
-import { Store } from '../src/store.js';
+import { ActivityCursor, Store } from '../src/store.js';
+import { notificationHistory, pullRequests, pullRequestActivity } from '../src/views.js';
 import { parseConfig } from '../src/config.js';
 import { startRuntime } from '../src/runtime.js';
 import { startApplication } from '../src/application.js';
@@ -93,6 +94,54 @@ test('idle delivery work does not read or parse 10,000 sent notifications', asyn
   const plan = db.prepare('EXPLAIN QUERY PLAN ' + dueQuery).all(clock.now(), 4) as { detail: string }[];
   assert.ok(plan.some(row => /SEARCH notifications USING.*notifications_delivery_due/.test(row.detail)), JSON.stringify(plan));
   assert.ok(plan.every(row => !/SCAN notifications|TEMP B-TREE/.test(row.detail)), JSON.stringify(plan));
+});
+
+test('notification history parses only a storage page out of 10,000 records', async t => {
+  const { store } = await setup(t);
+  store.transaction(() => { for (let i = 0; i < 10_000; i++) store.insertNotification(notification()); });
+  t.mock.method(store, 'notifications', () => { throw new Error('Unbounded notification read'); });
+  t.mock.method(store, 'activities', () => { throw new Error('Unbounded activity read'); });
+  t.mock.method(store, 'prs', () => { throw new Error('Unbounded PR read'); });
+  const parse = t.mock.method(Notification, 'parse');
+  const started = performance.now();
+  const page = notificationHistory(store, new URLSearchParams('page=100'));
+  assert.equal(page.items.length, 50); assert.equal(page.total, 10_000); assert.equal(page.pages, 200);
+  assert.equal(page.items[0]!.id, 5050); assert.equal(page.items.at(-1)!.id, 5001);
+  assert.equal(parse.mock.callCount(), 50);
+  t.diagnostic(JSON.stringify({ historyRecords: 10_000, parsedRecords: parse.mock.callCount(), elapsedMs: performance.now() - started }));
+});
+
+test('10,000 activities stay out of PR summaries and load through an indexed cursor', async t => {
+  const { store, monitor, path } = await setup(t);
+  const activity = Activity.parse({ event: { source: 'issue_comment', kind: 'comment', id: '0', occurredAt: T,
+    actor: { login: 'bea' }, body: '**Only render when expanded**'.repeat(40) }, observedAt: T,
+    actorType: 'human_other', decision: 'eligible', delivery: 'bundle', classification: null, visible: true });
+  store.transaction(() => { for (let i = 0; i < 10_000; i++) store.saveActivity('A', { ...activity, event: { ...activity.event, id: String(i).padStart(5, '0') } }); });
+  t.mock.method(store, 'activities', () => { throw new Error('Unbounded activity read'); });
+  const parse = t.mock.method(Activity, 'parse');
+  const started = performance.now();
+  const summary = pullRequests(store, monitor, new URLSearchParams());
+  assert.equal(parse.mock.callCount(), 0);
+  assert.equal(summary.items[0]!.activityCount, 10_000);
+  assert.doesNotMatch(JSON.stringify(summary), /Only render|bodyHtml|timeline/);
+  const first = pullRequestActivity(store, store.pr('A')!, null);
+  assert.equal(first.items.length, 50); assert.equal(parse.mock.callCount(), 51);
+  const prepare = Database.prototype.prepare;
+  const queries: string[] = [];
+  const trace = t.mock.method(Database.prototype, 'prepare', function(this: Database.Database, sql: string) {
+    queries.push(sql); return prepare.call(this, sql);
+  });
+  const cursor = ActivityCursor.parse(JSON.parse(first.nextCursor!));
+  const second = pullRequestActivity(store, store.pr('A')!, cursor);
+  trace.mock.restore();
+  assert.equal(second.items.length, 50); assert.equal(second.items[0]!.event.id, '09949');
+  const query = queries.find(sql => /SELECT data FROM activities/.test(sql))!;
+  const db = new Database(path); t.after(() => db.close());
+  const plan = db.prepare('EXPLAIN QUERY PLAN ' + query).all('A', cursor.at, cursor.key) as { detail: string }[];
+  assert.ok(plan.some(row => /SEARCH activities USING.*activities_visible_time/.test(row.detail)), JSON.stringify(plan));
+  assert.ok(plan.every(row => !/TEMP B-TREE/.test(row.detail)), JSON.stringify(plan));
+  t.diagnostic(JSON.stringify({ activityRecords: 10_000, summaryBytes: Buffer.byteLength(JSON.stringify(summary)), activityPageSize: first.items.length,
+    elapsedMs: performance.now() - started }));
 });
 
 test('an unchanged collection still commits previously interrupted decisions exactly once', async t => {

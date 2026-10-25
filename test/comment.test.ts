@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { parseFragment } from 'parse5';
 import { commentHtml } from '../src/comment.js';
 import { readable } from '../src/presentation.js';
-import { pullRequests } from '../src/views.js';
+import { pullRequestActivity } from '../src/views.js';
 import { webFixture } from './web-fixture.js';
 import { reviewComment } from './comment-fixture.js';
 
@@ -69,8 +69,8 @@ test('long code and text remain complete and escaped; malformed markup cannot ad
 
 test('web projection adds rich comments without changing stored bodies or notification excerpts', async t => {
   const fixture = await webFixture(true); t.after(() => fixture.close());
-  const pr = pullRequests(fixture.store, fixture.monitor, new URLSearchParams()).items.find(item => item.id === 'A')!;
-  const comment = pr.timeline.find(item => item.event.id === 'hello')!;
+  const pr = fixture.store.pr('A')!;
+  const comment = pullRequestActivity(fixture.store, pr, null).items.find(item => item.event.id === 'hello')!;
   assert.match(comment.bodyHtml, /<details>/);
   assert.equal(comment.event.body, readable(reviewComment));
   assert.equal(fixture.store.activities('A').find(item => item.event.id === 'hello')!.event.body, reviewComment);

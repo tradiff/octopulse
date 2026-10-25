@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { z } from 'zod';
-import { Activity, Attempt, Instant, Notification, PullRequest, Staged, canonical } from './model.js';
+import { Activity, Actor, Attempt, Instant, Notification, PullRequest, Snapshot, Staged, canonical, eventKey } from './model.js';
+import { filters } from './filters.js';
 
 const Row = z.object({ data: z.string() });
 const IdRow = Row.extend({ id: z.number().int() });
@@ -8,6 +9,26 @@ const automaticDelivery = `json_extract(data, '$.automatic') = 1 AND json_extrac
   AND json_extract(data, '$.runningAt') IS NULL`;
 const deliveryAt = `min(coalesce(julianday(json_extract(data, '$.nextAttemptAt')), julianday(json_extract(data, '$.preparedAt'), '+1 day')),
   julianday(json_extract(data, '$.preparedAt'), '+1 day'))`;
+const activityTime = "julianday(json_extract(data, '$.event.occurredAt'))";
+const activityKey = "(source || ':' || source_id) COLLATE BINARY";
+export const ActivityCursor = z.strictObject({ at: Instant, key: z.string().min(1) });
+
+function prWhere(filter: ReturnType<typeof filters>): { sql: string; values: (string | number)[] } {
+  const clauses: string[] = [];
+  const values: (string | number)[] = [];
+  if (filter.repository) { clauses.push("json_extract(p.data, '$.snapshot.repository') = ?"); values.push(filter.repository); }
+  for (const [path, selected] of [['tracked', filter.tracking.map(value => value === 'tracked' ? 1 : 0)], ['snapshot.state', filter.lifecycle]] as const) {
+    if (selected.length) { clauses.push(`json_extract(p.data, '$.${path}') IN (${selected.map(() => '?').join(',')})`); values.push(...selected); }
+  }
+  return { sql: clauses.length ? clauses.join(' AND ') : '1', values };
+}
+
+function pageBounds(total: number, query: URLSearchParams) {
+  const pages = Math.max(1, Math.ceil(total / 50));
+  const requested = Number(query.get('page') ?? 1);
+  const page = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, pages) : 1;
+  return { page, pages, total, from: total ? (page - 1) * 50 + 1 : 0, to: Math.min(page * 50, total) };
+}
 
 export class Store {
   private readonly db: Database.Database;
@@ -45,6 +66,12 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS notifications_delivery_due ON notifications(${deliveryAt}, id) WHERE ${automaticDelivery};
       CREATE INDEX IF NOT EXISTS notifications_running ON notifications(id) WHERE json_extract(data, '$.runningAt') IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS notifications_history ON notifications(julianday(json_extract(data, '$.createdAt')) DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS activities_visible_time ON activities(pr_id, ${activityTime} DESC, ${activityKey} DESC)
+        WHERE json_extract(data, '$.visible') = 1;
+      CREATE INDEX IF NOT EXISTS activities_people ON activities(pr_id, lower(json_extract(data, '$.event.actor.login')),
+        json_extract(data, '$.event.actor'), json_extract(data, '$.event.actor.bot'), json_extract(data, '$.event.kind'))
+        WHERE json_extract(data, '$.event.actor') IS NOT NULL;
       CREATE INDEX IF NOT EXISTS attempts_notification ON attempts(notification_id);
       CREATE TABLE IF NOT EXISTS failed_inputs (
         id INTEGER PRIMARY KEY AUTOINCREMENT, pr_id TEXT NOT NULL REFERENCES pull_requests(id),
@@ -117,10 +144,6 @@ export class Store {
       .map(row => PullRequest.parse(JSON.parse(Row.parse(row).data)));
   }
 
-  prCreationOrder(): string[] {
-    return z.array(z.string()).parse(this.db.prepare('SELECT id FROM pull_requests ORDER BY rowid DESC').pluck().all());
-  }
-
   savePr(pr: PullRequest): void {
     this.db.prepare('INSERT INTO pull_requests VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
       .run(pr.snapshot.id, JSON.stringify(pr));
@@ -129,6 +152,89 @@ export class Store {
   activities(prId: string): Activity[] {
     return this.db.prepare('SELECT data FROM activities WHERE pr_id = ? ORDER BY rowid').all(prId)
       .map(row => Activity.parse(JSON.parse(Row.parse(row).data)));
+  }
+
+  repositories(): string[] {
+    return z.array(z.string()).parse(this.db.prepare("SELECT DISTINCT json_extract(data, '$.snapshot.repository') FROM pull_requests ORDER BY 1").pluck().all());
+  }
+
+  pullRequestPage(query: URLSearchParams, user: string, teams: string[]) {
+    const filter = filters(query);
+    const where = prWhere(filter);
+    const queue = `CASE WHEN lower(json_extract(p.data, '$.snapshot.author')) = ? THEN 'my-prs'
+      WHEN json_extract(p.data, '$.snapshot.state') = 'open' AND (
+        EXISTS (SELECT 1 FROM json_each(p.data, '$.snapshot.requestedReviewers') WHERE lower(value) = ?)
+        OR EXISTS (SELECT 1 FROM json_each(p.data, '$.snapshot.requestedTeams') WHERE value IN (SELECT value FROM json_each(?)))
+      ) THEN 'needs-my-review' ELSE 'review-requests' END`;
+    const cte = `WITH filtered AS (SELECT p.rowid creation_order, p.id, p.data, ${queue} queue FROM pull_requests p WHERE ${where.sql})`;
+    const values = [canonical(user), canonical(user), JSON.stringify(teams), ...where.values];
+    const rows = z.array(z.object({ queue: z.string(), count: z.number().int() })).parse(this.db.prepare(`${cte} SELECT queue, count(*) count FROM filtered GROUP BY queue`).all(...values));
+    const counts = { 'my-prs': 0, 'needs-my-review': 0, 'review-requested': 0 };
+    for (const row of rows) counts[row.queue === 'review-requests' ? 'review-requested' : row.queue as keyof typeof counts] = row.count;
+    const tab = query.get('tab');
+    const selected = tab === 'needs-my-review' || tab === 'review-requested' ? tab : 'my-prs';
+    const bounds = pageBounds(counts[selected], query);
+    const items = this.db.prepare(`${cte} SELECT data FROM filtered p WHERE queue = ? ORDER BY
+      coalesce((SELECT ${activityTime} FROM activities WHERE pr_id = p.id AND json_extract(data, '$.visible') = 1
+        ORDER BY ${activityTime} DESC, ${activityKey} DESC LIMIT 1),
+        julianday(json_extract(p.data, '$.recordedAt')), julianday(json_extract(p.data, '$.snapshot.updatedAt')), julianday('1970-01-01')) DESC,
+      creation_order DESC LIMIT 50 OFFSET ?`).all(...values, selected === 'review-requested' ? 'review-requests' : selected, (bounds.page - 1) * 50)
+      .map(row => PullRequest.parse(JSON.parse(Row.parse(row).data)));
+    return { ...bounds, counts, items };
+  }
+
+  activitySummary(prId: string) {
+    const summary = z.object({ count: z.number().int(), latestAt: z.string().nullable() }).parse(this.db.prepare(`SELECT count(*) count,
+      (SELECT json_extract(data, '$.event.occurredAt') FROM activities WHERE pr_id = ? AND json_extract(data, '$.visible') = 1
+        ORDER BY ${activityTime} DESC, ${activityKey} DESC LIMIT 1) latestAt
+      FROM activities WHERE pr_id = ? AND json_extract(data, '$.visible') = 1`).get(prId, prId));
+    // SQLite selects bare actor columns from the row supplying the single max(rowid) aggregate.
+    const people = this.db.prepare(`SELECT json_extract(data, '$.event.actor') actor, max(rowid) latest,
+      sum(json_extract(data, '$.event.actor.bot')) > 0 bot,
+      sum(json_extract(data, '$.event.kind') IN ('comment', 'inline_comment', 'review')) > 0 commenter
+      FROM activities WHERE pr_id = ? AND json_extract(data, '$.event.actor') IS NOT NULL
+      GROUP BY lower(json_extract(data, '$.event.actor.login'))`).all(prId).map(row => {
+        const value = z.object({ actor: z.string(), bot: z.number().nullable(), commenter: z.number() }).parse(row);
+        return { actor: Actor.parse(JSON.parse(value.actor)), bot: value.bot === 1, commenter: value.commenter === 1 };
+      });
+    return { ...summary, people };
+  }
+
+  activityPage(prId: string, cursor: z.infer<typeof ActivityCursor> | null) {
+    const total = z.number().int().parse(this.db.prepare("SELECT count(*) FROM activities WHERE pr_id = ? AND json_extract(data, '$.visible') = 1").pluck().get(prId));
+    const before = cursor ? ` AND (${activityTime}, ${activityKey}) < (julianday(?), ? COLLATE BINARY)` : '';
+    const items = this.db.prepare(`SELECT data FROM activities WHERE pr_id = ? AND json_extract(data, '$.visible') = 1
+      ${before} ORDER BY ${activityTime} DESC, ${activityKey} DESC LIMIT 51`).all(prId, ...(cursor ? [cursor.at, cursor.key] : []))
+      .map(row => Activity.parse(JSON.parse(Row.parse(row).data)));
+    const more = items.length > 50;
+    if (more) items.pop();
+    const last = items.at(-1);
+    return { total, items, nextCursor: more && last ? JSON.stringify({ at: last.event.occurredAt, key: eventKey(last.event) }) : null };
+  }
+
+  notificationPage(query: URLSearchParams) {
+    const filter = filters(query, true);
+    const where = prWhere(filter);
+    if (filter.actors.length) {
+      where.sql += ` AND EXISTS (SELECT 1 FROM json_each(n.data, '$.intent.events') e JOIN activities a
+        ON a.pr_id = n.pr_id AND a.source = substr(e.value, 1, instr(e.value, ':') - 1) AND a.source_id = substr(e.value, instr(e.value, ':') + 1)
+        WHERE json_extract(a.data, '$.actorType') IN (${filter.actors.map(() => '?').join(',')}))`;
+      where.values.push(...filter.actors);
+    }
+    const from = `FROM notifications n JOIN pull_requests p ON p.id = n.pr_id WHERE ${where.sql}`;
+    const total = z.number().int().parse(this.db.prepare(`SELECT count(*) ${from}`).pluck().get(...where.values));
+    const bounds = pageBounds(total, query);
+    const items = this.db.prepare(`SELECT n.id, n.data, json_extract(p.data, '$.snapshot') snapshot, json_extract(p.data, '$.tracked') tracked,
+      (SELECT json_group_array(json_extract(a.data, '$.decision') ORDER BY CAST(e.key AS INTEGER))
+        FROM json_each(n.data, '$.intent.events') e JOIN activities a ON a.pr_id = n.pr_id
+          AND a.source = substr(e.value, 1, instr(e.value, ':') - 1) AND a.source_id = substr(e.value, instr(e.value, ':') + 1)) decisions
+      ${from} ORDER BY julianday(json_extract(n.data, '$.createdAt')) DESC, n.id DESC LIMIT 50 OFFSET ?`)
+      .all(...where.values, (bounds.page - 1) * 50).map(row => {
+        const value = IdRow.extend({ snapshot: z.string(), tracked: z.number(), decisions: z.string() }).parse(row);
+        return { id: value.id, data: Notification.parse(JSON.parse(value.data)), snapshot: Snapshot.parse(JSON.parse(value.snapshot)),
+          tracked: value.tracked === 1, decisions: z.array(z.string()).parse(JSON.parse(value.decisions)) };
+      });
+    return { ...bounds, items };
   }
 
   saveActivity(prId: string, activity: Activity): void {

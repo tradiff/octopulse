@@ -15,6 +15,7 @@ import { loadingRecovery } from './browser/recovery/loading.js';
 import { filterLayout } from './browser/layout/filters.js';
 import { queueLayout } from './browser/layout/queue.js';
 import { themeAndAccessibility } from './browser/layout/theme.js';
+import { pagination } from './browser/pagination.js';
 
 type Capture = (name: string, options?: { fullPage?: boolean }) => Promise<void>;
 const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number; status: string }>][] = [
@@ -23,6 +24,7 @@ const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number
   ['shared PR summaries', prSummary],
   ['comment Markdown and disclosures', commentRendering],
   ['commenter avatars and fallbacks', commentAvatars],
+  ['storage pages and lazy activity', pagination],
   ['focus continuity and failed reads', focusAndRecovery],
   ['independent request recovery', loadingRecovery],
   ['filter hierarchy and wrapping', filterLayout],

@@ -14,13 +14,13 @@
     { "action": "view", "page": "pulls" },
     { "action": "untrack", "pr": "B" },
     { "action": "view", "page": "pulls" },
-    { "action": "view", "page": "pulls", "query": "pr-state=all&repo=acme/widget" },
+    { "action": "view", "page": "pulls", "query": "pr-state=all&repo=acme/widget&tab=needs-my-review" },
     { "action": "view", "page": "history", "query": "pr-state=inactive&page=999" },
     { "action": "view", "page": "history", "query": "repo=missing/repo&page=999" },
     { "action": "expect", "state": { "views": [
       { "counts": { "my-prs": 1, "needs-my-review": 1, "review-requested": 1 } },
       { "counts": { "my-prs": 1, "needs-my-review": 0, "review-requested": 1 } },
-      { "counts": { "my-prs": 1, "needs-my-review": 1, "review-requested": 0 }, "items": [{ "id": "B", "tracked": false, "state": "draft" }, { "id": "A" }] },
+      { "counts": { "my-prs": 1, "needs-my-review": 1, "review-requested": 0 }, "items": [{ "id": "B", "tracked": false, "state": "draft" }] },
       { "total": 1, "page": 1, "pages": 1, "items": [{ "intent": { "prId": "B" }, "pr": { "tracked": false } }] },
       { "total": 0, "page": 1, "pages": 1, "items": [] }
     ] } }

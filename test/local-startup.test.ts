@@ -38,8 +38,10 @@ test('saved PRs, activity, notification history, identity and teams serve while 
   assert.equal((await fetch(app.origin + '/')).status, 200);
   const me = await (await fetch(app.origin + '/api/me')).json() as { login: string; teams: string[]; actionToken: string };
   assert.equal(me.login, 'alex'); assert.deepEqual(me.teams, ['acme/platform']);
-  const prs = await (await fetch(app.origin + '/api/pull-request-timeline')).text();
-  assert.ok(prs.includes('Saved PR')); assert.ok(prs.includes('Saved comment'));
+  const prs = await (await fetch(app.origin + '/api/pull-request-timeline?tab=needs-my-review')).text();
+  assert.ok(prs.includes('Saved PR')); assert.ok(!prs.includes('Saved comment'));
+  const activity = await (await fetch(app.origin + '/api/pull-requests/101/activity')).text();
+  assert.ok(activity.includes('Saved comment'));
   const history = await (await fetch(app.origin + '/api/notification-history')).json() as { total: number };
   assert.ok(history.total > 0);
   assert.equal((await fetch(app.origin + '/api/logs')).status, 200);

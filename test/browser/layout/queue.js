@@ -39,6 +39,7 @@ export async function queueLayout(page, capture) {
       return pr;
     });
     data.counts['my-prs'] = data.items.length;
+    data.total = data.items.length;
     await route.fulfill({ response, json: data });
   };
   await page.route('**/api/pull-request-timeline*', route);

@@ -15,6 +15,7 @@ export async function navigation(page, capture) {
   const summary = page.locator('[data-pr="A"] > summary');
   await summary.focus(); await page.keyboard.press('Enter');
   await page.locator('[data-pr="A"][open]').waitFor();
+  await page.getByText('Added the test.', { exact: true }).waitFor();
   check(await page.getByText('Added the test.', { exact: true }).isVisible(), 'Self-suppressed activity remains in timeline');
   check(await page.locator('.timeline .badge').filter({ hasText: /^eligible$/ }).count() === 0, 'Internal eligible badges are hidden');
   check(await page.locator('.timeline .badge').filter({ hasText: /^self$/ }).isVisible(), 'Other activity decision badges remain visible');

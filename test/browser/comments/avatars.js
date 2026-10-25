@@ -8,13 +8,12 @@ export async function commentAvatars(page, capture) {
   const image = route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="#82aaff"/></svg>' });
   const data = async route => {
     const response = await route.fetch(); const result = await response.json();
-    const pr = result.items.find(pr => pr.id === 'A');
-    pr.timeline.find(item => item.event.actor?.login === 'bea').event.actor.avatar = avatarUrl;
-    pr.timeline.find(item => item.event.actor?.login === 'cam').event.actor.avatar = 'javascript:alert(1)';
-    pr.timeline.push({ ...pr.timeline[0], event: { ...pr.timeline[0].event, actor: null, body: '' }, bodyHtml: '' });
+    result.items.find(item => item.event.actor?.login === 'bea').event.actor.avatar = avatarUrl;
+    result.items.find(item => item.event.actor?.login === 'cam').event.actor.avatar = 'javascript:alert(1)';
+    result.items.push({ ...result.items[0], event: { ...result.items[0].event, actor: null, body: '' }, bodyHtml: '' });
     await route.fulfill({ response, json: result });
   };
-  await page.route(avatarUrl, image); await page.route('**/api/pull-request-timeline*', data);
+  await page.route(avatarUrl, image); await page.route('**/api/pull-requests/A/activity*', data);
   try {
     await page.setViewportSize({ width: 1440, height: 1000 }); await page.goto(origin + '/');
     await page.waitForFunction(() => document.querySelector('#status').textContent.includes('refreshed'));
@@ -34,5 +33,5 @@ export async function commentAvatars(page, capture) {
     await page.setViewportSize({ width: 390, height: 900 });
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Avatar headers fit narrow screens');
     return { checks, status: 'pass' };
-  } finally { await page.unroute(avatarUrl, image); await page.unroute('**/api/pull-request-timeline*', data); }
+  } finally { await page.unroute(avatarUrl, image); await page.unroute('**/api/pull-requests/A/activity*', data); }
 }

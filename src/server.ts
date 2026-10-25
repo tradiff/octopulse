@@ -3,7 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
-import { notificationHistory, pullRequests } from './views.js';
+import { notificationHistory, pullRequestActivity, pullRequests } from './views.js';
+import { ActivityCursor } from './store.js';
 import type { Store } from './store.js';
 import type { Monitor } from './monitor.js';
 import type { Delivery } from './delivery.js';
@@ -62,6 +63,19 @@ export async function listenLocal(app: LocalApplication, port: number) {
       if (page) { response.writeHead(200, { 'Content-Type': `${page.type}; charset=utf-8` }); response.end(method === 'HEAD' ? undefined : page.data); return; }
       if (url.pathname === '/health') { send(response, 200, { status: 'ok' }, method === 'HEAD'); return; }
       if (method !== 'GET') { send(response, 404, { error: 'Not found' }, true); return; }
+      const activity = /^\/api\/pull-requests\/([^/]+)\/activity$/.exec(url.pathname);
+      if (activity) {
+        let id: string;
+        try { id = decodeURIComponent(activity[1]!); } catch { send(response, 400, { error: 'Invalid pull request ID' }); return; }
+        const pr = app.store.pr(id);
+        if (!pr) { send(response, 404, { error: 'Unknown pull request' }); return; }
+        let cursor: ReturnType<typeof ActivityCursor.parse> | null = null;
+        if (url.searchParams.has('cursor')) {
+          try { cursor = ActivityCursor.parse(JSON.parse(url.searchParams.get('cursor')!)); }
+          catch { send(response, 400, { error: 'Invalid activity cursor' }); return; }
+        }
+        send(response, 200, pullRequestActivity(app.store, pr, cursor)); return;
+      }
       switch (url.pathname) {
         case '/api/me': send(response, 200, { login: app.login, teams: app.teams, actionToken: token }); return;
         case '/api/tracked-pull-requests':

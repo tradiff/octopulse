@@ -6,7 +6,7 @@
 
 A Linux desktop app for tracking GitHub pull requests through a local web interface and desktop notifications.
 
-- PR and review-request queues with search, rich comments, and current-head CI results.
+- Paginated PR and review-request queues with search, on-demand activity timelines, rich comments, and current-head CI results.
 - Desktop notifications with sounds, author avatars, and a system tray menu.
 - Persistent notification history, retries, restart recovery, and resend actions.
 - Cached startup, bounded GitHub polling, and redacted logs.
