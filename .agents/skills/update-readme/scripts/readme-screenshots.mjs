@@ -1,20 +1,29 @@
-// Run from the repository root after npm run build. Requires playwright-cli and its Chromium browser.
+// Run from the repository root. Builds the app; requires playwright-cli and its Chromium browser.
 // Only a disposable profile and synthetic inputs are used; no GitHub access.
-import { execFile } from 'node:child_process';
-import { mkdir, rm } from 'node:fs/promises';
+import { execFile, execFileSync } from 'node:child_process';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { Profile } from '../../../../dist/src/profile.js';
-import { Snapshot, Event } from '../../../../dist/src/model.js';
-import { Monitor } from '../../../../dist/src/monitor.js';
-import { Delivery } from '../../../../dist/src/delivery.js';
-import { Diagnostics } from '../../../../dist/src/diagnostics.js';
-import { listenLocal } from '../../../../dist/src/server.js';
-import { VirtualClock, RecordingDesktop, completeSources, temporaryProfile } from '../../../../dist/test/fixture.js';
+import sharp from 'sharp';
 
+execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
+const { Profile } = await import('../../../../dist/src/profile.js');
+const { Snapshot, Event } = await import('../../../../dist/src/model.js');
+const { Monitor } = await import('../../../../dist/src/monitor.js');
+const { Delivery } = await import('../../../../dist/src/delivery.js');
+const { Diagnostics } = await import('../../../../dist/src/diagnostics.js');
+const { listenLocal } = await import('../../../../dist/src/server.js');
+const { VirtualClock, RecordingDesktop, completeSources, temporaryProfile } = await import('../../../../dist/test/fixture.js');
+
+const output = 'assets/screenshots/collage.png';
+const previous = await readFile(output).catch(error => {
+  if (error.code !== 'ENOENT') throw error;
+  return undefined;
+});
 const directory = await temporaryProfile();
+const capture = join(directory, 'collage.png');
 const profile = new Profile(directory);
-const clock = new VirtualClock(new Date().toISOString());
+const clock = new VirtualClock('3001-01-15T17:42:23.000Z');
 const capturedAt = Date.parse(clock.now());
 const monitor = new Monitor(profile.store, clock, 'byte-bot', ['moonbase/engineering'], clock.now());
 const delivery = new Delivery(profile.store, clock, new RecordingDesktop());
@@ -66,9 +75,19 @@ try {
   local = await listenLocal({ store: profile.store, monitor, delivery, logs, login: 'byte-bot', teams: ['moonbase/engineering'],
     async track() { throw new Error('Screenshot preview is read-only'); } }, 0);
   await mkdir('assets/screenshots', { recursive: true });
-  await cli('open', local.origin);
+  await cli('open');
   const result = await cli('run-code', `async page => {
     const origin = ${JSON.stringify(local.origin)};
+    const errors = [];
+    page.context().on('page', opened => opened.on('pageerror', error => errors.push(error.message)));
+    page.on('pageerror', error => errors.push(error.message));
+    page.context().on('requestfailed', request => {
+      if (request.url().startsWith(origin + '/')) errors.push(request.url() + ': ' + request.failure()?.errorText);
+    });
+    page.context().on('response', response => {
+      if (response.url().startsWith(origin + '/') && response.status() >= 400) errors.push(response.url() + ': HTTP ' + response.status());
+    });
+    await page.clock.setFixedTime(new Date(${capturedAt}));
     const avatars = ${JSON.stringify(avatars)};
     await page.context().route('**/*', route => {
       const avatar = avatars[route.request().url()];
@@ -134,12 +153,21 @@ try {
     ]));
     await artwork.setContent('<!doctype html><html lang="en"><meta charset="utf-8"><style>' + css + '</style><main class="art">' + panels.map(([src, x, y, secondary]) => '<div class="panel' + (secondary ? ' secondary' : '') + '" style="left:' + x + 'px;top:' + y + 'px"><img alt="Fictional Octopulse interface" src="' + src + '"></div>').join('') + '</main></html>');
     await artwork.locator('img').evaluateAll(images => Promise.all(images.map(image => image.decode())));
-    await artwork.screenshot({ path: 'assets/screenshots/collage.png', omitBackground: true, clip: { x: 320, y: 20, width: 1420, height: 1850 } });
+    await artwork.screenshot({ path: ${JSON.stringify(capture)}, omitBackground: true, clip: { x: 320, y: 20, width: 1420, height: 1850 } });
+    if (errors.length) throw new Error('Browser capture failed: ' + errors.join('; '));
     await artwork.close();
     return 'Created screenshot collage.';
   }`);
   if (!result.stdout.includes('Created screenshot collage')) throw new Error(result.stdout);
-  console.log('Created assets/screenshots/collage.png from fictional data.');
+  const generated = await readFile(capture);
+  let identical = false;
+  if (previous) {
+    const decode = image => sharp(image).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const [before, after] = await Promise.all([decode(previous), decode(generated)]);
+    identical = before.info.width === after.info.width && before.info.height === after.info.height && before.data.equals(after.data);
+  }
+  if (!identical) await writeFile(output, generated);
+  console.log(`${output}: ${identical ? 'identical' : previous ? 'changed' : 'created'} (fictional data; browser checks passed).`);
 } finally {
   await cli('close').catch(() => {});
   await local?.stop();
