@@ -5,13 +5,18 @@ import sharp from 'sharp';
 
 test('inline PR state icons have transparent backgrounds and colored glyphs at web size', async () => {
   for (const [state, color] of [['open', [195, 232, 141]], ['draft', [163, 172, 203]], ['closed', [255, 117, 127]], ['merged', [192, 153, 255]]] as const) {
-    const { data } = await sharp(await readFile(new URL(`../../assets/git-${state}-inline.svg`, import.meta.url)))
-      .resize(20, 20).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { data, info } = await sharp(await readFile(new URL(`../../assets/git-${state}-inline.svg`, import.meta.url)))
+      .resize(29, 29).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     assert.equal(data[3], 0, `${state}: no background at the corner`);
     const solid = [];
     for (let i = 0; i < data.length; i += 4) if (data[i + 3] === 255) solid.push([...data.subarray(i, i + 3)]);
-    assert.ok(solid.length > 0, `${state}: glyph is visible at 20px`);
+    assert.ok(solid.length > 0, `${state}: glyph is visible at 29px`);
     assert.ok(solid.every(pixel => pixel.every((channel, index) => Math.abs(channel - color[index]!) <= 1)), `${state}: glyph carries the state color rather than white`);
+    const visibleRows = new Set<number>();
+    for (let y = 0; y < info.height; y++) for (let x = 0; x < info.width; x++) {
+      if (data[(y * info.width + x) * 4 + 3]! > 32) visibleRows.add(y);
+    }
+    assert.equal(visibleRows.size, 29, `${state}: visible glyph fills the avatar's 29px height, not just its image box`);
   }
 });
 

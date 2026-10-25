@@ -239,7 +239,7 @@ function prSummary(pr: Pick<PrView, 'snapshot' | 'state' | 'tracked'>, activityC
   const repository = node('div', undefined, 'repository'); repository.append(node('span', pr.snapshot.repository), node('span', `#${pr.snapshot.number}`, 'pr-number'));
   const title = link(pr.snapshot.title, `https://github.com/${pr.snapshot.repository}/pull/${pr.snapshot.number}`); title.className = 'row-title';
   const state = node('img', undefined, 'pr-state-icon'); state.src = `/git-${pr.state}-inline.svg`;
-  state.alt = pr.state[0]!.toUpperCase() + pr.state.slice(1); state.title = state.alt; state.width = 20; state.height = 20;
+  state.alt = pr.state[0]!.toUpperCase() + pr.state.slice(1); state.title = state.alt; state.width = 29; state.height = 29;
   main.append(state, title, repository);
   const meta = node('div', undefined, 'meta pr-meta'); meta.append(node('span', `by ${pr.snapshot.author}`, 'pr-author'));
   if (activityCount !== undefined) meta.append(node('span', `${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`));

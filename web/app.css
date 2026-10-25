@@ -91,7 +91,7 @@ legend { float: none; margin: 0 0 4px; padding: 0; }
 #filters .clear-filters { margin-left: auto; margin-bottom: 3px; font-size: var(--text-label); min-height: 31px; padding: 6px 4px; border-color: transparent; background: transparent; color: var(--muted); font-weight: 450; }
 #filters .clear-filters:hover { color: var(--accent); }
 .result-summary { font-size: var(--text-small); color: var(--muted); }
-.list-headings, .pr > summary { display: grid; grid-template-columns: var(--pr-columns); gap: 16px; align-items: center; padding: 15px 34px 15px 16px; }
+.list-headings, .pr > summary { display: grid; grid-template-columns: var(--pr-columns); gap: 16px; align-items: center; padding: 15px 16px 15px 38px; }
 .list-headings { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; font-size: var(--text-small); color: var(--muted); padding-top: 10px; padding-bottom: 10px; }
 .pr { border: 1px solid var(--line); border-top: 0; background: var(--bg); }
 .pr:last-child { border-radius: 0 0 var(--radius) var(--radius); }
@@ -100,13 +100,13 @@ legend { float: none; margin: 0 0 4px; padding: 0; }
 .pr[open] { background: var(--expanded); box-shadow: inset 2px 0 var(--accent); }
 .pr[open] > summary { background: transparent; }
 summary::-webkit-details-marker { display: none; }
-.pr > summary::after { content: ''; position: absolute; right: 15px; top: 34px; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); }
-.pr[open] > summary::after { transform: rotate(225deg); }
+.pr > summary > .pr-summary::before, .notification-header .pr-summary::before { content: ''; position: absolute; left: -23px; top: 14.5px; translate: 0 -50%; width: 12px; height: 12px; background: var(--muted); clip-path: polygon(25% 0, 83.333% 50%, 25% 100%); }
+.pr[open] > summary > .pr-summary::before, .notification[open] > summary .pr-summary::before { transform: rotate(90deg); background: var(--accent); }
 .row-main, .review-status, .ci-status, .summary-reviewers { min-width: 0; }
-.pr-summary { display: grid; grid-template-columns: 29px minmax(0, 1fr); gap: 16px; align-items: center; min-width: 0; }
+.pr-summary { position: relative; display: grid; grid-template-columns: 29px minmax(0, 1fr); gap: 16px; align-items: center; min-width: 0; }
 .pr > summary > .pr-summary { grid-column: span 2; grid-template-columns: subgrid; }
 .pr-summary > .avatar { align-self: start; }
-.row-main { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 8px; }
+.row-main { display: grid; grid-template-columns: 29px minmax(0, 1fr); column-gap: 8px; }
 .row-main > .row-title, .row-main > .repository, .row-main > .pr-meta { grid-column: 2; }
 .row-title { display: inline-block; color: var(--ink); font-size: var(--text-title); font-weight: 550; margin-bottom: 4px; overflow-wrap: anywhere; }
 .row-title:hover { color: var(--accent); }
@@ -114,7 +114,7 @@ summary::-webkit-details-marker { display: none; }
 .repository > span { min-width: 0; overflow-wrap: anywhere; }
 .pr-number { font-variant-numeric: tabular-nums; }
 .badge { display: inline-block; border-radius: 4px; background: var(--tint); color: var(--ink); padding: 3px 7px; font-size: var(--text-small); font-weight: 500; }
-.pr-state-icon { grid-column: 1; grid-row: 1; width: 20px; height: 20px; align-self: start; margin-top: 1px; }
+.pr-state-icon { grid-column: 1; grid-row: 1; width: 29px; height: 29px; align-self: start; }
 .state-open, .state-passing { color: var(--success); }
 .state-failing, .state-closed { color: var(--danger); }
 .state-pending, .state-unknown { color: var(--warning); }
@@ -220,10 +220,8 @@ summary::-webkit-details-marker { display: none; }
 .notification:first-child > summary { border-radius: var(--radius) var(--radius) 0 0; }
 .notification:nth-last-child(2) { border-bottom: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); }
 .notification:first-child:nth-last-child(2) { border-radius: var(--radius); }
-.notification-header { position: relative; cursor: pointer; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 18px; align-items: center; padding: 16px 36px 16px 20px; }
+.notification-header { position: relative; cursor: pointer; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 18px; align-items: center; padding: 16px 20px 16px 38px; }
 .notification-header:hover, .notification[open] > summary { background: var(--raised); }
-.notification-header::after { content: '›'; position: absolute; right: 16px; color: var(--muted); }
-.notification[open] > summary::after { transform: rotate(90deg); }
 .notification-description { min-width: 0; }
 .notification-preview { display: block; font-size: var(--text-label); color: var(--muted); margin: 8px 0 0 73px; overflow-wrap: anywhere; }
 .notification-header time { color: var(--muted); font-size: var(--text-small); text-align: right; font-variant-numeric: tabular-nums; }
@@ -279,13 +277,13 @@ dialog .actions { justify-content: flex-end; margin-top: 24px; }
   #filters select { min-width: 0; max-width: 200px; }
   .list-headings { display: none; }
   .pr:first-child { border-top: 1px solid var(--line); }
-  .pr > summary { grid-template-columns: 29px minmax(0, 1fr); gap: 10px; padding: 16px 30px 16px 14px; }
+  .pr > summary { grid-template-columns: 29px minmax(0, 1fr); gap: 10px; padding: 16px 14px 16px 38px; }
   .review-status, .ci-status, .row-updated { grid-column: 2; }
   .pr-body { padding: 16px; }
   .detail-freshness { margin-left: 0; }
   .detail-columns, .notification-detail { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .ci-section { border-left: 0; border-top: 1px solid var(--line); padding: 20px 0 0; }
-  .notification-header { grid-template-columns: minmax(0, 1fr); padding: 16px 30px 16px 14px; }
+  .notification-header { grid-template-columns: minmax(0, 1fr); padding: 16px 14px 16px 38px; }
   .notification-header time { text-align: left; margin-left: 73px; }
   .notification-detail { padding: 20px; }
   .log { grid-template-columns: 65px minmax(0, 1fr); gap: 10px; padding: 14px; }
