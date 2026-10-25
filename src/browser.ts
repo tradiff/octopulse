@@ -48,6 +48,45 @@ function avatar(login: string, url: string | null): HTMLElement {
   } catch { return result; }
   return result;
 }
+const reviewerStates = {
+  decliners: { label: 'Changes requested', path: 'M7 7l6 6m0-6-6 6' },
+  requested: { label: 'Requested', path: 'M2.5 10c1.75-2.75 4.25-4.25 7.5-4.25s5.75 1.5 7.5 4.25c-1.75 2.75-4.25 4.25-7.5 4.25S4.25 12.75 2.5 10Z' },
+  approvers: { label: 'Approved', path: 'M5.75 10.5 8.5 13.25 14.25 7.5' },
+  commenters: { label: 'Commented', path: 'M5.5 6.25h9a1.75 1.75 0 0 1 1.75 1.75v4A1.75 1.75 0 0 1 14.5 13.75H10l-3.25 2v-2H5.5A1.75 1.75 0 0 1 3.75 12V8A1.75 1.75 0 0 1 5.5 6.25Z' },
+};
+function reviewerAvatar(person: { login: string; avatar: string | null }, state: keyof PrView['groups']): HTMLElement {
+  const result = node('span', undefined, 'reviewer-avatar');
+  result.tabIndex = 0; result.setAttribute('role', 'img');
+  const description = `${reviewerStates[state].label}: ${person.login}`; result.setAttribute('aria-label', description);
+  const tooltip = node('span', description, 'reviewer-tooltip'); tooltip.hidden = true; tooltip.setAttribute('aria-hidden', 'true');
+  const showTooltip = () => {
+    tooltip.hidden = false;
+    const anchor = result.getBoundingClientRect(); const bounds = tooltip.getBoundingClientRect();
+    tooltip.style.left = `${Math.max(8, Math.min(anchor.right - bounds.width, innerWidth - bounds.width - 8))}px`;
+    tooltip.style.top = `${anchor.bottom + bounds.height + 8 <= innerHeight ? anchor.bottom + 8 : Math.max(8, anchor.top - bounds.height - 8)}px`;
+  };
+  result.addEventListener('mouseenter', showTooltip); result.addEventListener('focus', showTooltip);
+  result.addEventListener('mouseleave', () => { tooltip.hidden = true; }); result.addEventListener('blur', () => { tooltip.hidden = true; });
+  result.addEventListener('keydown', event => { if (event.key === 'Escape') tooltip.hidden = true; });
+  const image = avatar(person.login, person.avatar);
+  image.removeAttribute('title'); image.removeAttribute('role'); image.removeAttribute('aria-label'); image.setAttribute('aria-hidden', 'true');
+  result.append(image, tooltip); return result;
+}
+function reviewerGroup(state: keyof PrView['groups'], people: PrView['groups'][typeof state]): HTMLElement {
+  const { label, path } = reviewerStates[state];
+  const group = node('span', undefined, `reviewer-group reviewer-${state}`);
+  group.setAttribute('role', 'group'); group.setAttribute('aria-label', label);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 20 20'); svg.setAttribute('aria-hidden', 'true');
+  const shape = document.createElementNS(svg.namespaceURI, 'path'); shape.setAttribute('d', path); svg.append(shape);
+  if (state === 'requested') {
+    const circle = document.createElementNS(svg.namespaceURI, 'circle');
+    circle.setAttribute('cx', '10'); circle.setAttribute('cy', '10'); circle.setAttribute('r', '2'); svg.append(circle);
+  }
+  const avatars = node('span', undefined, 'avatar-stack');
+  for (const person of people) avatars.append(reviewerAvatar(person, state));
+  group.append(svg, avatars); return group;
+}
 function time(input: string | null, precise = false): HTMLElement {
   if (!input) return node('span', 'No activity yet');
   const date = new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(input) ? input : `${input}Z`);
@@ -233,17 +272,14 @@ function prCard(pr: PrView): HTMLElement {
     ci.classList.add('ci-empty'); ci.append(node('span', 'No current-head results', 'ci-label'));
   }
   const groups = node('div', undefined, 'groups');
-  for (const [key, label] of [['approvers', 'Approvers'], ['commenters', 'Commenters / Reviewers'], ['decliners', 'Decliners'], ['requested', 'Requested Reviewers']] as const) {
+  const reviewerOrder = ['decliners', 'requested', 'approvers', 'commenters'] as const;
+  for (const key of reviewerOrder) {
     if (!pr.groups[key].length) continue;
-    const group = node('div', undefined, `group group-${key}`); group.append(node('span', label, 'group-label'));
-    const people = node('span', undefined, 'avatar-stack');
-    for (const person of pr.groups[key]) people.append(avatar(person.login, person.avatar)); group.append(people); groups.append(group);
+    const group = node('div', undefined, 'group'); group.append(node('span', reviewerStates[key].label, 'group-label'), reviewerGroup(key, pr.groups[key])); groups.append(group);
   }
   const reviewers = node('div', undefined, 'summary-reviewers');
-  const people = [...new Map(Object.values(pr.groups).flat().map(person => [person.login.toLowerCase(), person])).values()];
-  for (const person of people.slice(0, 3)) reviewers.append(avatar(person.login, person.avatar));
-  if (people.length > 3) reviewers.append(node('span', `+${people.length - 3}`, 'muted'));
-  if (!people.length) reviewers.append(node('span', 'None', 'muted'));
+  for (const state of reviewerOrder) if (pr.groups[state].length) reviewers.append(reviewerGroup(state, pr.groups[state]));
+  if (!reviewers.childElementCount) reviewers.append(node('span', 'None', 'muted'));
   const updated = node('div', undefined, 'row-updated'); updated.append(time(pr.latestAt));
   summary.append(prSummary(pr, pr.activityCount), review, ci, reviewers, updated); card.append(summary);
   const body = node('div', undefined, 'pr-body');

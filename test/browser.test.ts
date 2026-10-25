@@ -8,6 +8,7 @@ import { webFixture } from './web-fixture.js';
 import { navigation } from './browser/navigation.js';
 import { repositories } from './browser/repositories.js';
 import { prSummary } from './browser/pr-summary.js';
+import { reviewers } from './browser/reviewers.js';
 import { commentRendering } from './browser/comments/rendering.js';
 import { commentAvatars } from './browser/comments/avatars.js';
 import { focusAndRecovery } from './browser/recovery/focus.js';
@@ -22,6 +23,7 @@ const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number
   ['navigation, mutations and request races', navigation],
   ['repository search and keyboard interaction', repositories],
   ['shared PR summaries', prSummary],
+  ['reviewer status groups and wrapping', reviewers],
   ['comment Markdown and disclosures', commentRendering],
   ['commenter avatars and fallbacks', commentAvatars],
   ['storage pages and lazy activity', pagination],
