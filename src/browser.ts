@@ -1,5 +1,6 @@
 import { filters } from './filters.js';
 import type { ActivityPage, HistoryPage, PrPage, PrView } from './views.js';
+import type { SettingsView } from './settings.js';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const content = element<HTMLElement>('content');
@@ -427,6 +428,113 @@ function renderLogs(data: { items: { at: string; level: string; message: string;
   }
   if (!data.items.length) content.append(node('p', 'No matching log entries.', 'empty'));
 }
+function renderSettings(data: SettingsView): void {
+  clearContent(); controls.replaceChildren(); tabs.replaceChildren(); element('result-summary').hidden = true;
+  const settingsForm = node('form', undefined, 'settings-form');
+  settingsForm.append(node('h1', 'Settings'), node('p', 'Saved in this profile’s database. Changes apply without restarting.', 'muted'));
+  function section(title: string): HTMLFieldSetElement {
+    const group = node('fieldset', undefined, 'settings-section'); group.append(node('legend', title)); settingsForm.append(group); return group;
+  }
+  function appendField(group: HTMLElement, name: string, title: string, control: HTMLInputElement | HTMLSelectElement, help?: string): void {
+    const wrapper = node('div', undefined, 'settings-field'); const label = node('label', title); label.htmlFor = `setting-${name}`;
+    control.id = label.htmlFor; wrapper.append(label, control);
+    if (help) { const hint = node('small', help, 'muted'); hint.id = `${control.id}-help`; control.setAttribute('aria-describedby', hint.id); wrapper.append(hint); }
+    group.append(wrapper);
+  }
+  function field(group: HTMLElement, name: string, title: string, value: string, help?: string, type = 'text'): HTMLInputElement {
+    const input = node('input'); input.name = name; input.value = value; input.type = type;
+    input.autocomplete = 'off';
+    appendField(group, name, title, input, help); return input;
+  }
+  function interval(group: HTMLElement, name: string, title: string, value: string, options: readonly (readonly [string, string])[], help?: string): HTMLSelectElement {
+    const select = node('select'); select.name = name; select.required = true;
+    for (const [duration, text] of options) { const option = node('option', text); option.value = duration; select.append(option); }
+    if (!options.some(([duration]) => duration === value)) {
+      const saved = node('option', `${value} (saved value)`); saved.value = value; select.prepend(saved);
+    }
+    select.value = value; appendField(group, name, title, select, help); return select;
+  }
+  const github = section('GitHub');
+  const preview = data.github.token_preview;
+  const token = field(github, 'token', 'GitHub Token', preview);
+  token.spellcheck = false; token.autocapitalize = 'none';
+  const source = node('p', undefined, 'token-source'); source.id = 'token-source'; source.setAttribute('role', 'status');
+  token.setAttribute('aria-describedby', source.id); token.parentElement!.append(source);
+  const updateToken = () => {
+    const unchanged = token.value === preview;
+    const empty = !token.value.trim();
+    const environment = data.github.environment_detected && (empty || unchanged && data.github.token_source === 'environment');
+    source.hidden = !environment && !empty;
+    source.className = `token-source ${environment ? 'state-passing' : 'state-failing'}`;
+    source.textContent = environment ? 'Using $GITHUB_TOKEN' : 'Add your GitHub token here or set the GITHUB_TOKEN environment variable.';
+    token.setCustomValidity(!unchanged && token.value.includes('*') ? 'Enter a complete GitHub token or clear this field.' : '');
+  };
+  token.addEventListener('focus', () => { if (preview && token.value === preview) token.select(); });
+  token.addEventListener('input', updateToken); updateToken();
+  const timings = section('Polling and tracking');
+  const polling = [['30 s', '30 seconds'], ['1 m', '1 minute'], ['2 m', '2 minutes'], ['5 m', '5 minutes'],
+    ['10 m', '10 minutes'], ['15 m', '15 minutes'], ['30 m', '30 minutes'], ['1 h', '1 hour']] as const;
+  const tracked = interval(timings, 'tracked-poll', 'Tracked PR polling interval', data.timings.tracked_poll_interval, polling,
+    'How often to check tracked PRs. Shorter intervals make more GitHub API requests.');
+  const discovery = interval(timings, 'discovery-poll', 'Discovery interval', data.timings.discovery_poll_interval, polling,
+    'How often to discover your PRs and review requests.');
+  const grace = interval(timings, 'grace', 'Grace period', data.timings.grace_period,
+    [['1 h', '1 hour'], ['6 h', '6 hours'], ['12 h', '12 hours'], ['1 days', '1 day'], ['3 days', '3 days'],
+      ['7 days', '7 days'], ['14 days', '14 days'], ['30 days', '30 days']],
+    'How long to keep checking PRs after they close or merge.');
+  const logging = section('Logs and history');
+  const level = node('select');
+  for (const value of ['debug', 'info', 'warn', 'error']) { const option = node('option', value); option.value = value; level.append(option); }
+  level.value = data.logging.level; appendField(logging, 'level', 'Log level', level);
+  const retention = interval(logging, 'log-retention', 'Log retention', data.logging.retention,
+    [['1 days', '1 day'], ['3 days', '3 days'], ['7 days', '7 days'], ['14 days', '14 days'],
+      ['30 days', '30 days'], ['60 days', '60 days'], ['90 days', '90 days']],
+    'How long to keep diagnostic logs.');
+  const payloads = interval(logging, 'payload-retention', 'Raw payload retention', data.history.raw_payload_retention,
+    [['1 days', '1 day'], ['7 days', '7 days'], ['14 days', '14 days'], ['30 days', '30 days'],
+      ['60 days', '60 days'], ['90 days', '90 days'], ['180 days', '180 days'], ['365 days', '365 days']],
+    'How long to keep completed raw GitHub payloads. Unprocessed payloads are retained.');
+  const provider = section('System One');
+  const enabledLabel = node('label', undefined, 'settings-check'); const enabled = node('input'); enabled.type = 'checkbox'; enabled.checked = data.system_one !== null;
+  enabledLabel.append(enabled, node('span', 'Enable bot-comment classification')); provider.append(enabledLabel);
+  const providerFields = node('div', undefined, 'settings-provider'); provider.append(providerFields);
+  const base = field(providerFields, 'provider-url', 'Provider base URL', data.system_one?.base_url ?? '', undefined, 'url');
+  const model = field(providerFields, 'model', 'Model', data.system_one?.model ?? 'jev-latest');
+  const keyPreview = data.system_one?.api_key_preview ?? '';
+  const key = field(providerFields, 'api-key', 'API key', keyPreview);
+  key.spellcheck = false; key.autocapitalize = 'none';
+  const keyStatus = node('p', 'Add your System One API key here to enable classification.', 'token-source state-failing');
+  keyStatus.id = 'api-key-status'; keyStatus.setAttribute('role', 'status');
+  key.setAttribute('aria-describedby', keyStatus.id); key.parentElement!.append(keyStatus);
+  const updateKey = () => {
+    keyStatus.hidden = Boolean(key.value.trim());
+    key.setCustomValidity(key.value !== keyPreview && key.value.includes('*') ? 'Enter a complete API key or clear this field.' : '');
+  };
+  key.addEventListener('focus', () => { if (keyPreview && key.value === keyPreview) key.select(); });
+  key.addEventListener('input', updateKey); updateKey();
+  const toggleProvider = () => { providerFields.hidden = !enabled.checked; base.required = model.required = enabled.checked; };
+  enabled.addEventListener('change', toggleProvider); toggleProvider();
+  const feedback = node('p'); feedback.setAttribute('role', 'status');
+  const save = node('button', 'Save settings', 'primary'); save.type = 'submit';
+  settingsForm.append(save, feedback);
+  settingsForm.addEventListener('submit', event => {
+    event.preventDefault(); save.disabled = true; feedback.textContent = 'Saving settings…';
+    const body = {
+      github: token.value === preview ? {} : { token: token.value.trim() || null },
+      timings: { tracked_poll_interval: tracked.value, discovery_poll_interval: discovery.value, grace_period: grace.value },
+      logging: { level: level.value, retention: retention.value }, history: { raw_payload_retention: payloads.value },
+      system_one: enabled.checked ? { base_url: base.value, model: model.value,
+        ...(key.value === keyPreview ? {} : { api_key: key.value.trim() || null }) } : null,
+    };
+    void mutation('/api/settings', 'PUT', body).then(result => {
+      if (!settingsForm.isConnected) return;
+      renderSettings(result as SettingsView); status.textContent = 'Settings saved. Background monitoring is reconnecting.';
+    }).catch(error => { feedback.textContent = error instanceof Error ? error.message : 'Save failed. Retry.'; })
+      .finally(() => { save.disabled = false; });
+  });
+  content.append(settingsForm);
+}
+
 async function load(): Promise<void> {
   const version = ++sequence; controller?.abort(); const current = new AbortController(); controller = current;
   const initialFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
@@ -436,7 +544,8 @@ async function load(): Promise<void> {
   errorBox.hidden = true; content.setAttribute('aria-busy', 'true'); status.textContent = 'Loading local state…';
   identity = null; updateMutationButtons();
   const path = location.pathname;
-  const title = path === '/logs' ? 'Logs' : path === '/notification-history' ? 'Notification History' : 'Pull Requests';
+  const title = path === '/settings' ? 'Settings' : path === '/logs' ? 'Logs' : path === '/notification-history' ? 'Notification History' : 'Pull Requests';
+  element('filter-bar').hidden = path === '/settings';
   if (!renderedView || new URL(renderedView).pathname !== path) {
     renderedView = undefined; clearContent(); controls.replaceChildren(); tabs.replaceChildren(); element('result-summary').hidden = true;
     element('identity').textContent = 'Loading identity…';
@@ -449,7 +558,7 @@ async function load(): Promise<void> {
     if (new URL(anchor.href).pathname === path) anchor.setAttribute('aria-current', 'page'); else anchor.removeAttribute('aria-current');
   }
   try {
-    const endpoint = path === '/logs' ? '/api/logs' : path === '/notification-history' ? '/api/notification-history' : '/api/pull-request-timeline';
+    const endpoint = path === '/settings' ? '/api/settings' : path === '/logs' ? '/api/logs' : path === '/notification-history' ? '/api/notification-history' : '/api/pull-request-timeline';
     const meRequest = api('/api/me', { signal: current.signal });
     const dataRequest = api(endpoint + location.search, { signal: current.signal }).then(
       value => ({ status: 'fulfilled' as const, value }), reason => ({ status: 'rejected' as const, reason }));
@@ -473,6 +582,10 @@ async function load(): Promise<void> {
     if (version !== sequence || current.signal.aborted) return;
     if (dataResult.status === 'rejected') throw dataResult.reason;
     const data = dataResult.value;
+    if (path === '/settings') {
+      if (!data || typeof data !== 'object' || !('github' in data) || !('timings' in data)) throw new Error('Settings response is invalid');
+      renderSettings(data as SettingsView); renderedView = location.href; status.textContent = ''; return;
+    }
     if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) throw new Error('Local data response is invalid');
     focusKey = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.focusKey : undefined;
     if (path === '/logs') renderLogs(data as Parameters<typeof renderLogs>[0]);

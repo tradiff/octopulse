@@ -7,7 +7,7 @@ import { listenLocal } from '../src/server.js';
 import { Activity, Event, Snapshot } from '../src/model.js';
 import { ActivityCursor } from '../src/store.js';
 import { startApplication } from '../src/application.js';
-import { parseConfig } from '../src/config.js';
+import { Config } from '../src/config.js';
 import { Profile } from '../src/profile.js';
 import { readFile, rm } from 'node:fs/promises';
 import { webFixture } from './web-fixture.js';
@@ -223,9 +223,9 @@ test('local mutation size limit rejects an otherwise valid tracking request', as
 test('application composition releases ownership on listen failure and shutdown', async t => {
   const fixture = await webFixture(); t.after(() => fixture.close());
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
-  const config = parseConfig('[github]\ntoken="synthetic"\nlogin="alex"');
+  const config = Config.parse({ github: { token: 'synthetic' } });
   const clock = new VirtualClock('2026-10-22T12:00:00Z');
-  const transport = async (url: string) => new Response(JSON.stringify(url.includes('/user/teams') ? [] : { total_count: 0, incomplete_results: false, items: [] }));
+  const transport = async (url: string) => Response.json(url.endsWith('/user') ? { login: 'alex' } : url.includes('/user/teams') ? [] : { total_count: 0, incomplete_results: false, items: [] });
   await assert.rejects(startApplication(config, directory, clock, new RecordingDesktop(), new AbortController().signal, Number(new URL(fixture.local.origin).port), transport), /EADDRINUSE/);
   const released = new Profile(directory); released.close();
   const app = await startApplication(config, directory, clock, new RecordingDesktop(), new AbortController().signal, 0, transport);

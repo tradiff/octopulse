@@ -22,6 +22,18 @@
   -webkit-font-smoothing: antialiased;
 }
 * { box-sizing: border-box; }
+.settings-form { max-width: 760px; padding-bottom: 36px; }
+.settings-form h1 { font-size: 1.8rem; margin: 0 0 8px; }
+.settings-form > p { max-width: 65ch; margin: 0 0 28px; }
+.settings-section { border-top: 1px solid var(--line); padding: 20px 0 28px; margin-top: 12px; }
+.settings-section legend { font-size: 1.15rem; text-transform: none; letter-spacing: normal; color: var(--ink); font-weight: 600; padding-right: 14px; }
+.settings-field { display: grid; gap: 6px; margin-bottom: 18px; max-width: 560px; }
+.settings-field label { font-weight: 550; }
+.settings-field input, .settings-field select { width: 100%; min-width: 0; caret-color: var(--accent); }
+.settings-field small { font-size: .9rem; }
+.settings-check { display: flex; gap: 10px; align-items: center; margin: 0 0 18px; }
+.settings-check input { min-height: 18px; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); flex-shrink: 0; }
+.token-source { margin: 2px 0 0; max-width: 65ch; font-size: .95rem; }
 body { margin: 0; background: var(--bg); color: var(--ink); }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; }

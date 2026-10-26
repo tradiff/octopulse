@@ -10,10 +10,13 @@ import type { Monitor } from './monitor.js';
 import type { Delivery } from './delivery.js';
 import type { Diagnostics } from './diagnostics.js';
 import { pullRequestUrl } from './config.js';
+import type { Settings } from './settings.js';
 
 export interface LocalApplication {
   store: Store; monitor: Monitor; delivery: Pick<Delivery, 'resend'>; logs: Diagnostics; login: string; teams: string[];
   track(url: string, signal: AbortSignal): Promise<void>;
+  settings?: Settings;
+  updateSettings?(body: unknown): Promise<void>;
 }
 
 export async function listenLocal(app: LocalApplication, port: number) {
@@ -59,7 +62,7 @@ export async function listenLocal(app: LocalApplication, port: number) {
     const method = request.method ?? 'GET';
     const read = method === 'GET' || method === 'HEAD';
     if (read) {
-      const page = ['/', '/notification-history', '/logs'].includes(url.pathname) ? assets.get('/') : assets.get(url.pathname);
+      const page = ['/', '/notification-history', '/logs', '/settings'].includes(url.pathname) ? assets.get('/') : assets.get(url.pathname);
       if (page) { response.writeHead(200, { 'Content-Type': `${page.type}; charset=utf-8` }); response.end(method === 'HEAD' ? undefined : page.data); return; }
       if (url.pathname === '/health') { send(response, 200, { status: 'ok' }, method === 'HEAD'); return; }
       if (method !== 'GET') { send(response, 404, { error: 'Not found' }, true); return; }
@@ -77,6 +80,7 @@ export async function listenLocal(app: LocalApplication, port: number) {
         send(response, 200, pullRequestActivity(app.store, pr, cursor)); return;
       }
       switch (url.pathname) {
+        case '/api/settings': send(response, 200, app.settings?.view() ?? {}); return;
         case '/api/me': send(response, 200, { login: app.login, teams: app.teams, actionToken: token }); return;
         case '/api/tracked-pull-requests':
         case '/api/inactive-pull-requests':
@@ -91,7 +95,8 @@ export async function listenLocal(app: LocalApplication, port: number) {
     }
     const untrack = /^\/api\/tracked-pull-requests\/([^/]+)$/.exec(url.pathname);
     const resend = /^\/api\/notification-records\/(\d+)\/resend$/.exec(url.pathname);
-    const mutation = method === 'POST' && url.pathname === '/api/tracked-pull-requests' || method === 'DELETE' && untrack || method === 'POST' && resend;
+    const settings = method === 'PUT' && url.pathname === '/api/settings';
+    const mutation = settings || method === 'POST' && url.pathname === '/api/tracked-pull-requests' || method === 'DELETE' && untrack || method === 'POST' && resend;
     if (!mutation) { send(response, 404, { error: 'Not found' }); return; }
     if (request.headers.origin !== origin || request.headers['x-octopulse-action'] !== token || request.headers['sec-fetch-site'] === 'cross-site') {
       send(response, 403, { error: 'Same-origin action authorization required' }); return;
@@ -99,7 +104,11 @@ export async function listenLocal(app: LocalApplication, port: number) {
     if (request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() !== 'application/json') { send(response, 400, { error: 'Expected a JSON body' }); return; }
     let body: unknown;
     try { body = await json(request); } catch { send(response, 400, { error: 'Invalid or oversized JSON body' }); return; }
-    if (untrack) {
+    if (settings) {
+      if (!app.updateSettings || !app.settings) { send(response, 503, { error: 'Settings unavailable' }); return; }
+      try { await app.updateSettings(body); send(response, 200, app.settings.view()); }
+      catch { send(response, 400, { error: 'Unable to save settings. Check durations, provider URL, and required credentials, then retry.' }); }
+    } else if (untrack) {
       try { app.monitor.untrack(decodeURIComponent(untrack[1]!)); send(response, 200, { status: 'untracked' }); }
       catch { send(response, 400, { error: 'Unknown pull request' }); }
     } else if (resend) {

@@ -1,42 +1,37 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { parseConfig } from './config.js';
 import { startApplication } from './application.js';
 import { LinuxDesktop } from './linux-desktop.js';
 import { startTray } from './tray.js';
 import type { Fetch } from './http.js';
 
 export function daemonOptions(args: string[], home = homedir()) {
-  const { values } = parseArgs({ args, options: { config: { type: 'string' }, profile: { type: 'string' }, development: { type: 'boolean' },
+  const { values } = parseArgs({ args, options: { profile: { type: 'string' }, development: { type: 'boolean' },
     instance: { type: 'string' }, port: { type: 'string' } }, strict: true });
   const instance = values.instance ?? 'octopulse';
   if (!/^[a-z][a-z0-9-]{0,63}$/.test(instance)) throw new Error('Invalid instance name');
   const port = values.port === undefined ? (values.development ? 0 : 3000) : Number(values.port);
   if (values.port !== undefined && (!/^\d+$/.test(values.port) || !Number.isInteger(port) || port < 1 || port > 65535)) throw new Error('Port must be between 1 and 65535');
-  if ((values.config === undefined) !== (values.profile === undefined)) throw new Error('Specify both --config and --profile');
-  if (values.development && (!values.config || !values.profile)) throw new Error('Development requires explicit --config and --profile');
-  const config = values.config ?? join(home, '.config', instance, 'config.toml');
+  if (values.development && !values.profile) throw new Error('Development requires an explicit --profile');
   const profile = values.profile ?? join(home, '.local/state', instance);
-  if (!isAbsolute(config) || !isAbsolute(profile)) throw new Error('Config and profile paths must be absolute');
-  return { config, profile, port, instance };
+  if (!isAbsolute(profile)) throw new Error('Profile path must be absolute');
+  return { profile, port, instance };
 }
 
 export async function runDaemon(options: ReturnType<typeof daemonOptions>, shutdown: AbortController, fetch: Fetch = globalThis.fetch,
   environment: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const config = parseConfig(await readFile(options.config, 'utf8'));
   const clock = { now: () => new Date().toISOString() };
   let desktop: LinuxDesktop | undefined;
   let application: Awaited<ReturnType<typeof startApplication>> | undefined;
   let tray: Awaited<ReturnType<typeof startTray>> | undefined;
   try {
-    application = await startApplication(config, options.profile, clock, (store, login) => {
-      desktop = new LinuxDesktop(store, login, options.profile, clock, { address: environment.DBUS_SESSION_BUS_ADDRESS ?? '', instance: options.instance },
+    application = await startApplication(undefined, options.profile, clock, (store, login) => {
+      desktop ??= new LinuxDesktop(store, login, options.profile, clock, { address: environment.DBUS_SESSION_BUS_ADDRESS ?? '', instance: options.instance },
         message => application?.logs.write('warn', message));
       return desktop;
-    }, shutdown.signal, options.port, fetch);
+    }, shutdown.signal, options.port, fetch, environment);
     const app = application;
     shutdown.signal.throwIfAborted();
     tray = await startTray(app.origin, () => shutdown.abort(), message => app.logs.write('info', message), { environment, instance: options.instance });
@@ -61,6 +56,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.platform !== 'linux') throw new Error('Octopulse requires Linux');
     await runDaemon(daemonOptions(process.argv.slice(2)), shutdown);
   } catch {
-    console.error('Octopulse startup or shutdown failed; check configuration and profile diagnostics'); process.exitCode = 1;
+    console.error('Octopulse startup or shutdown failed; check settings and profile diagnostics'); process.exitCode = 1;
   } finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
 }

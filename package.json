@@ -29,7 +29,6 @@
     "markdown-it": "15.0.3",
     "parse5": "8.0.1",
     "sharp": "0.35.5",
-    "smol-toml": "1.9.1",
     "zod": "4.6.7"
   },
   "devDependencies": {

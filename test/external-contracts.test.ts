@@ -8,7 +8,8 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import Database from 'better-sqlite3';
-import { parseConfig, duration, pullRequestUrl } from '../src/config.js';
+import { Config, duration, pullRequestUrl } from '../src/config.js';
+import { Settings } from '../src/settings.js';
 import { Store } from '../src/store.js';
 import { Profile } from '../src/profile.js';
 import { Monitor } from '../src/monitor.js';
@@ -34,7 +35,7 @@ const snapshot = githubSnapshot(wirePr, 7);
 const comment = { id: 55, user: { login: 'bea', type: 'User' }, body: 'Please fix', created_at: T, updated_at: T };
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers });
 const emptySearch = () => json({ total_count: 0, incomplete_results: false, items: [] });
-const configText = '[github]\ntoken = "github-secret"\n';
+const configInput = { github: { token: 'github-secret' } };
 
 async function setup(t: TestContext) {
   const directory = await temporaryProfile();
@@ -47,25 +48,30 @@ async function setup(t: TestContext) {
   return { directory, store, clock, monitor };
 }
 
-test('strict TOML defaults, aliases, URL roots, and secret-free invalid configuration errors', () => {
-  const minimal = parseConfig(configText);
+test('settings defaults, duration aliases, URL roots, and secret-free validation errors', () => {
+  const minimal = Config.parse(configInput);
   assert.deepEqual(minimal.timings, { tracked_poll_interval: 60_000, discovery_poll_interval: 300_000, grace_period: 604_800_000 });
   assert.equal(minimal.logging.retention, 14 * 86_400_000);
   assert.equal(minimal.history.raw_payload_retention, 30 * 86_400_000);
   for (const [value, expected] of [[' 1.5 MiNs ', 90_000], ['0.5 ms', 1], ['1 DAY', 86_400_000], ['1hour', 3_600_000], ['2secs', 2000]] as const) assert.equal(duration(value), expected);
   for (const value of ['0 ms', '0.49ms', '-1s', '1m 2s', '1 week', '1e3s', 'Infinity s', '999999999999999999999d']) assert.throws(() => duration(value));
   for (const root of ['https://provider.example', 'https://provider.example/v1/', 'http://provider.example///']) {
-    const config = parseConfig(`${configText}\n[system_one]\nbase_url = " ${root} "\napi_key = " provider-secret "`);
+    const config = Config.parse({ ...configInput, system_one: { base_url: ` ${root} `, api_key: ' provider-secret ' } });
     assert.equal(config.system_one!.model, 'jev-latest');
     assert.equal(config.system_one!.base_url, root.startsWith('https') ? 'https://provider.example/v1/systemone' : 'http://provider.example/v1/systemone');
   }
-  for (const text of ['', '[github]\ntoken=7', `${configText}typo="github-secret"`, `${configText}[unknown]\nkey="provider-secret"`,
-    `${configText}[timings]\ntracked_poll_interval=3`, `${configText}[logging]\nlevel="trace"`, '[github]\ntoken="github-secret',
-    `${configText}[system_one]\nbase_url="https://provider-secret@example.com"\napi_key="provider-secret"`]) {
-    assert.throws(() => parseConfig(text), error => error instanceof Error && !/github-secret|provider-secret/.test(error.message));
-  }
-  assert.throws(() => parseConfig(`${configText}[openai]\napi_key="provider-secret"`), /Replace obsolete openai.*system_one/);
-  for (const suffix of ['?x=1', '#fragment', '?', '#']) assert.throws(() => parseConfig(`${configText}[system_one]\nbase_url="https://host${suffix}"\napi_key="key"`));
+  const store = new Store(':memory:');
+  try {
+    const settings = new Settings(store, undefined, {});
+    for (const input of ['', { github: { token: 7 } }, { github: { token: 'github-secret', typo: true } },
+      { ...configInput, unknown: { key: 'provider-secret' } }, { ...configInput, timings: { tracked_poll_interval: 3 } },
+      { ...configInput, logging: { level: 'trace' } },
+      { ...configInput, system_one: { base_url: 'https://provider-secret@example.com', api_key: 'provider-secret', model: 'model' } }]) {
+      assert.throws(() => settings.update(input), error => error instanceof Error && !/github-secret|provider-secret/.test(error.message));
+    }
+    for (const suffix of ['?x=1', '#fragment', '?', '#']) assert.throws(() => settings.update({ ...configInput,
+      system_one: { base_url: `https://host${suffix}`, api_key: 'key', model: 'model' } }));
+  } finally { store.close(); }
 });
 
 test('manual URLs require exact GitHub HTTPS PR paths and positive safe numbers', () => {
@@ -76,7 +82,7 @@ test('manual URLs require exact GitHub HTTPS PR paths and positive safe numbers'
 });
 
 test('System One sends only body state, lowercase Choice wire schema and its own bearer credential', async () => {
-  const config = parseConfig(`${configText}[system_one]\nbase_url="https://provider.example/v1"\napi_key="provider-secret"`).system_one!;
+  const config = Config.parse({ ...configInput, system_one: { base_url: 'https://provider.example/v1', api_key: 'provider-secret' } }).system_one!;
   let calls = 0;
   const provider = new SystemOne(config, async (url, init) => {
     calls++;
@@ -298,13 +304,14 @@ test('failed discovery drains in-flight details before rejecting and does not st
   assert.equal(finished, 3);
 });
 
-test('startup override skips user lookup, team failure warns, discovery deduplicates and preserves manual untrack', async t => {
+test('startup resolves GitHub identity, team failure warns, discovery deduplicates and preserves manual untrack', async t => {
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
   const clock = new VirtualClock(T);
-  const config = parseConfig(`${configText}login="ALEX"`);
+  const config = Config.parse(configInput);
   const calls: string[] = [];
   const fetch: Fetch = async input => {
     const url = new URL(input); calls.push(url.pathname);
+    if (url.pathname === '/user') return json({ login: 'ALEX' });
     if (url.pathname === '/user/teams') return json({}, 500);
     if (url.pathname === '/search/issues') return json({ total_count: 1, incomplete_results: false, items: [
       { id: 999, number: 7, repository_url: 'https://api.github.com/repos/acme/widget', pull_request: { url: 'https://api.github.com/repos/acme/widget/pulls/7' } },
@@ -322,12 +329,12 @@ test('startup override skips user lookup, team failure warns, discovery deduplic
   assert.equal(restarted.profile.store.pr('101')!.manualUntracked, true);
   assert.equal(restarted.logs.read('warn').length, 2);
   await restarted.stop();
-  assert.equal(calls.includes('/user'), false);
+  assert.equal(calls.filter(path => path === '/user').length, 2);
 });
 
 test('capped startup discovery fails after preserving successful PR details and releases ownership', async t => {
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
-  await assert.rejects(startRuntime(parseConfig(configText), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async input => {
+  await assert.rejects(startRuntime(Config.parse(configInput), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async input => {
     const url = new URL(input);
     if (url.pathname === '/user') return json({ login: 'alex' });
     if (url.pathname === '/user/teams') return json([]);
@@ -418,8 +425,8 @@ test('desktop contract keeps sticky lifetime, inert markup, saved text and capab
 
 test('fatal identity failure and successful empty discovery stay distinguishable', async t => {
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
-  await assert.rejects(startRuntime(parseConfig(configText), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async () => json({}, 401)), /startup failed/);
-  const runtime = await startRuntime(parseConfig(configText), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async url => {
+  await assert.rejects(startRuntime(Config.parse(configInput), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async () => json({}, 401)), /startup failed/);
+  const runtime = await startRuntime(Config.parse(configInput), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async url => {
     if (url.endsWith('/user')) return json({ login: 'alex' });
     if (url.includes('/user/teams')) return json([]);
     return emptySearch();
@@ -457,13 +464,13 @@ test('missing legacy review targets refresh per PR and survive a partially faile
     if (number === 8 && fail) return json({}, 503);
     return json({ ...wirePr, id: number === 7 ? 101 : 102, number, requested_reviewers: [{ login: 'bea' }] });
   };
-  await assert.rejects(startRuntime(parseConfig(configText), directory, new VirtualClock(T), new RecordingDesktop(), signal(), fetch), /upgrade refresh/);
+  await assert.rejects(startRuntime(Config.parse(configInput), directory, new VirtualClock(T), new RecordingDesktop(), signal(), fetch), /upgrade refresh/);
   const partial = new Profile(directory);
   assert.equal(partial.store.pr('101')!.manualUntracked, true);
   assert.deepEqual(partial.store.pr('101')!.snapshot.requestedReviewers, ['bea']);
   assert.deepEqual(JSON.parse(partial.store.metadata('reviewRefreshPending')!), ['102']); partial.close();
   fail = false;
-  const runtime = await startRuntime(parseConfig(configText), directory, new VirtualClock(T), new RecordingDesktop(), signal(), fetch);
+  const runtime = await startRuntime(Config.parse(configInput), directory, new VirtualClock(T), new RecordingDesktop(), signal(), fetch);
   assert.deepEqual(calls, [7, 8, 8]);
   assert.equal(runtime.profile.store.metadata('reviewRefreshPending'), '[]');
   assert.equal(runtime.profile.store.metadata('reviewBaseline'), T);
@@ -535,7 +542,7 @@ test('runtime shutdown aborts a manual lookup before closing its profile', async
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
   let began!: () => void;
   const started = new Promise<void>(resolve => { began = resolve; });
-  const runtime = await startRuntime(parseConfig(configText), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async url => {
+  const runtime = await startRuntime(Config.parse(configInput), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async url => {
     if (url.endsWith('/user')) return json({ login: 'alex' });
     if (url.includes('/user/teams')) return json([]);
     if (url.includes('/search/issues')) return emptySearch();
@@ -549,15 +556,31 @@ test('runtime shutdown aborts a manual lookup before closing its profile', async
 test('offline maintenance refuses a live profile, then reclaims privately without network credentials', async t => {
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
   const profile = new Profile(directory);
-  const config = join(directory, 'config.toml'); await writeFile(config, configText, { mode: 0o600 });
+  const settings = new Settings(profile.store, undefined, {});
+  settings.update({ github: {}, history: { raw_payload_retention: '1 day' } });
+  const now = new Date().toISOString();
+  const monitor = new Monitor(profile.store, { now: () => now }, 'alex', [], now);
+  monitor.track(snapshot, 'manual');
+  profile.store.bindIdentity('alex', now);
+  const old = profile.store.rawInput('101', 'comments', { body: 'old' }, new Date(Date.now() - 2 * 86_400_000).toISOString());
+  const recent = profile.store.rawInput('101', 'comments', { body: 'recent' }, new Date(Date.now() - 3_600_000).toISOString());
+  const unfinished = profile.store.rawInput('101', 'comments', { body: 'unfinished' }, new Date(Date.now() - 3 * 86_400_000).toISOString());
+  profile.store.completeRaw('101', [old, recent]);
+  const saved = profile.store.metadata('settings');
   const command = fileURLToPath(new URL('../src/maintenance.js', import.meta.url));
-  const args = [command, '--config', config, '--profile', directory];
+  const args = [command, '--profile', directory];
   const refused = spawnSync(process.execPath, args, { encoding: 'utf8' });
   assert.equal(refused.status, 1); assert.doesNotMatch(refused.stderr, /github-secret/);
   profile.close();
   const success = spawnSync(process.execPath, args, { encoding: 'utf8' });
   assert.equal(success.status, 0, success.stderr);
   assert.equal((await stat(join(directory, 'state.sqlite'))).mode & 0o777, 0o600);
+  const reopened = new Profile(directory);
+  try {
+    assert.deepEqual(reopened.store.rawInputs('101').map(item => item.id), [recent, unfinished]);
+    assert.equal(reopened.store.metadata('settings'), saved);
+    assert.equal(reopened.store.metadata('login'), 'alex');
+  } finally { reopened.close(); }
 });
 
 test('avatar bounds reject active content, use a private cache, and retain it on a failed refresh', async t => {
@@ -606,7 +629,7 @@ test('recurring desktop failure is logged and delivery recovers independently of
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
   const clock = new VirtualClock(T); let offline = false;
   const desktop = new RecordingDesktop(); desktop.results = ['transient', 'sent'];
-  const runtime = await startRuntime(parseConfig(configText), directory, clock, desktop, signal(), async url => {
+  const runtime = await startRuntime(Config.parse(configInput), directory, clock, desktop, signal(), async url => {
     if (offline) return json({}, 503);
     if (url.endsWith('/user')) return json({ login: 'alex' });
     if (url.includes('/user/teams')) return json([]);

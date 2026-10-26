@@ -4,14 +4,14 @@ import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { test } from 'node:test';
 import { startApplication } from '../src/application.js';
-import { parseConfig } from '../src/config.js';
+import { Config } from '../src/config.js';
 import { Monitor } from '../src/monitor.js';
 import { Snapshot } from '../src/model.js';
 import { Profile } from '../src/profile.js';
 import { completeSources, RecordingDesktop, temporaryProfile, VirtualClock } from './fixture.js';
 
 const T = '2026-10-23T12:00:00.000Z';
-const config = parseConfig('[github]\ntoken="synthetic-local-startup"');
+const config = Config.parse({ github: { token: 'synthetic-local-startup' } });
 const emptySearch = () => Response.json({ total_count: 0, incomplete_results: false, items: [] });
 
 test('saved PRs, activity, notification history, identity and teams serve while GitHub identity is blocked', async t => {

@@ -15,7 +15,7 @@ export async function uninstallUserService(home, { run = execute, confirmDataRem
   const unit = join(home, '.config/systemd/user/octopulse.service');
   const launcher = join(home, '.local/bin/octopulse');
   const identity = join(home, '.local/share/applications/octopulse.desktop');
-  const dataDirectories = [join(home, '.config/octopulse'), join(home, '.local/state/octopulse')];
+  const dataDirectories = [join(home, '.local/state/octopulse')];
   const managed = [];
   for (const path of [unit, launcher, identity]) {
     try {
@@ -70,11 +70,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       confirmDataRemoval: async directories => {
         if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
         const prompt = createInterface({ input: process.stdin, output: process.stdout });
-        try { return /^(y|yes)$/i.test((await prompt.question(`Delete all Octopulse data, including config, database, history, logs, caches, and these directories?\n${directories.join('\n')}\nThis cannot be undone. [y/N] `)).trim()); }
+        try { return /^(y|yes)$/i.test((await prompt.question(`Delete all Octopulse data, including settings, database, history, logs, caches, and these directories?\n${directories.join('\n')}\nThis cannot be undone. [y/N] `)).trim()); }
         finally { prompt.close(); }
       },
     });
     console.log(`Removed ${result.removed.length} files or directories.`);
-    console.log(result.dataRemoved ? 'All Octopulse data directories removed.' : 'Octopulse config and data kept (if present).');
+    console.log(result.dataRemoved ? 'All Octopulse data directories removed.' : 'Octopulse settings and data kept (if present).');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

@@ -40,7 +40,7 @@ try {
   for (const directory of ['dist/src', 'web', 'assets']) {
     await cp(join(root, directory), join(bundle, directory), { recursive: true });
   }
-  for (const file of ['package.json', 'package-lock.json', 'config.example.toml', 'README.md']) {
+  for (const file of ['package.json', 'package-lock.json', 'README.md']) {
     await cp(join(root, file), join(bundle, file));
   }
   await mkdir(join(bundle, 'scripts'));

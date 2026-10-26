@@ -9,9 +9,8 @@ import { userServiceFiles } from './deploy-user-service.mjs';
 const execute = promisify(execFile);
 
 export async function installUserService(root, home, { run = execute } = {}) {
-  const { unit, launcher, config, files } = userServiceFiles(root, home);
+  const { unit, launcher, files } = userServiceFiles(root, home);
   for (const path of ['dist/src/daemon.js', 'web/index.html', 'assets/octopulse-mark-small-white.svg']) await readFile(join(root, path));
-  files.set(config, await readFile(join(root, 'config.example.toml'), 'utf8'));
   const created = [];
   for (const [path, text] of files) {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -23,7 +22,7 @@ export async function installUserService(root, home, { run = execute } = {}) {
     }
   }
   if (created.includes(unit)) await run('systemctl', ['--user', 'daemon-reload']);
-  return { config, created };
+  return { created };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -31,6 +30,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.argv.length !== 2) throw new Error('Usage: npm run user-service:install');
     const result = await installUserService(fileURLToPath(new URL('../', import.meta.url)), homedir());
     console.log(`Created ${result.created.length} missing files; existing files preserved.`);
-    console.log(`Set github.token in ${result.config}, then run: systemctl --user enable --now octopulse.service`);
+    console.log('Run systemctl --user enable --now octopulse.service, then configure Settings at http://127.0.0.1:3000.');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

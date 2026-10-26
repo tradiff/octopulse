@@ -14,27 +14,33 @@ import { Scheduler } from './scheduler.js';
 import { SystemOne } from './system-one.js';
 import type { Fetch } from './http.js';
 import type { Store } from './store.js';
+import { Settings } from './settings.js';
 
 export type RuntimeDesktop = Desktop | ((store: Store, login: string) => Desktop);
 
-export function openRuntime(config: Config, directory: string, clock: Clock, desktop: RuntimeDesktop, signal: AbortSignal, fetch: Fetch = globalThis.fetch) {
+export function openRuntime(initial: Config | undefined, directory: string, clock: Clock, desktop: RuntimeDesktop, signal: AbortSignal, fetch: Fetch = globalThis.fetch,
+  environment: NodeJS.ProcessEnv = {}) {
   const profile = new Profile(directory);
   try {
     const store = profile.store;
+    const settings = new Settings(store, initial, environment);
+    let config = settings.effective();
     const logs = new Diagnostics(join(directory, 'logs'), clock, config.logging.level, config.logging.retention,
       [config.github.token, config.system_one?.api_key ?? '']);
-    const shutdown = new AbortController();
-    const connectionSignal = AbortSignal.any([signal, shutdown.signal]);
+    let shutdown = new AbortController();
+    let connectionSignal = AbortSignal.any([signal, shutdown.signal]);
     let connected: Awaited<ReturnType<typeof connectRuntime>> | undefined;
     let connecting: Promise<void> | undefined;
     let stopped: Promise<void> | undefined;
     let retryAt = 0;
+    let updating = false;
     const savedTeams = () => z.array(z.string()).parse(JSON.parse(store.metadata('teams') ?? '[]'));
     const savedMonitor = () => new Monitor(store, clock, store.metadata('login') ?? '', savedTeams(), store.metadata('reviewBaseline') ?? clock.now(), undefined, config.timings.grace_period);
     let cached = savedMonitor();
     const initialize = (): Promise<void> => {
       if (stopped || connectionSignal.aborted) return Promise.reject(new Error('Runtime is stopped'));
       if (connected) return Promise.resolve();
+      if (!config.github.token) return Promise.resolve();
       if (!connecting) {
         connecting = connectRuntime(config, profile, logs, clock, desktop, connectionSignal, fetch).then(runtime => {
           connected = runtime;
@@ -49,7 +55,26 @@ export function openRuntime(config: Config, directory: string, clock: Clock, des
       return connecting;
     };
     return {
-      profile, logs, initialize,
+      profile, logs, initialize, settings,
+      async updateSettings(body: unknown): Promise<void> {
+        if (updating || stopped) throw new Error('Settings are busy. Try again.');
+        updating = true;
+        try {
+          settings.update(body);
+          shutdown.abort();
+          await connecting?.catch(() => {});
+          await connected?.stop();
+          await cached.stop();
+          connected = undefined;
+          config = settings.effective();
+          logs.configure(config.logging.level, config.logging.retention, [config.github.token, config.system_one?.api_key ?? '']);
+          shutdown = new AbortController();
+          connectionSignal = AbortSignal.any([signal, shutdown.signal]);
+          cached = savedMonitor();
+          retryAt = 0;
+        } finally { updating = false; }
+        void initialize().catch(() => {});
+      },
       get login() { return connected?.login ?? store.metadata('login') ?? ''; },
       get teams() { return connected?.teams ?? savedTeams(); },
       get monitor() { return connected?.monitor ?? cached; },
@@ -63,7 +88,7 @@ export function openRuntime(config: Config, directory: string, clock: Clock, des
         await connected.track(url, callerSignal);
       },
       tick(): void {
-        if (stopped || connectionSignal.aborted) return;
+        if (stopped || updating || connectionSignal.aborted) return;
         if (connected) connected.tick();
         else if (!connecting && Date.parse(clock.now()) >= retryAt) void initialize().catch(() => {});
       },
@@ -99,7 +124,7 @@ async function connectRuntime(config: Config, profile: Profile, logs: Diagnostic
   let monitor: Monitor | undefined;
   let phase = 'identity';
   try {
-    const login = canonical(config.github.login ?? await github.identity(signal));
+    const login = canonical(await github.identity(signal));
     phase = 'profile identity binding';
     const initialized = store.metadata('login') === login && store.metadata('discoveryComplete') !== undefined
       && z.array(z.string()).parse(JSON.parse(store.metadata('reviewRefreshPending') ?? '[]')).length === 0;

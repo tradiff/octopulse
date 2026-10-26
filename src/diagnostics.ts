@@ -10,11 +10,17 @@ const Entry = z.object({ at: Instant, level: z.enum(levels), message: z.string()
 
 export class Diagnostics {
   private day: string | undefined;
-  constructor(private readonly directory: string, private readonly clock: Clock, private readonly minimum: Level,
-    private readonly retentionMs: number, private readonly secrets: string[], private readonly output: (line: string) => void = console.error,
+  constructor(private readonly directory: string, private readonly clock: Clock, private minimum: Level,
+    private retentionMs: number, private readonly secrets: string[], private readonly output: (line: string) => void = console.error,
   ) {
     try { mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700); this.prune(); }
     catch { this.output('Octopulse diagnostic initialization failed'); }
+  }
+
+  configure(minimum: Level, retentionMs: number, secrets: string[]): void {
+    this.minimum = minimum; this.retentionMs = retentionMs;
+    for (const secret of secrets) if (secret && !this.secrets.includes(secret)) this.secrets.push(secret);
+    try { this.prune(); } catch { this.output('Octopulse diagnostic pruning failed'); }
   }
 
   private redact(text: string): string {

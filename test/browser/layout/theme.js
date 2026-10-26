@@ -48,6 +48,7 @@ export async function themeAndAccessibility(page, capture) {
     check(Math.abs(heading.x - review.x) < 2, 'Review column aligns with its heading');
     await summary.focus(); await page.keyboard.press('Enter');
     check(await page.getByRole('heading', { name: 'Review state', exact: true }).first().isVisible(), 'Full reviewer groups remain available in details');
+    await page.locator('.pr[open] .comment-body').first().waitFor();
     const expandedStyle = await page.locator('.pr[open]').first().evaluate(row => {
       const style = selector => getComputedStyle(row.querySelector(selector));
       return {

@@ -9,8 +9,9 @@ import { pullRequestUrl } from '../src/config.js';
 import { listenLocal } from '../src/server.js';
 import { VirtualClock, RecordingDesktop, completeSources, temporaryProfile } from './fixture.js';
 import { reviewComment } from './comment-fixture.js';
+import { Settings } from '../src/settings.js';
 
-export async function webFixture(richComments = false) {
+export async function webFixture(richComments = false, environment: NodeJS.ProcessEnv = { GITHUB_TOKEN: 'fixture-environment-token' }) {
   const directory = await temporaryProfile();
   const profile = new Profile(directory); const store = profile.store;
   const clock = new VirtualClock('2026-10-22T12:00:00Z');
@@ -40,8 +41,10 @@ export async function webFixture(richComments = false) {
   await delivery.runDue();
   logs.write('info', 'Synthetic discovery complete', { count: snapshots.length }); logs.write('warn', 'Synthetic provider timeout', { recovered: true });
   let tracks = 0;
+  const settings = new Settings(store, undefined, environment);
   const app = {
     store, monitor, delivery, logs, login: 'alex', teams: ['acme/platform'],
+    settings, async updateSettings(body: unknown) { settings.update(body); },
     async track(input: string, signal: AbortSignal) {
       signal.throwIfAborted(); tracks++;
       const target = pullRequestUrl(input);

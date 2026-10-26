@@ -13,18 +13,18 @@ const work = await mkdtemp(join(tmpdir(), 'opencode/octopulse-uninstall-check-')
 async function setup(name) {
   const home = join(work, name);
   const { unit, files } = userServiceFiles(work, home);
-  const config = join(home, '.config/octopulse/config.toml');
+  const unrelated = join(home, '.config/unrelated/settings.json');
   const state = join(home, '.local/state/octopulse/state.sqlite');
-  const dataDirectories = [dirname(config), dirname(state)];
+  const dataDirectories = [dirname(state)];
   const otherUnit = join(home, '.config/systemd/user/octopulse-test.service');
-  for (const [path, text] of [...files, [config, 'Synthetic config'], [state, 'Saved activity'], [otherUnit, 'Other instance'],
+  for (const [path, text] of [...files, [unrelated, 'Unrelated settings'], [state, 'Saved activity'], [otherUnit, 'Other instance'],
     [join(dirname(state), 'logs/day.jsonl'), 'Saved logs'], [join(dirname(state), 'cache/avatars/user.png'), 'Cached avatar'],
-    [join(dirname(config), 'nested/extra.toml'), 'Additional config'], [join(home, '.local/state/octopulse-test/state.sqlite'), 'Other instance data']]) {
+    [join(home, '.local/state/octopulse-test/state.sqlite'), 'Other instance data']]) {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, text);
   }
   new Database(join(dirname(state), 'ownership.sqlite')).close();
-  return { home, unit, files, config, state, otherUnit, dataDirectories };
+  return { home, unit, files, unrelated, state, otherUnit, dataDirectories };
 }
 const missing = path => assert.rejects(lstat(path), { code: 'ENOENT' });
 try {
@@ -52,12 +52,12 @@ try {
     if (answer === true) {
       for (const path of fixture.dataDirectories) await missing(path);
     } else {
-      assert.equal(await readFile(fixture.config, 'utf8'), 'Synthetic config');
       assert.equal(await readFile(fixture.state, 'utf8'), 'Saved activity');
       assert.equal(await readFile(join(dirname(fixture.state), 'logs/day.jsonl'), 'utf8'), 'Saved logs');
       assert.equal(await readFile(join(dirname(fixture.state), 'cache/avatars/user.png'), 'utf8'), 'Cached avatar');
     }
     assert.equal(prompts, answer === undefined ? 0 : 1);
+    assert.equal(await readFile(fixture.unrelated, 'utf8'), 'Unrelated settings');
     assert.equal(await readFile(fixture.otherUnit, 'utf8'), 'Other instance');
     assert.equal(await readFile(join(fixture.home, '.local/state/octopulse-test/state.sqlite'), 'utf8'), 'Other instance data');
     for (const directory of ['.config', '.local/state', '.local/bin', '.local/share/applications']) assert.ok((await lstat(join(fixture.home, directory))).isDirectory());
@@ -75,7 +75,7 @@ try {
       confirmDataRemoval: async () => assert.fail('Must not prompt'),
     }), /unmanaged file/);
     assert.deepEqual(await Promise.all(paths.map(path => readFile(path, 'utf8'))), before);
-    assert.equal(await readFile(fixture.config, 'utf8'), 'Synthetic config');
+    assert.equal(await readFile(fixture.unrelated, 'utf8'), 'Unrelated settings');
   }
 
   const linked = await setup('symlink');
@@ -94,7 +94,7 @@ try {
     confirmDataRemoval: async () => assert.fail('Must not prompt after failure'),
   }), /Systemd unavailable/);
   for (const [path, text] of failed.files) assert.equal(await readFile(path, 'utf8'), text);
-  assert.equal(await readFile(failed.config, 'utf8'), 'Synthetic config');
+  assert.equal(await readFile(failed.unrelated, 'utf8'), 'Unrelated settings');
 
   const partial = await setup('partial');
   await rm(partial.unit);
@@ -110,16 +110,9 @@ try {
     env: { ...process.env, HOME: piped.home }, encoding: 'utf8', input: 'yes\n', timeout: 5000,
   });
   assert.equal(cli.status, 0, cli.stdout + cli.stderr);
-  assert.match(cli.stdout, /config and data kept/);
-  assert.equal(await readFile(piped.config, 'utf8'), 'Synthetic config');
+  assert.match(cli.stdout, /settings and data kept/);
+  assert.equal(await readFile(piped.unrelated, 'utf8'), 'Unrelated settings');
   assert.equal(await readFile(piped.state, 'utf8'), 'Saved activity');
-
-  const stateOnly = await setup('state-only');
-  await rm(stateOnly.dataDirectories[0], { recursive: true });
-  assert.equal((await uninstallUserService(stateOnly.home, {
-    run: async () => {}, confirmDataRemoval: async () => true,
-  })).dataRemoved, true);
-  await missing(stateOnly.dataDirectories[1]);
 
   const active = await setup('active-profile');
   const ownership = new Database(join(dirname(active.state), 'ownership.sqlite'));
@@ -128,7 +121,7 @@ try {
     await assert.rejects(uninstallUserService(active.home, {
       run: async () => {}, confirmDataRemoval: async () => true,
     }), /stop any running Octopulse process/);
-    assert.equal(await readFile(active.config, 'utf8'), 'Synthetic config');
+    assert.equal(await readFile(active.unrelated, 'utf8'), 'Unrelated settings');
     assert.equal(await readFile(active.state, 'utf8'), 'Saved activity');
   } finally { ownership.close(); }
 

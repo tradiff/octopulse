@@ -14,7 +14,7 @@ import { Activity, Notification, Snapshot } from '../src/model.js';
 import { Scheduler } from '../src/scheduler.js';
 import { ActivityCursor, Store } from '../src/store.js';
 import { notificationHistory, pullRequests, pullRequestActivity } from '../src/views.js';
-import { parseConfig } from '../src/config.js';
+import { Config } from '../src/config.js';
 import { startRuntime } from '../src/runtime.js';
 import { startApplication } from '../src/application.js';
 import { avatarPng, completeSources, RecordingDesktop, temporaryProfile, VirtualClock } from './fixture.js';
@@ -390,7 +390,7 @@ test('avatars slower than the notification budget finish caching for the next de
 test('initialized restart serves saved state and recovers delivery during a discovery outage', async t => {
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
   const clock = new VirtualClock(T);
-  const config = parseConfig('[github]\ntoken="synthetic-secret"\n');
+  const config = Config.parse({ github: { token: 'synthetic-secret' } });
   let offline = false;
   const fetch = async (url: string) => {
     if (url.endsWith('/user')) return json({ login: 'alex' });
@@ -430,8 +430,8 @@ test('initialized restart serves saved state and recovers delivery during a disc
 test('degraded startup never bypasses first initialization, identity, or non-transient discovery failures', async t => {
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
   const clock = new VirtualClock(T);
-  const config = parseConfig('[github]\ntoken="synthetic-secret"\n');
-  const start = (identity: () => Promise<Response>, discovery: () => Promise<Response>, options = config) => startRuntime(options, directory, clock,
+  const config = Config.parse({ github: { token: 'synthetic-secret' } });
+  const start = (identity: () => Promise<Response>, discovery: () => Promise<Response>) => startRuntime(config, directory, clock,
     new RecordingDesktop(), signal(), async url => url.endsWith('/user') ? identity() : url.includes('/user/teams') ? json([]) : discovery());
   const alex = async () => json({ login: 'alex' });
   for (let attempt = 0; attempt < 2; attempt++) await assert.rejects(start(alex, async () => json({}, 503)), /during discovery/);
@@ -439,7 +439,6 @@ test('degraded startup never bypasses first initialization, identity, or non-tra
   await assert.rejects(start(async () => json({}, 401), async () => emptySearch()), /during identity/);
   await assert.rejects(start(async () => { throw new TypeError('Network unavailable'); }, async () => emptySearch()), /during identity/);
   await assert.rejects(start(async () => json({ login: 'different' }), async () => emptySearch()), /identity binding/);
-  await assert.rejects(start(alex, async () => emptySearch(), { ...config, github: { ...config.github, login: 'different' } }), /identity binding/);
   for (const response of [() => json({}, 401), () => json({}, 403), () => json({}),
     () => json({ total_count: 0, incomplete_results: true, items: [] }),
     () => new Response(null, { status: 302, headers: { location: 'https://[' } })]) {

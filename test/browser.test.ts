@@ -18,9 +18,14 @@ import { queueLayout } from './browser/layout/queue.js';
 import { themeAndAccessibility } from './browser/layout/theme.js';
 import { pagination } from './browser/pagination.js';
 import { identity } from './browser/identity.js';
+import { settings, settingsWithoutEnvironment, systemOneSettings, intervalPresets } from './browser/settings.js';
 
 type Capture = (name: string, options?: { fullPage?: boolean }) => Promise<void>;
-const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number; status: string }>][] = [
+const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number; status: string }>, NodeJS.ProcessEnv?][] = [
+  ['settings and credential sources', settings],
+  ['settings without environment credentials', settingsWithoutEnvironment, {}],
+  ['System One API key settings', systemOneSettings],
+  ['interval and retention presets', intervalPresets],
   ['current user avatar and fallback', identity],
   ['navigation, mutations and request races', navigation],
   ['repository search and keyboard interaction', repositories],
@@ -39,9 +44,9 @@ const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number
 test('browser interface', { timeout: 180_000 }, async t => {
   const browser = await chromium.launch();
   t.after(() => browser.close());
-  for (const [name, run] of cases) {
+  for (const [name, run, environment] of cases) {
     await t.test(name, { timeout: 30_000 }, async child => {
-      const fixture = await webFixture(true);
+      const fixture = await webFixture(true, environment);
       child.after(() => fixture.close());
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: 'dark' });
       child.after(() => context.close());

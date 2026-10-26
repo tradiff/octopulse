@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { parse } from 'smol-toml';
 import { z } from 'zod';
 
 const units: Record<string, number> = {};
@@ -29,7 +27,7 @@ const ProviderUrl = nonblank.refine(value => {
   } catch { return false; }
 }, 'Invalid provider root').transform(value => value.replace(/\/+$/, '').replace(/\/v1$/, '') + '/v1/systemone');
 export const Config = z.strictObject({
-  github: z.strictObject({ token: nonblank, login: nonblank.optional() }),
+  github: z.strictObject({ token: nonblank }),
   system_one: z.strictObject({ base_url: ProviderUrl, api_key: nonblank, model: nonblank.default('jev-latest') }).optional(),
   timings: z.strictObject({
     tracked_poll_interval: Duration.prefault('1m'), discovery_poll_interval: Duration.prefault('5m'), grace_period: Duration.prefault('7 days'),
@@ -38,21 +36,6 @@ export const Config = z.strictObject({
   history: z.strictObject({ raw_payload_retention: Duration.prefault('30 days') }).prefault({}),
 });
 export type Config = z.infer<typeof Config>;
-
-export function parseConfig(text: string): Config {
-  let input: unknown;
-  try { input = parse(text); } catch { throw new Error('Malformed TOML configuration'); }
-  if (input && typeof input === 'object' && 'openai' in input) throw new Error('Replace obsolete openai configuration with system_one and its own credential');
-  const result = Config.safeParse(input);
-  if (!result.success) throw new Error('Invalid configuration: check required values, types, durations, URLs and unknown keys');
-  return result.data;
-}
-
-export function loadConfig(path: string): Config {
-  let text: string;
-  try { text = readFileSync(path, 'utf8'); } catch { throw new Error('Cannot read configuration file'); }
-  return parseConfig(text);
-}
 
 export function pullRequestUrl(input: string): { repository: string; number: number } {
   let url: URL;

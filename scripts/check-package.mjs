@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -19,16 +19,13 @@ try {
     commands.push(args);
   });
   assert.ok((await readFile(installed.identity, 'utf8')).includes(`Icon=${join(installed.prefix, 'assets/octopulse-mark-small-white.svg')}\n`));
-  const config = '[github]\ntoken="synthetic"\nlogin="alex"\n';
-  await writeFile(installed.config, config);
   await installPackage(bundle, home, { activate: true }, async args => {
     commands.push(args);
   });
-  assert.equal(await readFile(installed.config, 'utf8'), config);
   assert.equal(commands.length, 4);
   const node = join(installed.prefix, 'runtime/bin/node');
   const probe = `
-    import { parseConfig } from './dist/src/config.js';
+    import assert from 'node:assert/strict';
     import { startApplication } from './dist/src/application.js';
     import { SessionBus } from './dist/src/session-bus.js';
     import { readFile } from 'node:fs/promises';
@@ -45,7 +42,7 @@ try {
       create: { width: 512, height: 512, channels: 3, background: '#2096aa' },
     }).jpeg().toBuffer();
     const avatars = new AvatarCache(
-      process.argv[2] + '/avatars',
+      process.argv[1] + '/avatars',
       { now: () => new Date().toISOString() },
       async () => new Response(source),
     );
@@ -59,19 +56,21 @@ try {
       await sharp(await readFile('./assets/' + file)).resize(22, 22).png().toBuffer();
     }
 
-    const config = parseConfig(await readFile(process.argv[1], 'utf8'));
-    const app = await startApplication(
-      config,
-      process.argv[2],
+    const start = environment => startApplication(
+      undefined,
+      process.argv[1],
       { now: () => new Date().toISOString() },
       { submit: async () => 'sent' },
       new AbortController().signal,
       0,
       async url => new Response(JSON.stringify(
-        url.includes('/user/teams') ? [] : { total_count: 0, incomplete_results: false, items: [] },
+        url.endsWith('/user') ? { login: 'alex' } : url.includes('/user/teams') ? [] : { total_count: 0, incomplete_results: false, items: [] },
       )),
+      environment,
     );
-    for (const path of ['/health', '/', '/app.js', '/app.css', '/icon.svg', '/notification-history', '/logs']) {
+    const app = await start({ GITHUB_TOKEN: 'synthetic-environment-token' });
+    await app.initialize();
+    for (const path of ['/health', '/', '/app.js', '/app.css', '/icon.svg', '/notification-history', '/logs', '/settings', '/api/settings']) {
       if ((await fetch(app.origin + path)).status !== 200) throw Error('Packaged route failed');
     }
     if (await (await fetch(app.origin + '/icon.svg')).text() !== await readFile('./assets/octopulse-mark-blue.svg', 'utf8')) {
@@ -80,17 +79,29 @@ try {
     if (await (await fetch(app.origin + '/favicon.svg')).text() !== await readFile('./assets/octopulse-mark-small-blue.svg', 'utf8')) {
       throw Error('Packaged favicon differs from the small blue mark');
     }
+    const me = await (await fetch(app.origin + '/api/me')).json();
+    const update = await fetch(app.origin + '/api/settings', { method: 'PUT',
+      headers: { Origin: app.origin, 'Content-Type': 'application/json', 'X-Octopulse-Action': me.actionToken },
+      body: JSON.stringify({ github: { token: 'synthetic-saved-token' }, logging: { retention: '7 days' } }) });
+    assert.equal(update.status, 200);
+    assert.ok(!(await update.text()).includes('synthetic-saved-token'));
     await app.stop();
-    console.log(JSON.stringify({ node: process.version, native: 'loaded', routes: 'pass', shutdown: 'pass' }));
+    const reopened = await start({});
+    await reopened.initialize();
+    assert.equal(reopened.settings.effective().github.token, 'synthetic-saved-token');
+    assert.equal(reopened.settings.view().logging.retention, '7 days');
+    assert.ok(!reopened.profile.store.metadata('settings').includes('synthetic-environment-token'));
+    await reopened.stop();
+    console.log(JSON.stringify({ node: process.version, native: 'loaded', routes: 'pass', settings: 'persisted', shutdown: 'pass' }));
   `;
-  const result = await execute(node, ['--input-type=module', '-e', probe, installed.config, join(home, '.local/state/disposable-profile')], {
+  const result = await execute(node, ['--input-type=module', '-e', probe, join(home, '.local/state/disposable-profile')], {
     cwd: installed.prefix,
     env: { HOME: home, PATH: '/nonexistent' },
     timeout: 30_000,
   });
   assert.equal(JSON.parse(result.stdout).node, 'v24.22.1');
   await execute('systemd-analyze', ['--user', 'verify', installed.unit], { env: { ...process.env, HOME: home }, timeout: 30_000 });
-  console.log('Packaged Node 24.22.1, SQLite, avatar resizing, HTTP assets, shutdown, config preservation, and systemd unit validation passed without a runtime PATH or compiler.');
+  console.log('Packaged Node 24.22.1, SQLite, avatar resizing, HTTP assets, shutdown, database settings persistence, and systemd unit validation passed without a runtime PATH or compiler.');
 } finally {
   await rm(work, { recursive: true, force: true });
 }

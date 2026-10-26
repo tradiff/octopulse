@@ -16,22 +16,21 @@ export function userServiceFiles(root, home) {
     throw new Error('Absolute single-line checkout and home paths are required');
   }
   const instance = 'octopulse';
-  const config = join(home, '.config/octopulse/config.toml');
   const profile = join(home, '.local/state/octopulse');
   const unit = join(home, '.config/systemd/user/octopulse.service');
   const launcher = join(home, '.local/bin/octopulse');
   const identity = join(home, '.local/share/applications/octopulse.desktop');
-  const args = [process.execPath, join(root, 'dist/src/daemon.js'), '--instance', instance, '--port', '3000', '--config', config, '--profile', profile];
+  const args = [process.execPath, join(root, 'dist/src/daemon.js'), '--instance', instance, '--port', '3000', '--profile', profile];
   const files = new Map([
     [unit, `${marker}\n[Unit]\nDescription=Octopulse GitHub pull request monitor\nAfter=network-online.target graphical-session.target\nPartOf=graphical-session.target\n\n[Service]\nType=simple\nWorkingDirectory=${root.replaceAll('%', '%%')}\nExecStart=${args.map(unitQuote).join(' ')}\nRestart=on-failure\nRestartSec=5\nUMask=0077\n\n[Install]\nWantedBy=graphical-session.target\n`],
     [launcher, `#!/bin/sh\n${marker}\nexec ${args.map(shellQuote).join(' ')} "$@"\n`],
     [identity, `${marker}\n[Desktop Entry]\nType=Application\nName=Octopulse\nComment=GitHub pull request monitor\nNoDisplay=true\nExec=xdg-open http://127.0.0.1:3000\nIcon=${join(root, 'assets/octopulse-mark-small-white.svg')}\nX-GNOME-UsesNotifications=true\n`],
   ]);
-  return { unit, launcher, identity, config, profile, files };
+  return { unit, launcher, identity, profile, files };
 }
 
 export async function deployUserService(root, home, { run = execute, request = fetch, healthTimeoutMs = 90_000 } = {}) {
-  const { unit, launcher, identity, config, profile, files: desired } = userServiceFiles(root, home);
+  const { unit, launcher, identity, profile, files: desired } = userServiceFiles(root, home);
   const instance = 'octopulse';
   const previous = new Map();
   for (const path of [unit, launcher, identity]) {
@@ -39,10 +38,9 @@ export async function deployUserService(root, home, { run = execute, request = f
     if (!text.startsWith(marker) && !text.startsWith(`#!/bin/sh\n${marker}`)) throw new Error(`Refusing to replace an unmanaged file: ${path}`);
     previous.set(path, text);
   }
-  for (const [flag, value] of [['--instance', instance], ['--port', '3000'], ['--config', config], ['--profile', profile]]) {
+  for (const [flag, value] of [['--instance', instance], ['--port', '3000'], ['--profile', profile]]) {
     if (!previous.get(unit).includes(`${unitQuote(flag)} ${unitQuote(value)}`)) throw new Error(`Existing service has a different ${flag}; local deploy will not change it`);
   }
-  await readFile(config);
   for (const path of ['dist/src/daemon.js', 'web/index.html', 'assets/octopulse-mark-small-white.svg']) await readFile(join(root, path));
   await run(process.execPath, ['--input-type=module', '-e',
     'import Database from "better-sqlite3"; import sharp from "sharp"; const db = new Database(":memory:"); db.close(); await sharp({create:{width:1,height:1,channels:3,background:"white"}}).png().toBuffer();'],
