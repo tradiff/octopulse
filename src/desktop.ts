@@ -161,10 +161,10 @@ export class DesktopAdapter implements Desktop {
   async submit(intent: Intent, signal: AbortSignal): Promise<'sent' | 'transient'> {
     try {
       const capabilities = z.array(z.string()).parse(await this.transport.capabilities(signal));
-      const pr = this.store.pr(intent.prId);
+      const pr = intent.kind === 'monitoring' ? undefined : this.store.pr(intent.prId);
       const history = this.store.activities(intent.prId);
       const events = intent.events.flatMap(key => history.filter(item => `${item.event.source}:${item.event.id}` === key).map(item => item.event));
-      const current = pr && events.length === intent.events.length ? present(pr.snapshot, events, intent.kind, this.user, history) : intent;
+      const current = pr && events.length === intent.events.length ? present(pr.snapshot, events, intent.kind, this.store.metadata('login') ?? this.user, history) : intent;
       const state = pr?.snapshot.state === 'open' && pr.snapshot.draft ? 'draft' : pr?.snapshot.state ?? 'open';
       const images = new Map<string, string | null>();
       if (capabilities.includes('body-markup') && capabilities.includes('body-images') && this.avatars) {
@@ -211,9 +211,9 @@ export class DesktopAdapter implements Desktop {
         }
       }
       const id = await this.transport.notify({
-        appName: 'Octopulse', replacesId: 0, icon: `git-${state}`,
+        appName: 'Octopulse', replacesId: 0, icon: intent.kind === 'monitoring' ? 'dialog-warning' : `git-${state}`,
         summary: pr && capabilities.includes('body-markup') ? '' : current.title, body,
-        actions: capabilities.includes('actions') ? ['default', 'Open pull request'] : [],
+        actions: capabilities.includes('actions') ? ['default', intent.kind === 'monitoring' ? 'Open Settings' : 'Open pull request'] : [],
         hints: { 'desktop-entry': 'octopulse', ...(current.sound && capabilities.includes('sound') ? { 'sound-name': `octopulse-${current.sound}` } : {}) },
         expireTimeout: current.expiryMs,
       }, intent.destination, signal);

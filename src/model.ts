@@ -136,7 +136,7 @@ export const Activity = z.strictObject({
 });
 export const Intent = z.strictObject({
   prId: z.string(),
-  kind: z.enum(['immediate', 'bundled']),
+  kind: z.enum(['immediate', 'bundled', 'monitoring']),
   events: z.array(z.string()),
   title: z.string(),
   body: z.string(),

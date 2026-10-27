@@ -19,9 +19,11 @@ import { themeAndAccessibility } from './browser/layout/theme.js';
 import { pagination } from './browser/pagination.js';
 import { identity } from './browser/identity.js';
 import { settings, settingsWithoutEnvironment, systemOneSettings, intervalPresets } from './browser/settings.js';
+import { monitoringHealth } from './browser/monitoring-health.js';
 
 type Capture = (name: string, options?: { fullPage?: boolean }) => Promise<void>;
 const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number; status: string }>, NodeJS.ProcessEnv?][] = [
+  ['monitoring credential warnings', monitoringHealth],
   ['settings and credential sources', settings],
   ['settings without environment credentials', settingsWithoutEnvironment, {}],
   ['System One API key settings', systemOneSettings],

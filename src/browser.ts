@@ -529,10 +529,33 @@ function renderSettings(data: SettingsView): void {
     void mutation('/api/settings', 'PUT', body).then(result => {
       if (!settingsForm.isConnected) return;
       renderSettings(result as SettingsView); status.textContent = 'Settings saved. Background monitoring is reconnecting.';
+      void refreshMonitoring();
     }).catch(error => { feedback.textContent = error instanceof Error ? error.message : 'Save failed. Retry.'; })
       .finally(() => { save.disabled = false; });
   });
   content.append(settingsForm);
+}
+
+function renderMonitoring(value: unknown): void {
+  if (!value || typeof value !== 'object' || !('state' in value)
+    || !['starting', 'ready', 'missing_token', 'authentication_failed'].includes(String(value.state))) throw new Error('Monitoring status response is invalid');
+  const warning = element('monitoring-warning');
+  const missing = value.state === 'missing_token';
+  const failed = value.state === 'authentication_failed';
+  const title = missing ? 'GitHub monitoring is off' : 'GitHub authentication failed';
+  const message = missing
+    ? 'No GitHub token is configured. Add one in Settings to resume PR updates and notifications.'
+    : 'GitHub rejected your token. It may have expired or been revoked. Update it in Settings; PR activity and notifications may be out of date.';
+  if (warning.querySelector('strong')!.textContent !== title) warning.querySelector('strong')!.textContent = title;
+  if (warning.querySelector('p')!.textContent !== message) warning.querySelector('p')!.textContent = message;
+  warning.hidden = !missing && !failed;
+}
+
+let monitoringRefresh: Promise<void> | undefined;
+function refreshMonitoring(): Promise<void> {
+  monitoringRefresh ??= api('/api/monitoring', { signal: AbortSignal.timeout(10_000) })
+    .then(renderMonitoring).catch(() => {}).finally(() => { monitoringRefresh = undefined; });
+  return monitoringRefresh;
 }
 
 async function load(): Promise<void> {
@@ -571,6 +594,7 @@ async function load(): Promise<void> {
       element('identity').textContent = 'Identity unavailable'; throw new Error('Identity response is invalid');
     }
     identity = { login: me.login, teams: me.teams, actionToken: me.actionToken };
+    if ('monitoring' in me) renderMonitoring(me.monitoring);
     const identityLabel = element('identity');
     identityLabel.replaceChildren(node('span', identity.login ? `@${identity.login}` : 'Local profile'));
     if (identity.login) {
@@ -632,3 +656,5 @@ form.addEventListener('submit', event => {
     .finally(() => { if (epoch === dialogEpoch) { delete submit.dataset.busy; updateMutationButtons(); } });
 });
 void load();
+setInterval(() => { if (!document.hidden) void refreshMonitoring(); }, 30_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshMonitoring(); });

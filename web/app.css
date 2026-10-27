@@ -73,6 +73,9 @@ h3 { font-size: var(--text-body); margin: 0 0 18px; font-weight: 600; }
 .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 #status { font-size: var(--text-small); min-height: 18px; margin: 0 0 0 auto; text-align: right; }
 #error { display: flex; justify-content: space-between; align-items: center; gap: 16px; background: color-mix(in srgb, var(--danger) 12%, var(--surface)); padding: 16px 20px; border-radius: var(--radius); color: var(--danger); margin: 16px 0; }
+#monitoring-warning { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; background: color-mix(in srgb, var(--warning) 10%, var(--surface)); padding: 16px 20px; border-radius: var(--radius); color: var(--warning); margin-bottom: 20px; }
+#monitoring-warning p { margin: 4px 0 0; max-width: 70ch; color: var(--ink); }
+#monitoring-warning a { flex-shrink: 0; text-decoration: underline; text-underline-offset: 3px; }
 #tabs { gap: 29px; }
 #tabs:empty { display: none; }
 #tabs button { position: relative; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 0 14px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font-size: var(--text-body); }

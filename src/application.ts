@@ -12,10 +12,12 @@ export async function startApplication(config: Config | undefined, directory: st
     const local = await listenLocal({
       store: runtime.profile.store, logs: runtime.logs, delivery: runtime.delivery, track: runtime.track,
       settings: runtime.settings, updateSettings: runtime.updateSettings,
+      get monitoring() { return runtime.monitoring; },
       get monitor() { return runtime.monitor; },
       get login() { return runtime.login; },
       get teams() { return runtime.teams; },
     }, port);
+    runtime.setOrigin(local.origin);
     void runtime.initialize().catch(() => {});
     const timer = setInterval(() => {
       try { runtime.tick(); } catch { runtime.logs.write('error', 'Runtime scheduling failed'); }

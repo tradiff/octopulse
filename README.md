@@ -40,6 +40,8 @@ Octopulse automatically discovers your open PRs and PRs requesting your review.
 - Open **Notification History** to inspect past notifications or resend one; use **Logs** to investigate problems.
 - Use **Settings** to change credentials, polling, retention, or optional System One bot-comment classification.
 
+If the GitHub token is missing, expired, or revoked, Octopulse shows a persistent warning with a link to Settings and attempts one desktop alert per unresolved credential incident. Retries and restarts do not repeat the alert; successful authentication re-arms it for a future incident. Saved PR activity remains available but may be out of date. Rate limits and repository permission errors are not treated as expired tokens.
+
 Local data is stored in `~/.local/state/octopulse/`. To run in the foreground instead of using the service, stop the service with `systemctl --user stop octopulse.service` and run `npm start`. Ctrl+C stops the foreground process.
 
 To uninstall, run `npm run user-service:uninstall`. Local settings and data are kept unless you explicitly confirm their deletion in the interactive prompt.

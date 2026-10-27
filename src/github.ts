@@ -105,7 +105,8 @@ export class GitHubUnavailable extends Error {}
 
 export class GitHub implements PageClient {
   private retryAt = 0;
-  constructor(private readonly token: string, private readonly clock: Clock, private readonly store: Store, private readonly fetch: Fetch = globalThis.fetch) {}
+  constructor(private readonly token: string, private readonly clock: Clock, private readonly store: Store, private readonly fetch: Fetch = globalThis.fetch,
+    private readonly authentication?: (valid: boolean) => void) {}
 
   private async get(url: URL, signal: AbortSignal, validator: string | null = null) {
     if (Date.parse(this.clock.now()) < this.retryAt) throw new GitHubUnavailable(`GitHub deferred until ${new Date(this.retryAt).toISOString()}`);
@@ -143,6 +144,7 @@ export class GitHub implements PageClient {
           || (response.status === 403 && (response.headers.has('retry-after') || response.headers.get('x-ratelimit-remaining') === '0'))) {
           throw new GitHubUnavailable(`GitHub HTTP ${response.status}`);
         }
+        if (response.status === 401 || (response.status === 403 && url.pathname === '/user')) this.authentication?.(false);
         if (response.status !== 200 && response.status !== 304) throw new Error(`GitHub HTTP ${response.status}`);
         return { ...response, url };
       }
@@ -221,7 +223,9 @@ export class GitHub implements PageClient {
 
   async identity(signal: AbortSignal): Promise<string> {
     const response = await this.get(new URL('https://api.github.com/user'), signal);
-    return User.parse(response.body).login;
+    const login = User.parse(response.body).login;
+    this.authentication?.(true);
+    return login;
   }
 
   async teams(signal: AbortSignal): Promise<string[]> {

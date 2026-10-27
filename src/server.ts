@@ -11,11 +11,13 @@ import type { Delivery } from './delivery.js';
 import type { Diagnostics } from './diagnostics.js';
 import { pullRequestUrl } from './config.js';
 import type { Settings } from './settings.js';
+import type { MonitoringStatus } from './monitoring-health.js';
 
 export interface LocalApplication {
   store: Store; monitor: Monitor; delivery: Pick<Delivery, 'resend'>; logs: Diagnostics; login: string; teams: string[];
   track(url: string, signal: AbortSignal): Promise<void>;
   settings?: Settings;
+  monitoring?: MonitoringStatus;
   updateSettings?(body: unknown): Promise<void>;
 }
 
@@ -81,7 +83,8 @@ export async function listenLocal(app: LocalApplication, port: number) {
       }
       switch (url.pathname) {
         case '/api/settings': send(response, 200, app.settings?.view() ?? {}); return;
-        case '/api/me': send(response, 200, { login: app.login, teams: app.teams, actionToken: token }); return;
+        case '/api/me': send(response, 200, { login: app.login, teams: app.teams, actionToken: token, monitoring: app.monitoring }); return;
+        case '/api/monitoring': send(response, 200, app.monitoring ?? { state: 'ready', since: null }); return;
         case '/api/tracked-pull-requests':
         case '/api/inactive-pull-requests':
           send(response, 200, app.store.prs().filter(pr => pr.tracked === (url.pathname === '/api/tracked-pull-requests')).map(pr => pr.snapshot)); return;

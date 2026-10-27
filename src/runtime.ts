@@ -15,6 +15,7 @@ import { SystemOne } from './system-one.js';
 import type { Fetch } from './http.js';
 import type { Store } from './store.js';
 import { Settings } from './settings.js';
+import { MonitoringHealth } from './monitoring-health.js';
 
 export type RuntimeDesktop = Desktop | ((store: Store, login: string) => Desktop);
 
@@ -27,6 +28,9 @@ export function openRuntime(initial: Config | undefined, directory: string, cloc
     let config = settings.effective();
     const logs = new Diagnostics(join(directory, 'logs'), clock, config.logging.level, config.logging.retention,
       [config.github.token, config.system_one?.api_key ?? '']);
+    let alertDesktop: Desktop | undefined;
+    const health = new MonitoringHealth(store, clock, () => alertDesktop ??= typeof desktop === 'function'
+      ? desktop(store, store.metadata('login') ?? '') : desktop, message => logs.write('warn', message));
     let shutdown = new AbortController();
     let connectionSignal = AbortSignal.any([signal, shutdown.signal]);
     let connected: Awaited<ReturnType<typeof connectRuntime>> | undefined;
@@ -40,9 +44,10 @@ export function openRuntime(initial: Config | undefined, directory: string, cloc
     const initialize = (): Promise<void> => {
       if (stopped || connectionSignal.aborted) return Promise.reject(new Error('Runtime is stopped'));
       if (connected) return Promise.resolve();
-      if (!config.github.token) return Promise.resolve();
+      if (!config.github.token) { health.update('missing_token'); return health.idle(); }
       if (!connecting) {
-        connecting = connectRuntime(config, profile, logs, clock, desktop, connectionSignal, fetch).then(runtime => {
+        if (health.view().state !== 'authentication_failed') health.update('starting');
+        connecting = connectRuntime(config, profile, logs, clock, desktop, connectionSignal, fetch, health).then(runtime => {
           connected = runtime;
         }).catch(error => {
           cached = savedMonitor();
@@ -56,6 +61,8 @@ export function openRuntime(initial: Config | undefined, directory: string, cloc
     };
     return {
       profile, logs, initialize, settings,
+      get monitoring() { return health.view(); },
+      setOrigin(origin: string): void { health.destination = new URL('/settings', origin).href; },
       async updateSettings(body: unknown): Promise<void> {
         if (updating || stopped) throw new Error('Settings are busy. Try again.');
         updating = true;
@@ -99,6 +106,7 @@ export function openRuntime(initial: Config | undefined, directory: string, cloc
             await connecting?.catch(() => {});
             if (connected) await connected.stop();
             await cached.stop();
+            await health.stop();
           });
           stopped = Promise.allSettled([work, localRequests]).then(results => {
             for (const result of results) if (result.status === 'rejected') throw result.reason;
@@ -116,9 +124,9 @@ export async function startRuntime(config: Config, directory: string, clock: Clo
   catch (error) { await runtime.stop(); throw error; }
 }
 
-async function connectRuntime(config: Config, profile: Profile, logs: Diagnostics, clock: Clock, desktop: RuntimeDesktop, signal: AbortSignal, fetch: Fetch) {
+async function connectRuntime(config: Config, profile: Profile, logs: Diagnostics, clock: Clock, desktop: RuntimeDesktop, signal: AbortSignal, fetch: Fetch, health: MonitoringHealth) {
   const store = profile.store;
-  const github = new GitHub(config.github.token, clock, store, fetch);
+  const github = new GitHub(config.github.token, clock, store, fetch, valid => health.update(valid ? 'ready' : 'authentication_failed'));
   const shutdown = new AbortController();
   const manual = new Set<Promise<void>>();
   let monitor: Monitor | undefined;
@@ -144,6 +152,10 @@ async function connectRuntime(config: Config, profile: Profile, logs: Diagnostic
     let degraded = false;
     const discover = async (signal: AbortSignal) => {
       try {
+        if (health.view().state === 'authentication_failed') {
+          const current = canonical(await github.identity(signal));
+          if (current !== login) throw new Error('GitHub identity changed; update Settings to reconnect');
+        }
         await github.discover(login, async (repository, number) => {
           const known = store.prs().find(pr => pr.snapshot.repository.toLowerCase() === repository.toLowerCase() && pr.snapshot.number === number);
           if (known) await core.lookup(known.snapshot.id, 'discovery', owned => github.detail(repository, number, AbortSignal.any([signal, owned])));
