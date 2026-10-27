@@ -1,0 +1,90 @@
+import assert from 'node:assert/strict';
+
+export async function autoRefresh(page, capture) {
+  await page.clock.install();
+  let title;
+  let fail = false;
+  let requests = 0;
+  await page.route('**/api/pull-request-timeline*', async route => {
+    requests++;
+    if (fail) return route.fulfill({ status: 503, json: { error: 'Background read failed' } });
+    const etag = `W/"${encodeURIComponent(title ?? 'initial')}"`;
+    if (route.request().headers()['if-none-match'] === etag) return route.fulfill({ status: 304, headers: { ETag: etag } });
+    const headers = { ...route.request().headers() }; delete headers['if-none-match'];
+    const response = await route.fetch({ headers });
+    const data = await response.json();
+    if (title) data.items.find(pr => pr.id === 'E').snapshot.title = title;
+    await route.fulfill({ json: data, headers: { ETag: etag } });
+  });
+  await page.goto(new URL('/?pr-state=all', page.url()).href);
+  await page.waitForFunction(() => document.querySelector('#status').textContent.includes('refreshed'));
+  const first = page.locator('.pr[data-pr=E]');
+  const original = await first.elementHandle();
+  const firstId = await first.getAttribute('data-pr');
+  const other = page.locator('.pr[data-pr=A]');
+  await other.locator('summary').click();
+  await other.locator('.timeline li').first().waitFor();
+  await page.locator('#refresh').focus();
+  const openCard = await other.elementHandle();
+  const activity = await other.locator('.timeline').elementHandle();
+  await page.evaluate(() => {
+    window.refreshFlashes = [];
+    new MutationObserver(() => {
+      if (!document.querySelector('.pr') || document.querySelector('#content').hasAttribute('aria-busy')
+        || document.querySelector('#status').textContent.includes('Loading')) window.refreshFlashes.push('loading flash');
+    }).observe(document.querySelector('main'), { subtree: true, childList: true, attributes: true });
+  });
+  const poll = async () => {
+    const next = page.waitForResponse('**/api/pull-request-timeline*');
+    await page.clock.fastForward(5_000);
+    await next;
+    await page.clock.runFor(100);
+  };
+  await poll();
+  assert.ok(await original.evaluate(el => el.isConnected), 'Unchanged rows stay in the DOM');
+  title = 'Automatically updated pull request';
+  await poll();
+  await page.getByText(title, { exact: true }).waitFor();
+  assert.equal(await first.getAttribute('data-pr'), firstId);
+  assert.ok(await openCard.evaluate(el => el.isConnected && el.open), 'Unchanged open details remain open');
+  assert.ok(await activity.evaluate(el => el.isConnected && el.childElementCount > 0), 'Loaded activity is retained');
+  assert.equal(await page.locator('#content').getAttribute('aria-busy'), null);
+  assert.equal(await page.locator('#refresh').evaluate(el => el === document.activeElement), true);
+  assert.deepEqual(await page.evaluate(() => window.refreshFlashes), [], 'Background updates never clear the screen or enter a loading state');
+  await first.locator('summary').focus();
+  title = 'Deferred update after focus moves';
+  await poll();
+  assert.equal(await page.getByText(title, { exact: true }).count(), 0, 'Focused rows defer replacement');
+  await page.locator('#refresh').focus();
+  await poll();
+  await page.getByText(title, { exact: true }).waitFor();
+  await capture('automatic-update.png');
+  fail = true;
+  await poll();
+  assert.equal(await page.locator('#error').isVisible(), false, 'Background failures do not flash error banners');
+  assert.ok(await page.getByText(title, { exact: true }).isVisible(), 'Failed reads retain existing data');
+  fail = false;
+  const repository = page.locator('#repository-filter');
+  await repository.fill('wid');
+  title = 'Update while searching repositories';
+  await poll();
+  await page.getByText(title, { exact: true }).waitFor();
+  assert.equal(await repository.inputValue(), 'wid', 'Background updates preserve unfinished repository searches');
+  assert.equal(await repository.getAttribute('aria-expanded'), 'true');
+  await page.evaluate(() => Object.defineProperty(document, 'hidden', { configurable: true, value: true }));
+  const hiddenRequests = requests;
+  await page.clock.fastForward(15_000);
+  assert.equal(requests, hiddenRequests, 'Hidden pages do not poll');
+  await page.evaluate(() => { delete document.hidden; });
+  title = 'Manual refresh still works';
+  await page.locator('#refresh').click();
+  await page.getByText(title, { exact: true }).waitFor();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  const token = page.getByLabel('GitHub Token', { exact: true });
+  await token.fill('unsaved-token');
+  const before = requests;
+  await page.clock.fastForward(15_000);
+  assert.equal(await token.inputValue(), 'unsaved-token', 'Polling does not overwrite settings edits');
+  assert.equal(requests, before);
+  return { checks: 17, status: 'pass' };
+}

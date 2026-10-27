@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { Instant } from './model.js';
@@ -64,6 +64,15 @@ export class Diagnostics {
       }
     } catch { return []; }
     return records.sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, 200);
+  }
+
+  changeToken(): string | undefined {
+    try {
+      return JSON.stringify(readdirSync(this.directory).filter(file => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(file)).sort().map(file => {
+        const stat = statSync(join(this.directory, file), { bigint: true });
+        return [file, String(stat.ino), String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)];
+      }));
+    } catch { return undefined; }
   }
 
   prune(): void {

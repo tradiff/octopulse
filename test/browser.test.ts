@@ -20,9 +20,13 @@ import { pagination } from './browser/pagination.js';
 import { identity } from './browser/identity.js';
 import { settings, settingsWithoutEnvironment, systemOneSettings, intervalPresets } from './browser/settings.js';
 import { monitoringHealth } from './browser/monitoring-health.js';
+import { autoRefresh } from './browser/auto-refresh.js';
+import { conditionalRefresh } from './browser/conditional-refresh.js';
 
 type Capture = (name: string, options?: { fullPage?: boolean }) => Promise<void>;
 const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number; status: string }>, NodeJS.ProcessEnv?][] = [
+  ['quiet automatic updates', autoRefresh],
+  ['conditional background requests', conditionalRefresh],
   ['monitoring credential warnings', monitoringHealth],
   ['settings and credential sources', settings],
   ['settings without environment credentials', settingsWithoutEnvironment, {}],

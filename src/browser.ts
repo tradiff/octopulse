@@ -16,12 +16,24 @@ let controller: AbortController | undefined;
 let dialogEpoch = 0;
 let renderedView: string | undefined;
 let showingPrevious = false;
+let renderedData: string | undefined;
+let renderedETag: string | undefined;
+let renderedRepositories: string | undefined;
+let meCache: { data: unknown; etag: string | undefined } | undefined;
+const cardData = new WeakMap<HTMLElement, string>();
 const expanded = new Set<string>();
 const activityControllers = new Set<AbortController>();
 
 function clearContent(): void {
   for (const request of activityControllers) request.abort();
   activityControllers.clear(); content.replaceChildren();
+}
+
+function reconcileChildren(parent: HTMLElement, children: HTMLElement[]): void {
+  for (const [index, child] of children.entries()) {
+    if (parent.children[index] !== child) parent.insertBefore(child, parent.children[index] ?? null);
+  }
+  for (const old of [...parent.children]) if (!children.includes(old as HTMLElement)) old.remove();
 }
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
@@ -106,10 +118,20 @@ function fail(error: unknown): void {
   errorBox.querySelector('span')!.textContent = error instanceof Error ? error.message : 'Operation failed';
 }
 async function api(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(path, init);
+  return responseJson(await fetch(path, init));
+}
+async function responseJson(response: Response): Promise<unknown> {
   const body: unknown = await response.json();
   if (!response.ok) throw new Error(body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Local request failed');
   return body;
+}
+async function conditionalApi(path: string, signal: AbortSignal, etag?: string): Promise<{ data: unknown; etag: string | undefined } | null> {
+  const response = await fetch(path, { signal, headers: etag ? { 'If-None-Match': etag } : {} });
+  if (response.status === 304) {
+    if (!etag) throw new Error('Unexpected not-modified response');
+    return null;
+  }
+  return { data: await responseJson(response), etag: response.headers.get('ETag') ?? undefined };
 }
 function closeDialog(): void {
   dialogEpoch++; dialog.close(); form.reset(); element('track-error').textContent = '';
@@ -247,7 +269,7 @@ function prSummary(pr: Pick<PrView, 'snapshot' | 'state' | 'tracked'>, activityC
   if (!pr.tracked) meta.append(node('span', 'Inactive', 'tracking-status'));
   main.append(meta); result.append(avatar(pr.snapshot.author, pr.snapshot.authorAvatar), main); return result;
 }
-function prCard(pr: PrView): HTMLElement {
+function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
   const card = node('details', undefined, 'pr'); card.open = expanded.has(pr.id); card.dataset.pr = pr.id;
   card.addEventListener('toggle', () => {
     if (card.open) { expanded.add(pr.id); if (!loaded) void loadActivity(); } else expanded.delete(pr.id);
@@ -296,6 +318,10 @@ function prCard(pr: PrView): HTMLElement {
   const activitySection = node('section', undefined, 'activity-section'); activitySection.append(node('h3', 'Activity timeline'));
   const timeline = node('ol', undefined, 'timeline');
   const activityStatus = node('p', 'Expand to load saved activity.', 'muted'); activityStatus.setAttribute('role', 'status');
+  if (previous?.matches('[open]')) {
+    for (const item of previous.querySelectorAll('.timeline > li')) timeline.append(item.cloneNode(true));
+    activityStatus.textContent = previous.querySelector('.activity-section [role=status]')?.textContent ?? '';
+  }
   let loaded = false;
   let loading = false;
   let nextCursor: string | null = null;
@@ -304,7 +330,8 @@ function prCard(pr: PrView): HTMLElement {
     if (loading || !card.isConnected) return;
     const restoreFocus = document.activeElement === more;
     const request = new AbortController(); activityControllers.add(request);
-    loading = true; more.disabled = true; activitySection.setAttribute('aria-busy', 'true'); activityStatus.textContent = 'Loading saved activity…';
+    loading = true; more.disabled = true; activitySection.setAttribute('aria-busy', 'true');
+    if (!timeline.childElementCount) activityStatus.textContent = 'Loading saved activity…';
     try {
       const query = nextCursor ? `?${new URLSearchParams({ cursor: nextCursor })}` : '';
       const response = await api(`/api/pull-requests/${encodeURIComponent(pr.id)}/activity${query}`, { signal: request.signal });
@@ -315,6 +342,7 @@ function prCard(pr: PrView): HTMLElement {
         throw new Error('Activity response is invalid');
       }
       const page = response as ActivityPage;
+      if (!loaded) timeline.replaceChildren();
       for (const activity of page.items) {
         const item = node('li'); const header = node('div', undefined, 'meta');
         if (activity.event.actor) header.append(avatar(activity.event.actor.login, activity.event.actor.avatar ?? null));
@@ -355,30 +383,53 @@ function prCard(pr: PrView): HTMLElement {
   columns.append(activitySection, ciSection); body.append(columns, actions);
   card.append(body); return card;
 }
-function renderPrs(data: PrPage): void {
-  filterControls(data.repositories, false); tabs.replaceChildren();
+function renderPrs(data: PrPage, quiet = false): void {
+  const repositories = JSON.stringify(data.repositories);
+  if (!quiet || repositories !== renderedRepositories && !controls.contains(document.activeElement)) {
+    filterControls(data.repositories, false); renderedRepositories = repositories;
+  }
+  const oldTabs = [...tabs.children];
+  const newTabs: HTMLElement[] = [];
   const selected = new URLSearchParams(location.search).get('tab');
   const tab = selected === 'needs-my-review' || selected === 'review-requested' ? selected : 'my-prs';
   for (const [key, label] of [['my-prs', 'My PRs'], ['needs-my-review', 'Needs My Review'], ['review-requested', 'Review Requests']] as const) {
     const queue = button('', () => changeQuery(query => query.set('tab', key), true), key === tab);
     queue.setAttribute('aria-label', `${label} (${data.counts[key]})`);
     queue.dataset.focusKey = `queue:${key}`;
-    queue.append(node('span', label), node('span', String(data.counts[key]), 'queue-count')); tabs.append(queue);
+    queue.append(node('span', label), node('span', String(data.counts[key]), 'queue-count'));
+    const previous = oldTabs[newTabs.length];
+    newTabs.push(quiet && previous?.isEqualNode(queue) ? previous as HTMLElement : queue);
   }
+  reconcileChildren(tabs, newTabs);
   const items = data.items;
   const summary = element('result-summary'); summary.hidden = false;
-  summary.replaceChildren(node('span', `${data.total} pull ${data.total === 1 ? 'request' : 'requests'}`));
-  clearContent();
+  const count = `${data.total} pull ${data.total === 1 ? 'request' : 'requests'}`;
+  if (summary.textContent !== count) summary.replaceChildren(node('span', count));
+  const oldCards = new Map([...content.querySelectorAll<HTMLElement>(':scope > .pr')].map(card => [card.dataset.pr, card]));
+  const children: HTMLElement[] = [];
   if (items.length) {
     const headings = node('div', undefined, 'list-headings'); headings.setAttribute('aria-hidden', 'true');
     for (const label of ['', 'Pull request', 'Review', 'Current-head CI', 'Reviewers', 'Updated ↓']) headings.append(node('span', label));
-    content.append(headings, ...items.map(prCard));
+    children.push(quiet && content.firstElementChild?.isEqualNode(headings) ? content.firstElementChild as HTMLElement : headings);
+    for (const pr of items) {
+      const previous = quiet ? oldCards.get(pr.id) : undefined;
+      const signature = JSON.stringify(pr);
+      const card = previous && (cardData.get(previous) === signature || previous.contains(document.activeElement)) ? previous : prCard(pr, previous);
+      if (card !== previous) cardData.set(card, signature);
+      children.push(card);
+    }
   }
   if (!items.length) {
     const empty = node('div', undefined, 'empty'); empty.append(node('span', '✓', 'empty-symbol'), node('h2', 'No matching pull requests'),
-      node('p', 'No pull requests match this queue and its filters.'), node('p', 'Try another queue or adjust the filters above.', 'empty-hint')); content.append(empty);
+      node('p', 'No pull requests match this queue and its filters.'), node('p', 'Try another queue or adjust the filters above.', 'empty-hint')); children.push(empty);
   }
-  if (data.pages > 1) content.append(pagination(data, 'Pull request pages'));
+  if (data.pages > 1) {
+    const pages = pagination(data, 'Pull request pages');
+    const previous = content.querySelector<HTMLElement>('.pagination');
+    children.push(quiet && previous?.isEqualNode(pages) ? previous : pages);
+  }
+  if (!quiet) clearContent();
+  reconcileChildren(content, children);
 }
 function pagination(data: Pick<HistoryPage, 'page' | 'pages' | 'from' | 'to' | 'total'>, label: string): HTMLElement {
   const result = node('nav', undefined, 'pagination'); result.setAttribute('aria-label', label); result.tabIndex = -1;
@@ -552,20 +603,26 @@ function renderMonitoring(value: unknown): void {
 }
 
 let monitoringRefresh: Promise<void> | undefined;
+let monitoringETag: string | undefined;
 function refreshMonitoring(): Promise<void> {
-  monitoringRefresh ??= api('/api/monitoring', { signal: AbortSignal.timeout(10_000) })
-    .then(renderMonitoring).catch(() => {}).finally(() => { monitoringRefresh = undefined; });
+  monitoringRefresh ??= conditionalApi('/api/monitoring', AbortSignal.timeout(10_000), monitoringETag)
+    .then(result => { if (result) { renderMonitoring(result.data); monitoringETag = result.etag; } })
+    .catch(() => {}).finally(() => { monitoringRefresh = undefined; });
   return monitoringRefresh;
 }
 
-async function load(): Promise<void> {
+async function load(quiet = false): Promise<void> {
+  if (quiet && (document.hidden || controller || location.pathname === '/settings' || dialog.open || renderedView !== location.href
+    || document.querySelector('[data-busy=true]') || window.getSelection()?.toString())) return;
   const version = ++sequence; controller?.abort(); const current = new AbortController(); controller = current;
   const initialFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
   const disabledFocusKey = initialFocus?.matches('[data-requires-identity]') ? initialFocus.dataset.focusKey : undefined;
   let focusKey: string | undefined;
   showingPrevious = false;
-  errorBox.hidden = true; content.setAttribute('aria-busy', 'true'); status.textContent = 'Loading local state…';
-  identity = null; updateMutationButtons();
+  if (!quiet) {
+    errorBox.hidden = true; content.setAttribute('aria-busy', 'true'); status.textContent = 'Loading local state…';
+    identity = null; updateMutationButtons();
+  }
   const path = location.pathname;
   const title = path === '/settings' ? 'Settings' : path === '/logs' ? 'Logs' : path === '/notification-history' ? 'Notification History' : 'Pull Requests';
   element('filter-bar').hidden = path === '/settings';
@@ -582,48 +639,72 @@ async function load(): Promise<void> {
   }
   try {
     const endpoint = path === '/settings' ? '/api/settings' : path === '/logs' ? '/api/logs' : path === '/notification-history' ? '/api/notification-history' : '/api/pull-request-timeline';
-    const meRequest = api('/api/me', { signal: current.signal });
-    const dataRequest = api(endpoint + location.search, { signal: current.signal }).then(
+    const signal = quiet ? AbortSignal.any([current.signal, AbortSignal.timeout(10_000)]) : current.signal;
+    const meRequest = conditionalApi('/api/me', signal, quiet ? meCache?.etag : undefined);
+    const dataRequest = conditionalApi(endpoint + location.search, signal, quiet ? renderedETag : undefined).then(
       value => ({ status: 'fulfilled' as const, value }), reason => ({ status: 'rejected' as const, reason }));
     let me: unknown;
-    try { me = await meRequest; }
-    catch (error) { if (version === sequence && !current.signal.aborted) element('identity').textContent = 'Identity unavailable'; throw error; }
+    let meResult: Awaited<typeof meRequest>;
+    try { meResult = await meRequest; me = (meResult ?? meCache)?.data; }
+    catch (error) { if (!quiet && version === sequence && !current.signal.aborted) element('identity').textContent = 'Identity unavailable'; throw error; }
     if (version !== sequence) return;
     if (!me || typeof me !== 'object' || !('login' in me) || typeof me.login !== 'string' || !('teams' in me) || !Array.isArray(me.teams)
       || !me.teams.every(team => typeof team === 'string') || !('actionToken' in me) || typeof me.actionToken !== 'string') {
-      element('identity').textContent = 'Identity unavailable'; throw new Error('Identity response is invalid');
+      if (!quiet) element('identity').textContent = 'Identity unavailable'; throw new Error('Identity response is invalid');
     }
     identity = { login: me.login, teams: me.teams, actionToken: me.actionToken };
-    if ('monitoring' in me) renderMonitoring(me.monitoring);
+    if (meResult && 'monitoring' in me) renderMonitoring(me.monitoring);
+    if (meResult) meCache = meResult;
     const identityLabel = element('identity');
-    identityLabel.replaceChildren(node('span', identity.login ? `@${identity.login}` : 'Local profile'));
-    if (identity.login) {
-      const picture = avatar(identity.login, `https://github.com/${encodeURIComponent(identity.login)}.png?size=64`);
-      picture.setAttribute('aria-hidden', 'true');
-      identityLabel.prepend(picture);
+    const loginLabel = identity.login ? `@${identity.login}` : 'Local profile';
+    if (!quiet || identityLabel.querySelector('span:last-child')?.textContent !== loginLabel) {
+      identityLabel.replaceChildren(node('span', loginLabel));
+      if (identity.login) {
+        const picture = avatar(identity.login, `https://github.com/${encodeURIComponent(identity.login)}.png?size=64`);
+        picture.setAttribute('aria-hidden', 'true');
+        identityLabel.prepend(picture);
+      }
     }
     const dataResult = await dataRequest;
     if (version !== sequence || current.signal.aborted) return;
     if (dataResult.status === 'rejected') throw dataResult.reason;
-    const data = dataResult.value;
+    const pageResult = dataResult.value;
+    if (!pageResult) {
+      if (!errorBox.hidden) { errorBox.hidden = true; status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`; }
+      return;
+    }
+    const data = pageResult.data;
     if (path === '/settings') {
       if (!data || typeof data !== 'object' || !('github' in data) || !('timings' in data)) throw new Error('Settings response is invalid');
       renderSettings(data as SettingsView); renderedView = location.href; status.textContent = ''; return;
     }
     if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) throw new Error('Local data response is invalid');
+    const signature = JSON.stringify(data);
+    if (quiet && (document.hidden || dialog.open || document.querySelector('[data-busy=true]') || window.getSelection()?.toString())) return;
+    if (quiet && signature === renderedData) {
+      renderedETag = pageResult.etag;
+      if (!errorBox.hidden) { errorBox.hidden = true; status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`; }
+      return;
+    }
+    if (quiet && path !== '/' && (content.querySelector('details[open]') || content.contains(document.activeElement) || controls.contains(document.activeElement))) return;
     focusKey = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.focusKey : undefined;
     if (path === '/logs') renderLogs(data as Parameters<typeof renderLogs>[0]);
-    else if (path === '/notification-history') renderHistory(data as HistoryPage); else renderPrs(data as PrPage);
+    else if (path === '/notification-history') renderHistory(data as HistoryPage); else renderPrs(data as PrPage, quiet);
+    renderedData = quiet && (content.contains(document.activeElement) || controls.contains(document.activeElement)) ? undefined : signature;
+    renderedETag = renderedData === undefined ? undefined : pageResult.etag;
     renderedView = location.href;
+    errorBox.hidden = true;
     status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`;
   } catch (error) {
     if (version !== sequence || current.signal.aborted) return;
     current.abort();
+    if (quiet) return;
     showingPrevious = renderedView !== undefined;
     status.textContent = renderedView ? (renderedView === location.href ? 'Refresh failed. Showing previous results.' : 'Could not apply these filters. Showing previous results.') : 'Unable to load local state. Retry to try again.';
     fail(error);
   } finally {
     if (version === sequence) {
+      controller = undefined;
       content.removeAttribute('aria-busy'); updateMutationButtons();
       focusKey ??= document.activeElement === document.body ? disabledFocusKey : undefined;
       if (focusKey) {
@@ -656,5 +737,10 @@ form.addEventListener('submit', event => {
     .finally(() => { if (epoch === dialogEpoch) { delete submit.dataset.busy; updateMutationButtons(); } });
 });
 void load();
+function refreshBackground(): void {
+  if (document.hidden) return;
+  void load(true);
+}
+setInterval(refreshBackground, 5_000);
 setInterval(() => { if (!document.hidden) void refreshMonitoring(); }, 30_000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshMonitoring(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { void refreshMonitoring(); refreshBackground(); } });

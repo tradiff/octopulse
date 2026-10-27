@@ -96,6 +96,12 @@ export class Store {
   close(): void { this.db.close(); }
   transaction<T>(run: () => T): T { return this.db.transaction(run)(); }
 
+  changeToken(): string {
+    const row = z.object({ changes: z.number().int(), data_version: z.number().int() }).parse(
+      this.db.prepare('SELECT total_changes() AS changes, data_version FROM pragma_data_version').get());
+    return `${row.changes}:${row.data_version}`;
+  }
+
   metadata(key: string): string | undefined {
     return z.string().optional().parse(this.db.prepare('SELECT value FROM metadata WHERE key = ?').pluck().get(key));
   }

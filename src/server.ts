@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { notificationHistory, pullRequestActivity, pullRequests } from './views.js';
@@ -35,12 +35,24 @@ export async function listenLocal(app: LocalApplication, port: number) {
     assets.set(`/git-${state}-inline.svg`, { type: 'image/svg+xml', data: await readFile(new URL(`../../assets/git-${state}-inline.svg`, import.meta.url)) });
   }
   const token = randomBytes(32).toString('hex');
+  const validatorSalt = randomBytes(16).toString('hex');
   let origin = '';
   const pending = new Set<Promise<void>>();
   const shutdown = new AbortController();
   function send(response: ServerResponse, status: number, body: unknown, head = false) {
     response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(head ? undefined : JSON.stringify(body));
+  }
+  function conditional(request: IncomingMessage, response: ServerResponse, url: URL, body: () => unknown, revision?: string): void {
+    const serialized = revision === undefined ? JSON.stringify(body()) : undefined;
+    const etag = `W/"${createHash('sha256').update(JSON.stringify([validatorSalt, url.pathname, url.search, revision ?? serialized])).digest('base64url')}"`;
+    response.setHeader('ETag', etag);
+    const validators = request.headers['if-none-match'];
+    if (validators && (validators.trim() === '*' || validators.split(',').some(value => value.trim().replace(/^W\//, '') === etag.slice(2)))) {
+      response.writeHead(304); response.end(); return;
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    response.end(serialized ?? JSON.stringify(body()));
   }
   async function json(request: IncomingMessage): Promise<unknown> {
     let size = 0;
@@ -83,16 +95,19 @@ export async function listenLocal(app: LocalApplication, port: number) {
       }
       switch (url.pathname) {
         case '/api/settings': send(response, 200, app.settings?.view() ?? {}); return;
-        case '/api/me': send(response, 200, { login: app.login, teams: app.teams, actionToken: token, monitoring: app.monitoring }); return;
-        case '/api/monitoring': send(response, 200, app.monitoring ?? { state: 'ready', since: null }); return;
+        case '/api/me': conditional(request, response, url, () => ({ login: app.login, teams: app.teams, actionToken: token, monitoring: app.monitoring })); return;
+        case '/api/monitoring': conditional(request, response, url, () => app.monitoring ?? { state: 'ready', since: null }); return;
         case '/api/tracked-pull-requests':
         case '/api/inactive-pull-requests':
           send(response, 200, app.store.prs().filter(pr => pr.tracked === (url.pathname === '/api/tracked-pull-requests')).map(pr => pr.snapshot)); return;
-        case '/api/pull-request-timeline': send(response, 200, pullRequests(app.store, app.monitor, url.searchParams)); return;
-        case '/api/notification-history': send(response, 200, notificationHistory(app.store, url.searchParams)); return;
+        case '/api/pull-request-timeline':
+          conditional(request, response, url, () => pullRequests(app.store, app.monitor, url.searchParams),
+            JSON.stringify([app.store.changeToken(), app.monitor.user, app.monitor.teams])); return;
+        case '/api/notification-history':
+          conditional(request, response, url, () => notificationHistory(app.store, url.searchParams), app.store.changeToken()); return;
         case '/api/logs': {
           const level = z.enum(['debug', 'info', 'warn', 'error']).safeParse(url.searchParams.get('level'));
-          send(response, 200, { items: app.logs.read(level.success ? level.data : undefined) }); return;
+          conditional(request, response, url, () => ({ items: app.logs.read(level.success ? level.data : undefined) }), app.logs.changeToken()); return;
         }
       }
     }
