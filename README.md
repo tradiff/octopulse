@@ -36,11 +36,12 @@ Octopulse automatically discovers your open PRs and PRs requesting your review.
 
 - Switch between **My PRs**, **Needs My Review**, and **Review Requests**, and filter by tracking status, PR state, or repository.
 - Expand a PR to read activity and check reviews and CI. Use **Untrack** to stop monitoring it or **Retrack** to resume.
-- Use **Track PR** to add another PR by its GitHub URL.
+- Use **Track a pull request** below the PR list to add another PR by its GitHub URL.
+- Use **Refresh** to check GitHub now; progress appears while the check runs in the background.
 - Open **Notification History** to inspect past notifications or resend one; use **Logs** to investigate problems.
 - Use **Settings** to change credentials, polling, retention, or optional System One bot-comment classification.
 
-If the GitHub token is missing, expired, or revoked, Octopulse shows a persistent warning with a link to Settings and attempts one desktop alert per unresolved credential incident. Retries and restarts do not repeat the alert; successful authentication re-arms it for a future incident. Saved PR activity remains available but may be out of date. Rate limits and repository permission errors are not treated as expired tokens.
+If the GitHub token is missing or rejected, Octopulse shows a warning linking to Settings. Saved PR activity remains available but may be out of date until monitoring resumes.
 
 Local data is stored in `~/.local/state/octopulse/`. To run in the foreground instead of using the service, stop the service with `systemctl --user stop octopulse.service` and run `npm start`. Ctrl+C stops the foreground process.
 
