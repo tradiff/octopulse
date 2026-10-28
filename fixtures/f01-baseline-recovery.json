@@ -36,7 +36,7 @@
         { "body": "Old failure", "decision": "baseline" }, { "decision": "baseline" },
         { "body": "Please rename", "decision": "eligible" }
       ] } },
-      "notifications": [{ "events": ["issue_comment:live"], "body": "bea: 💬 commented: Please rename", "status": "sent", "expiryMs": 0, "sound": "comment" }],
+      "notifications": [{ "events": ["issue_comment:live"], "body": "bea: 💬: Please rename", "status": "sent", "expiryMs": 0, "sound": "comment" }],
       "submissions": [{}], "providerCalls": []
     } }
   ]

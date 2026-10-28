@@ -213,7 +213,14 @@ test('formatted text is inert, readable and limited to 100 Unicode characters', 
   const long = '😀'.repeat(101);
   await monitor.observe({ snapshot: A, sources: completeSources, events: [{ ...comment, body: long }] });
   const body = store.notifications()[0]!.data.intent.body;
-  assert.equal(body, `bea: 💬 commented: ${'😀'.repeat(97)}...`);
+  assert.equal(body, `bea: 💬: ${'😀'.repeat(97)}...`);
+});
+
+test('inline comment notifications show the icon and body without a fixed label', async t => {
+  const { monitor, store } = await setup(t);
+  await monitor.observe({ snapshot: A, sources: completeSources,
+    events: [{ ...comment, source: 'inline_comment', kind: 'inline_comment' }] });
+  assert.equal(store.notifications()[0]!.data.intent.body, 'bea: 💬: Please fix');
 });
 
 test('transient failure does not block another notification and never waits for dismissal', async t => {

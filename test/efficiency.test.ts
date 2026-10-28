@@ -333,7 +333,7 @@ test('desktop renders the current PR title once with rich and plain capability f
       assert.equal(`${sent.summary}\n${sent.body}`.split(title).length - 1, 1);
       if (capabilities.includes('body-markup')) {
         assert.equal(sent.summary, '');
-        assert.equal(sent.body, `[acme/widget] ${title} (draft)<br/>&#160;<br/><b>bea</b>: 💬 Please check this change`);
+        assert.equal(sent.body, `[acme/widget] ${title} (draft)<br/>&#160;<br/><b>bea</b>: 💬: Please check this change`);
       } else assert.equal(sent.body, saved.body);
       assert.equal(store.notification(1).intent.title, saved.title);
     }

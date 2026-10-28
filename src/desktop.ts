@@ -191,8 +191,7 @@ export class DesktopAdapter implements Desktop {
             for (let i = 0; i < events.length; i++) {
               const event = events[i]!;
               const image = event.actor?.avatar && !event.kind.startsWith('ci_') ? images.get(event.actor.avatar) : null;
-              const paragraph = event.kind === 'comment'
-                ? paragraphs[i]!.replace(/^((?:[^:\n]+: )?💬) commented(?:: |$)/, '$1 ') : paragraphs[i]!;
+              const paragraph = paragraphs[i]!;
               const actor = event.actor && !event.kind.startsWith('ci_') ? event.actor.login : null;
               const text = actor && paragraph.startsWith(`${actor}: `)
                 ? `<b>${escape(actor)}</b>${escape(paragraph.slice(actor.length))}` : escape(paragraph);

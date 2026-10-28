@@ -27,7 +27,7 @@ export function readable(body: string): string {
 }
 
 const wording: Record<Event['kind'], string> = {
-  comment: '💬 commented', inline_comment: '💬 inline comment', review: '💬 submitted review',
+  comment: '💬', inline_comment: '💬', review: '💬 submitted review',
   approval: '✅ approval', changes_requested: '❗ requested changes', review_requested: '👀 review requested',
   close: 'closed', merge: 'merged', reopen: 'reopened', ready_for_review: 'ready for review',
   converted_to_draft: 'converted to draft', commit: 'pushed commits', ci_failure: 'CI failed', ci_success: 'CI passed',
