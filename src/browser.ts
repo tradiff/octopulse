@@ -11,6 +11,8 @@ const status = element<HTMLElement>('status');
 const errorBox = element<HTMLElement>('error');
 const dialog = element<HTMLDialogElement>('track-dialog');
 const form = element<HTMLFormElement>('track-form');
+const trackRow = element<HTMLElement>('track-row');
+const track = element<HTMLButtonElement>('track');
 let identity: { login: string; teams: string[]; actionToken: string } | null = null;
 let sequence = 0;
 let controller: AbortController | undefined;
@@ -430,6 +432,7 @@ function renderPrs(data: PrPage, quiet = false): void {
     const empty = node('div', undefined, 'empty'); empty.append(node('span', '✓', 'empty-symbol'), node('h2', 'No matching pull requests'),
       node('p', 'No pull requests match this queue and its filters.'), node('p', 'Try another queue or adjust the filters above.', 'empty-hint')); children.push(empty);
   }
+  trackRow.hidden = false; children.push(trackRow);
   if (data.pages > 1) {
     const pages = pagination(data, 'Pull request pages');
     const previous = content.querySelector<HTMLElement>('.pagination');
@@ -639,7 +642,7 @@ async function load(mode: 'foreground' | 'background' | 'refresh' = 'foreground'
     renderedView = undefined; clearContent(); controls.replaceChildren(); tabs.replaceChildren(); element('result-summary').hidden = true;
     element('identity').textContent = 'Loading identity…';
   }
-  document.querySelector('main')!.setAttribute('aria-label', title); document.title = `${title} · Octopulse`; element('track').hidden = path !== '/';
+  document.querySelector('main')!.setAttribute('aria-label', title); document.title = `${title} · Octopulse`; trackRow.hidden = path !== '/';
   const workbar = element('workbar'); workbar.hidden = path !== '/';
   renderRefreshProgress();
   if (path === '/') void pollRefreshStatus();
@@ -838,7 +841,7 @@ document.querySelector('.masthead')!.addEventListener('click', event => {
 window.addEventListener('popstate', () => { closeDialog(); void load(); });
 element('refresh').addEventListener('click', () => { void refreshGitHub(); });
 element('retry').addEventListener('click', () => { if (retryGitHub) void refreshGitHub(); else void load(); });
-element('track').addEventListener('click', () => { dialogEpoch++; form.reset(); element('track-error').textContent = ''; dialog.showModal(); });
+track.addEventListener('click', () => { dialogEpoch++; form.reset(); element('track-error').textContent = ''; dialog.showModal(); });
 element('cancel-track').addEventListener('click', closeDialog);
 dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(); });
 form.addEventListener('submit', event => {

@@ -97,11 +97,11 @@ export async function queueLayout(page, capture) {
     await page.setViewportSize({ width: 1440, height: 1000 }); await go('/?repo=missing/repo');
     check(await page.getByRole('heading', { name: 'No matching pull requests' }).isVisible(), 'Empty state explains the result');
     check(await page.getByRole('button', { name: 'Clear filters', exact: true }).isVisible(), 'Empty state keeps its recovery controls');
-    await page.getByRole('button', { name: '＋ Track PR', exact: true }).click();
+    await page.getByRole('button', { name: 'Track a pull request', exact: true }).click();
     check(await page.getByLabel('GitHub pull request URL', { exact: true }).evaluate(el => el === document.activeElement), 'Dialog focuses its URL field');
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Tracking dialog fits viewport');
     await page.keyboard.press('Escape');
-    check(await page.getByRole('button', { name: '＋ Track PR', exact: true }).evaluate(el => el === document.activeElement), 'Dialog restores focus to trigger');
+    check(await page.getByRole('button', { name: 'Track a pull request', exact: true }).evaluate(el => el === document.activeElement), 'Dialog restores focus to trigger');
     check(errors.length === 0, `No runtime errors: ${errors.join('; ')}`);
     return { checks, status: 'pass', theme: 'dark', widths: [1280, 1440, 1920] };
   } finally {

@@ -42,7 +42,7 @@ export async function focusAndRecovery(page, capture) {
     check(await page.locator('#tabs').textContent() === counts, 'Retained counts still describe the retained PRs');
     check(await page.locator('#identity > span').last().textContent() === '@alex', 'Data failure does not invalidate a successful identity read');
     check((await page.locator('#status').textContent()).includes('previous'), 'Retained results are explicitly marked as previous results');
-    check(await page.getByRole('button', { name: '＋ Track PR', exact: true }).isEnabled(), 'Valid identity keeps Track available after a data-only failure');
+    check(await page.getByRole('button', { name: 'Track a pull request', exact: true }).isEnabled(), 'Valid identity keeps Track available after a data-only failure');
     await page.unroute('**/api/pull-request-timeline*', failedData);
     await page.getByRole('button', { name: 'Retry', exact: true }).click(); await ready();
     check(await page.locator('#error').isHidden(), 'Retry recovers the normal view');
@@ -52,12 +52,12 @@ export async function focusAndRecovery(page, capture) {
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'Synthetic identity failure' }).waitFor();
     check(await page.locator('.pr').count() > 0, 'Identity refresh failure retains existing results');
-    check(await page.getByRole('button', { name: '＋ Track PR', exact: true }).isDisabled(), 'Identity failure disables Track');
+    check(await page.getByRole('button', { name: 'Track a pull request', exact: true }).isDisabled(), 'Identity failure disables Track');
     await page.locator('.pr > summary').first().click();
     check(await page.getByRole('button', { name: 'Untrack', exact: true }).first().isDisabled(), 'Identity failure disables existing row mutations');
     await page.unroute('**/api/me', failedIdentity);
     await page.getByRole('button', { name: 'Retry', exact: true }).click(); await ready();
-    check(await page.getByRole('button', { name: '＋ Track PR', exact: true }).isEnabled(), 'Identity recovery reenables actions');
+    check(await page.getByRole('button', { name: 'Track a pull request', exact: true }).isEnabled(), 'Identity recovery reenables actions');
 
     await page.route('**/api/pull-request-timeline*', failedData);
     await page.reload();

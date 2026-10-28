@@ -111,7 +111,10 @@ legend { float: none; margin: 0 0 4px; padding: 0; }
 .list-headings, .pr > summary { display: grid; grid-template-columns: var(--pr-columns); gap: 16px; align-items: center; padding: 15px 16px 15px 38px; }
 .list-headings { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; font-size: var(--text-small); color: var(--muted); padding-top: 10px; padding-bottom: 10px; }
 .pr { border: 1px solid var(--line); border-top: 0; background: var(--bg); }
-.pr:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+.track-row { display: flex; align-items: center; min-height: 36px; padding: 0 16px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); background: var(--surface); }
+.empty:has(+ .track-row) { border-radius: var(--radius) var(--radius) 0 0; }
+#track { min-height: 36px; padding: 7px 4px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font-size: var(--text-label); font-weight: 450; text-decoration: underline; text-underline-offset: 3px; }
+#track:not(:disabled):hover { background: transparent; color: var(--accent); }
 .pr > summary { position: relative; cursor: pointer; list-style: none; }
 .pr > summary:hover { background: var(--raised); }
 .pr[open] { background: var(--expanded); box-shadow: inset 2px 0 var(--accent); }

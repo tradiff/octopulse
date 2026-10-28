@@ -31,18 +31,18 @@ export async function loadingRecovery(page) {
     try {
       await page.getByRole('button', { name: 'Refresh', exact: true }).click();
       await page.getByRole('alert').filter({ hasText: 'Identity failed independently' }).waitFor({ timeout: 3000 });
-      check(await page.getByRole('button', { name: '＋ Track PR', exact: true }).isDisabled(), 'Identity failure is reported without waiting for stalled data');
+      check(await page.getByRole('button', { name: 'Track a pull request', exact: true }).isDisabled(), 'Identity failure is reported without waiting for stalled data');
       check(await page.locator('.pr').count() > 0, 'Fast identity failure retains useful results');
     } finally { release(); await page.unroute('**/api/pull-request-timeline*', holdData); await page.unroute('**/api/me', failIdentity); }
     await page.getByRole('button', { name: 'Retry', exact: true }).click(); await ready();
 
     const fakeTrack = route => route.fulfill({ status: 201, contentType: 'application/json', body: '{"status":"tracked"}' });
     await page.route('**/api/tracked-pull-requests', fakeTrack);
-    await page.getByRole('button', { name: '＋ Track PR', exact: true }).click();
+    await page.getByRole('button', { name: 'Track a pull request', exact: true }).click();
     await page.getByLabel('GitHub pull request URL', { exact: true }).fill('https://github.com/acme/widget/pull/101');
     await page.getByRole('button', { name: 'Track pull request', exact: true }).click();
     await page.locator('#track-dialog').waitFor({ state: 'hidden' }); await ready();
-    check(await page.getByRole('button', { name: '＋ Track PR', exact: true }).evaluate(el => el === document.activeElement), 'Successful tracking restores focus after refreshing results');
+    check(await page.getByRole('button', { name: 'Track a pull request', exact: true }).evaluate(el => el === document.activeElement), 'Successful tracking restores focus after refreshing results');
     await page.unroute('**/api/tracked-pull-requests', fakeTrack);
     return { checks, status: 'pass', failures: 'split requests, filter retry, and mutation focus' };
   } finally {

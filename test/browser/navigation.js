@@ -79,7 +79,7 @@ export async function navigation(page, capture) {
   check(await page.locator('#identity > span').last().textContent() === '@alex', 'Identity failure can recover');
 
   await go('/?tab=needs-my-review');
-  await page.getByRole('button', { name: '＋ Track PR', exact: true }).click();
+  await page.getByRole('button', { name: 'Track a pull request', exact: true }).click();
   await page.getByLabel('GitHub pull request URL', { exact: true }).fill('https://github.com/denied/repo/pull/7');
   await page.getByRole('button', { name: 'Track pull request', exact: true }).click();
   await page.getByText('Unable to track pull request; check URL and GitHub access', { exact: true }).waitFor();
@@ -98,7 +98,7 @@ export async function navigation(page, capture) {
   if (await inactive.getAttribute('open') === null) await inactive.locator('summary').click();
   await inactive.getByRole('button', { name: 'Retrack', exact: true }).click(); await ready();
   check(await page.getByText('Manually tracked synthetic PR', { exact: true }).isVisible(), 'Retrack succeeds');
-  await page.getByRole('button', { name: '＋ Track PR', exact: true }).click();
+  await page.getByRole('button', { name: 'Track a pull request', exact: true }).click();
   await page.getByLabel('GitHub pull request URL', { exact: true }).fill('https://github.com/acme/widget/pull/101');
   await page.keyboard.press('Escape');
   await page.getByRole('link', { name: 'Logs', exact: true }).click(); await ready();
@@ -161,12 +161,12 @@ export async function navigation(page, capture) {
   await page.setViewportSize({ width: 1280, height: 900 }); await go('/');
   await page.getByRole('link', { name: 'Logs', exact: true }).click(); await ready();
   await page.getByRole('link', { name: 'Pull Requests', exact: true }).click(); await ready();
-  await page.getByRole('button', { name: '＋ Track PR', exact: true }).click();
+  await page.getByRole('button', { name: 'Track a pull request', exact: true }).click();
   await page.getByLabel('GitHub pull request URL', { exact: true }).fill('https://github.com/acme/widget/pull/102');
   await page.goBack(); await ready();
   check(await page.locator('#track-dialog').isHidden(), 'Back navigation dismisses an open tracking dialog');
   await page.goForward(); await ready();
-  await page.getByRole('button', { name: '＋ Track PR', exact: true }).click();
+  await page.getByRole('button', { name: 'Track a pull request', exact: true }).click();
   check(await page.getByLabel('GitHub pull request URL', { exact: true }).inputValue() === '', 'Navigation clears the tracking URL');
   await page.keyboard.press('Escape');
   check(errors.length === 0, `No browser runtime errors: ${errors.join('; ')}`);

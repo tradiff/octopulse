@@ -30,6 +30,7 @@ export async function pagination(page, capture) {
   await page.route('**/api/pull-request-timeline*', queues);
   try {
     await page.goto(origin + '/'); await ready();
+    check(await page.locator('#track-row').evaluate(el => el.previousElementSibling?.classList.contains('pr') && el.nextElementSibling?.classList.contains('pagination')), 'Tracking footer follows the PR rows and precedes pagination');
     check(activityRequests === 0, 'Collapsed cards fetch no timeline');
     check(await page.locator('.timeline > li').count() === 0, 'No timeline DOM exists initially');
     await page.locator('[data-pr="A"] > summary').click();
