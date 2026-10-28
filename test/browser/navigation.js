@@ -70,9 +70,9 @@ export async function navigation(page, capture) {
   await page.unroute('**/api/notification-records/*/resend');
   await go('/notification-history?repo=missing/repo');
   check(await page.getByText('No notifications match these filters.', { exact: true }).isVisible(), 'Empty history has an explicit state');
-  check(await page.getByRole('button', { name: 'Refresh', exact: true }).isVisible(), 'Empty history retains refresh');
+  check(await page.getByRole('button', { name: 'Refresh', exact: true }).count() === 0, 'History has no refresh action');
   await page.route('**/api/me', route => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"Synthetic identity failure"}' }));
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.getByRole('link', { name: 'Logs', exact: true }).click();
   await page.getByText('Synthetic identity failure', { exact: true }).waitFor();
   check(await page.locator('#identity').textContent() === 'Identity unavailable', 'Identity failure is explicit');
   await page.unroute('**/api/me'); await page.getByRole('button', { name: 'Retry', exact: true }).click(); await ready();
@@ -121,7 +121,7 @@ export async function navigation(page, capture) {
     await route.fulfill({ response, json: data });
   });
   await page.getByRole('button', { name: 'Refresh', exact: true }).click(); await firstSeen;
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.getByRole('button', { name: 'Merged', exact: true }).click();
   await page.getByText('Latest response', { exact: true }).waitFor();
   const staleResponse = page.waitForResponse(response => response.url().includes('/api/pull-request-timeline'));
   release(); await staleResponse;

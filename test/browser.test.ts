@@ -22,11 +22,13 @@ import { settings, settingsWithoutEnvironment, systemOneSettings, intervalPreset
 import { monitoringHealth } from './browser/monitoring-health.js';
 import { autoRefresh } from './browser/auto-refresh.js';
 import { conditionalRefresh } from './browser/conditional-refresh.js';
+import { githubRefresh } from './browser/github-refresh.js';
 
 type Capture = (name: string, options?: { fullPage?: boolean }) => Promise<void>;
 const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number; status: string }>, NodeJS.ProcessEnv?][] = [
   ['quiet automatic updates', autoRefresh],
   ['conditional background requests', conditionalRefresh],
+  ['manual GitHub refresh', githubRefresh],
   ['monitoring credential warnings', monitoringHealth],
   ['settings and credential sources', settings],
   ['settings without environment credentials', settingsWithoutEnvironment, {}],

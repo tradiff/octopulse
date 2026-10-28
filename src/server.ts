@@ -12,10 +12,13 @@ import type { Diagnostics } from './diagnostics.js';
 import { pullRequestUrl } from './config.js';
 import type { Settings } from './settings.js';
 import type { MonitoringStatus } from './monitoring-health.js';
+import type { RefreshStatus } from './scheduler.js';
 
 export interface LocalApplication {
   store: Store; monitor: Monitor; delivery: Pick<Delivery, 'resend'>; logs: Diagnostics; login: string; teams: string[];
   track(url: string, signal: AbortSignal): Promise<void>;
+  refresh(): RefreshStatus;
+  readonly refreshStatus: RefreshStatus | null;
   settings?: Settings;
   monitoring?: MonitoringStatus;
   updateSettings?(body: unknown): Promise<void>;
@@ -94,6 +97,7 @@ export async function listenLocal(app: LocalApplication, port: number) {
         send(response, 200, pullRequestActivity(app.store, pr, cursor)); return;
       }
       switch (url.pathname) {
+        case '/api/refresh': conditional(request, response, url, () => app.refreshStatus); return;
         case '/api/settings': send(response, 200, app.settings?.view() ?? {}); return;
         case '/api/me': conditional(request, response, url, () => ({ login: app.login, teams: app.teams, actionToken: token, monitoring: app.monitoring })); return;
         case '/api/monitoring': conditional(request, response, url, () => app.monitoring ?? { state: 'ready', since: null }); return;
@@ -114,7 +118,8 @@ export async function listenLocal(app: LocalApplication, port: number) {
     const untrack = /^\/api\/tracked-pull-requests\/([^/]+)$/.exec(url.pathname);
     const resend = /^\/api\/notification-records\/(\d+)\/resend$/.exec(url.pathname);
     const settings = method === 'PUT' && url.pathname === '/api/settings';
-    const mutation = settings || method === 'POST' && url.pathname === '/api/tracked-pull-requests' || method === 'DELETE' && untrack || method === 'POST' && resend;
+    const refresh = method === 'POST' && url.pathname === '/api/refresh';
+    const mutation = refresh || settings || method === 'POST' && url.pathname === '/api/tracked-pull-requests' || method === 'DELETE' && untrack || method === 'POST' && resend;
     if (!mutation) { send(response, 404, { error: 'Not found' }); return; }
     if (request.headers.origin !== origin || request.headers['x-octopulse-action'] !== token || request.headers['sec-fetch-site'] === 'cross-site') {
       send(response, 403, { error: 'Same-origin action authorization required' }); return;
@@ -122,7 +127,15 @@ export async function listenLocal(app: LocalApplication, port: number) {
     if (request.headers['content-type']?.split(';')[0]?.trim().toLowerCase() !== 'application/json') { send(response, 400, { error: 'Expected a JSON body' }); return; }
     let body: unknown;
     try { body = await json(request); } catch { send(response, 400, { error: 'Invalid or oversized JSON body' }); return; }
-    if (settings) {
+    if (refresh) {
+      if (!z.strictObject({}).safeParse(body).success) { send(response, 400, { error: 'Expected an empty refresh request' }); return; }
+      try {
+        const progress = app.refresh();
+        response.setHeader('Location', '/api/refresh'); response.setHeader('Retry-After', '1');
+        send(response, 202, progress);
+      }
+      catch { send(response, 503, { error: 'GitHub refresh is unavailable. Check monitoring status and Settings, then retry.' }); }
+    } else if (settings) {
       if (!app.updateSettings || !app.settings) { send(response, 503, { error: 'Settings unavailable' }); return; }
       try { await app.updateSettings(body); send(response, 200, app.settings.view()); }
       catch { send(response, 400, { error: 'Unable to save settings. Check durations, provider URL, and required credentials, then retry.' }); }

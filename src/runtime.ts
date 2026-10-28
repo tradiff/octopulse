@@ -94,6 +94,11 @@ export function openRuntime(initial: Config | undefined, directory: string, cloc
         if (!connected) throw new Error('Background monitoring is not ready');
         await connected.track(url, callerSignal);
       },
+      refresh() {
+        if (!connected || updating || stopped) throw new Error('Background monitoring is not ready');
+        return connected.scheduler.startRefresh();
+      },
+      get refreshStatus() { return connected?.scheduler.refreshStatus ?? null; },
       tick(): void {
         if (stopped || updating || connectionSignal.aborted) return;
         if (connected) connected.tick();

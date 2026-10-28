@@ -12,6 +12,7 @@ import { Profile } from '../src/profile.js';
 import { readFile, rm } from 'node:fs/promises';
 import { webFixture } from './web-fixture.js';
 import { completeSources, temporaryProfile, VirtualClock, RecordingDesktop } from './fixture.js';
+import type { RefreshStatus } from '../src/scheduler.js';
 
 test('filter defaults distinguish omitted, recognized empty and unknown values', () => {
   assert.deepEqual(filters(new URLSearchParams()), { tracking: ['tracked'], lifecycle: ['open'], repository: '', actors: [] });
@@ -196,6 +197,39 @@ test('local routes, HEAD, mutation statuses, validation and same-origin protecti
   const before = fixture.trackCount(); await fetch(origin + '/api/pull-request-timeline'); await fetch(origin + '/api/notification-history'); assert.equal(fixture.trackCount(), before);
   const badHost = await new Promise<number>(resolve => { const req = request(origin + '/health', { headers: { Host: 'evil.example' } }, res => { res.resume(); resolve(res.statusCode!); }); req.end(); });
   assert.equal(badHost, 403);
+});
+
+test('GitHub refresh requires an authorized POST, validates input and reports partial or unavailable work', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  let calls = 0; let unavailable = false;
+  let progress: RefreshStatus | null = null;
+  const local = await listenLocal({ ...fixture, get refreshStatus() { return progress; }, refresh() {
+    calls++;
+    if (unavailable) throw new Error('fixture-secret');
+    progress = { id: 'test-refresh', phase: 'discovering', completed: 0, total: 0, discoveryFailed: false, failedPullRequests: 0 };
+    return progress;
+  } }, 0); t.after(() => local.stop());
+  const { actionToken } = await (await fetch(local.origin + '/api/me')).json() as { actionToken: string };
+  const headers = { Origin: local.origin, 'Content-Type': 'application/json', 'X-Octopulse-Action': actionToken };
+  assert.equal(await (await fetch(local.origin + '/api/refresh')).json(), null);
+  for (const method of ['HEAD', 'PUT']) assert.equal((await fetch(local.origin + '/api/refresh', { method })).status, 404);
+  for (const overrides of [{ Origin: 'https://evil.example' }, { 'X-Octopulse-Action': 'bad' }, { 'Sec-Fetch-Site': 'cross-site' }]) {
+    assert.equal((await fetch(local.origin + '/api/refresh', { method: 'POST', headers: { ...headers, ...overrides }, body: '{}' })).status, 403);
+  }
+  for (const body of ['[]', 'null', '{"force":true}', 'invalid']) {
+    assert.equal((await fetch(local.origin + '/api/refresh', { method: 'POST', headers, body })).status, 400);
+  }
+  assert.equal(calls, 0);
+  const response = await fetch(local.origin + '/api/refresh', { method: 'POST', headers, body: '{}' });
+  assert.equal(response.status, 202); assert.deepEqual(await response.json(), progress);
+  assert.equal(response.headers.get('location'), '/api/refresh'); assert.equal(response.headers.get('retry-after'), '1');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  progress = { id: 'test-refresh', phase: 'completed', completed: 2, total: 2, discoveryFailed: true, failedPullRequests: 2 };
+  assert.deepEqual(await (await fetch(local.origin + '/api/refresh')).json(), progress);
+  assert.equal(calls, 1, 'Status reads never start GitHub work');
+  unavailable = true;
+  const failed = await fetch(local.origin + '/api/refresh', { method: 'POST', headers, body: '{}' });
+  assert.equal(failed.status, 503); assert.doesNotMatch(await failed.text(), /fixture-secret/);
 });
 
 test('occupied loopback port rejects startup and ordinary reads expose no caches or raw payloads', async t => {

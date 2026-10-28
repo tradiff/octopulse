@@ -1,6 +1,7 @@
 import { filters } from './filters.js';
 import type { ActivityPage, HistoryPage, PrPage, PrView } from './views.js';
 import type { SettingsView } from './settings.js';
+import type { RefreshStatus } from './scheduler.js';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const content = element<HTMLElement>('content');
@@ -16,6 +17,12 @@ let controller: AbortController | undefined;
 let dialogEpoch = 0;
 let renderedView: string | undefined;
 let showingPrevious = false;
+let retryGitHub = false;
+let refreshJob: RefreshStatus | null = null;
+let refreshPoll: Promise<void> | undefined;
+let refreshETag: string | undefined;
+let refreshSequence = 0;
+let lastRefreshId: string | undefined;
 let renderedData: string | undefined;
 let renderedETag: string | undefined;
 let renderedRepositories: string | undefined;
@@ -139,7 +146,7 @@ function closeDialog(): void {
   updateMutationButtons();
 }
 function updateMutationButtons(): void {
-  for (const control of document.querySelectorAll<HTMLButtonElement>('[data-requires-identity]')) control.disabled = !identity || control.dataset.busy === 'true';
+  for (const control of document.querySelectorAll<HTMLButtonElement>('[data-requires-identity]')) control.disabled = !identity || control.dataset.busy === 'true' || control.dataset.refreshing === 'true';
 }
 function navigate(url: URL): void {
   if (url.pathname !== '/') closeDialog();
@@ -244,9 +251,9 @@ function filterControls(repositories: string[], isHistory: boolean): void {
   clear.className = 'clear-filters'; clear.dataset.focusKey = 'clear-filters'; controls.append(clear);
   if (restoreRepositoryFocus) { input.focus(); close(); }
 }
-async function mutation(path: string, method: string, body: unknown): Promise<unknown> {
+async function mutation(path: string, method: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
   if (!identity) throw new Error('Identity is unavailable. Retry loading before acting.');
-  return api(path, { method, headers: { 'Content-Type': 'application/json', 'X-Octopulse-Action': identity.actionToken }, body: JSON.stringify(body) });
+  return api(path, { method, headers: { 'Content-Type': 'application/json', 'X-Octopulse-Action': identity.actionToken }, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
 }
 function actionButton(text: string, action: () => Promise<unknown>): HTMLButtonElement {
   const result = button(text, () => {
@@ -611,7 +618,8 @@ function refreshMonitoring(): Promise<void> {
   return monitoringRefresh;
 }
 
-async function load(quiet = false): Promise<void> {
+async function load(mode: 'foreground' | 'background' | 'refresh' = 'foreground'): Promise<void> {
+  const quiet = mode !== 'foreground';
   if (quiet && (document.hidden || controller || location.pathname === '/settings' || dialog.open || renderedView !== location.href
     || document.querySelector('[data-busy=true]') || window.getSelection()?.toString())) return;
   const version = ++sequence; controller?.abort(); const current = new AbortController(); controller = current;
@@ -620,6 +628,7 @@ async function load(quiet = false): Promise<void> {
   let focusKey: string | undefined;
   showingPrevious = false;
   if (!quiet) {
+    retryGitHub = false;
     errorBox.hidden = true; content.setAttribute('aria-busy', 'true'); status.textContent = 'Loading local state…';
     identity = null; updateMutationButtons();
   }
@@ -632,25 +641,29 @@ async function load(quiet = false): Promise<void> {
   }
   document.querySelector('main')!.setAttribute('aria-label', title); document.title = `${title} · Octopulse`; element('track').hidden = path !== '/';
   const workbar = element('workbar'); workbar.hidden = path !== '/';
-  const actionParent = path === '/' ? workbar : element('filter-bar');
-  if (element('page-actions').parentElement !== actionParent) actionParent.append(element('page-actions'));
+  renderRefreshProgress();
+  if (path === '/') void pollRefreshStatus();
   for (const anchor of document.querySelectorAll<HTMLAnchorElement>('.masthead nav a')) {
     if (new URL(anchor.href).pathname === path) anchor.setAttribute('aria-current', 'page'); else anchor.removeAttribute('aria-current');
   }
   try {
     const endpoint = path === '/settings' ? '/api/settings' : path === '/logs' ? '/api/logs' : path === '/notification-history' ? '/api/notification-history' : '/api/pull-request-timeline';
     const signal = quiet ? AbortSignal.any([current.signal, AbortSignal.timeout(10_000)]) : current.signal;
-    const meRequest = conditionalApi('/api/me', signal, quiet ? meCache?.etag : undefined);
-    const dataRequest = conditionalApi(endpoint + location.search, signal, quiet ? renderedETag : undefined).then(
+    const meRequest = conditionalApi('/api/me', signal, mode === 'background' ? meCache?.etag : undefined);
+    const dataRequest = conditionalApi(endpoint + location.search, signal, mode === 'background' ? renderedETag : undefined).then(
       value => ({ status: 'fulfilled' as const, value }), reason => ({ status: 'rejected' as const, reason }));
     let me: unknown;
     let meResult: Awaited<typeof meRequest>;
     try { meResult = await meRequest; me = (meResult ?? meCache)?.data; }
-    catch (error) { if (!quiet && version === sequence && !current.signal.aborted) element('identity').textContent = 'Identity unavailable'; throw error; }
+    catch (error) {
+      if (mode !== 'background' && version === sequence && !current.signal.aborted) { identity = null; element('identity').textContent = 'Identity unavailable'; }
+      throw error;
+    }
     if (version !== sequence) return;
     if (!me || typeof me !== 'object' || !('login' in me) || typeof me.login !== 'string' || !('teams' in me) || !Array.isArray(me.teams)
       || !me.teams.every(team => typeof team === 'string') || !('actionToken' in me) || typeof me.actionToken !== 'string') {
-      if (!quiet) element('identity').textContent = 'Identity unavailable'; throw new Error('Identity response is invalid');
+      if (mode !== 'background') { identity = null; element('identity').textContent = 'Identity unavailable'; }
+      throw new Error('Identity response is invalid');
     }
     identity = { login: me.login, teams: me.teams, actionToken: me.actionToken };
     if (meResult && 'monitoring' in me) renderMonitoring(me.monitoring);
@@ -670,7 +683,7 @@ async function load(quiet = false): Promise<void> {
     if (dataResult.status === 'rejected') throw dataResult.reason;
     const pageResult = dataResult.value;
     if (!pageResult) {
-      if (!errorBox.hidden) { errorBox.hidden = true; status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`; }
+      if (!errorBox.hidden && !retryGitHub) { errorBox.hidden = true; status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`; }
       return;
     }
     const data = pageResult.data;
@@ -683,7 +696,7 @@ async function load(quiet = false): Promise<void> {
     if (quiet && (document.hidden || dialog.open || document.querySelector('[data-busy=true]') || window.getSelection()?.toString())) return;
     if (quiet && signature === renderedData) {
       renderedETag = pageResult.etag;
-      if (!errorBox.hidden) { errorBox.hidden = true; status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`; }
+      if (!errorBox.hidden && !retryGitHub) { errorBox.hidden = true; status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`; }
       return;
     }
     if (quiet && path !== '/' && (content.querySelector('details[open]') || content.contains(document.activeElement) || controls.contains(document.activeElement))) return;
@@ -693,11 +706,14 @@ async function load(quiet = false): Promise<void> {
     renderedData = quiet && (content.contains(document.activeElement) || controls.contains(document.activeElement)) ? undefined : signature;
     renderedETag = renderedData === undefined ? undefined : pageResult.etag;
     renderedView = location.href;
-    errorBox.hidden = true;
-    status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`;
+    if (!retryGitHub) {
+      errorBox.hidden = true;
+      status.textContent = `Local state refreshed at ${new Date().toLocaleTimeString()}`;
+    }
   } catch (error) {
     if (version !== sequence || current.signal.aborted) return;
     current.abort();
+    if (mode === 'refresh') throw error;
     if (quiet) return;
     showingPrevious = renderedView !== undefined;
     status.textContent = renderedView ? (renderedView === location.href ? 'Refresh failed. Showing previous results.' : 'Could not apply these filters. Showing previous results.') : 'Unable to load local state. Retry to try again.';
@@ -717,13 +733,111 @@ async function load(quiet = false): Promise<void> {
   }
 }
 
+function readRefreshStatus(value: unknown): RefreshStatus | null {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || !('id' in value) || typeof value.id !== 'string' || !value.id
+    || !('phase' in value) || !['discovering', 'checking', 'completed', 'failed'].includes(String(value.phase))
+    || !('completed' in value) || !Number.isSafeInteger(value.completed) || Number(value.completed) < 0
+    || !('total' in value) || !Number.isSafeInteger(value.total) || Number(value.total) < Number(value.completed)
+    || !('discoveryFailed' in value) || typeof value.discoveryFailed !== 'boolean'
+    || !('failedPullRequests' in value) || !Number.isSafeInteger(value.failedPullRequests)
+    || Number(value.failedPullRequests) < 0 || Number(value.failedPullRequests) > Number(value.completed)) {
+    throw new Error('GitHub refresh status is invalid');
+  }
+  return value as RefreshStatus;
+}
+
+function renderRefreshProgress(): void {
+  const refresh = element<HTMLButtonElement>('refresh');
+  const active = refreshJob !== null;
+  refresh.dataset.refreshing = String(active);
+  const buttonLabel = active ? 'Refreshing GitHub…' : refresh.dataset.busy === 'true' ? 'Starting refresh…' : 'Refresh';
+  if (refresh.textContent !== buttonLabel) refresh.textContent = buttonLabel;
+  element('refresh-progress').hidden = !active || location.pathname !== '/';
+  if (refreshJob) {
+    const progress = element<HTMLProgressElement>('refresh-meter');
+    if (refreshJob.phase === 'discovering') progress.removeAttribute('value');
+    else {
+      const total = Math.max(1, refreshJob.total);
+      if (progress.max !== total) progress.max = total;
+      if (!progress.hasAttribute('value') || progress.value !== refreshJob.completed) progress.value = refreshJob.completed;
+    }
+    const label = refreshJob.phase === 'discovering' ? 'Discovering pull requests…' : `Checking pull requests: ${refreshJob.completed} of ${refreshJob.total}`;
+    if (element('refresh-progress-label').textContent !== label) element('refresh-progress-label').textContent = label;
+  }
+  updateMutationButtons();
+}
+
+async function observeRefresh(job: RefreshStatus | null, requested = false): Promise<void> {
+  if (job && (job.phase === 'discovering' || job.phase === 'checking')) {
+    refreshJob = job; renderRefreshProgress(); return;
+  }
+  const wasActive = refreshJob !== null;
+  refreshJob = null; renderRefreshProgress();
+  if (!requested && (!wasActive || job?.id === lastRefreshId)) return;
+  lastRefreshId = job?.id;
+  if (!job || job.phase === 'failed') {
+    retryGitHub = true; status.textContent = 'GitHub refresh was interrupted. Showing available data.';
+    fail(new Error('GitHub refresh was interrupted. Retry to start another refresh.')); return;
+  }
+  const view = location.href;
+  try {
+    await load('refresh');
+    if (location.href !== view) return;
+    const failures = [job.discoveryFailed ? 'discovery failed' : '', job.failedPullRequests ? `${job.failedPullRequests} pull request ${job.failedPullRequests === 1 ? 'check' : 'checks'} failed` : ''].filter(Boolean);
+    status.textContent = failures.length ? `GitHub refresh incomplete: ${failures.join('; ')}. Showing available updates.` : 'GitHub refreshed.';
+  } catch (error) {
+    if (location.href !== view) return;
+    retryGitHub = false; status.textContent = 'Unable to load updated local data. Showing previous results.'; fail(error);
+  }
+}
+
+function pollRefreshStatus(): Promise<void> {
+  if (document.hidden || location.pathname !== '/' || element('refresh').dataset.busy === 'true') return Promise.resolve();
+  const version = refreshSequence;
+  refreshPoll ??= conditionalApi('/api/refresh', AbortSignal.timeout(10_000), refreshETag).then(async result => {
+    if (version !== refreshSequence || location.pathname !== '/') return;
+    if (!result) { if (refreshJob) renderRefreshProgress(); return; }
+    const job = readRefreshStatus(result.data); refreshETag = result.etag;
+    await observeRefresh(job);
+  }).catch(() => {
+    if (version === refreshSequence && refreshJob && location.pathname === '/') element('refresh-progress-label').textContent = 'Connection interrupted. Retrying refresh status…';
+  }).finally(() => { refreshPoll = undefined; });
+  return refreshPoll;
+}
+
+async function refreshGitHub(): Promise<void> {
+  const refresh = element<HTMLButtonElement>('refresh');
+  if (!identity || refresh.dataset.busy === 'true' || refreshJob) return;
+  const view = location.href;
+  const restoreFocus = document.activeElement === refresh;
+  refreshSequence++;
+  refresh.dataset.busy = 'true'; renderRefreshProgress();
+  retryGitHub = false; errorBox.hidden = true;
+  try {
+    const job = readRefreshStatus(await mutation('/api/refresh', 'POST', {}, AbortSignal.timeout(10_000)));
+    if (!job) throw new Error('GitHub refresh status is missing');
+    refreshSequence++; refreshETag = undefined;
+    delete refresh.dataset.busy;
+    if (location.pathname !== '/') { refreshJob = job.phase === 'discovering' || job.phase === 'checking' ? job : null; return; }
+    await observeRefresh(job, true);
+  } catch (error) {
+    if (location.href !== view) return;
+    retryGitHub = true; status.textContent = 'GitHub refresh could not be started. Showing previous results.'; fail(error);
+  } finally {
+    delete refresh.dataset.busy; renderRefreshProgress();
+    if (restoreFocus && location.href === view && document.activeElement === document.body) refresh.focus({ preventScroll: true });
+  }
+}
+
 document.querySelector('.masthead')!.addEventListener('click', event => {
   const anchor = (event.target as Element).closest<HTMLAnchorElement>('a');
   if (!anchor || !(event instanceof MouseEvent) || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
   event.preventDefault(); navigate(new URL(anchor.href));
 });
 window.addEventListener('popstate', () => { closeDialog(); void load(); });
-element('refresh').addEventListener('click', () => { void load(); }); element('retry').addEventListener('click', () => { void load(); });
+element('refresh').addEventListener('click', () => { void refreshGitHub(); });
+element('retry').addEventListener('click', () => { if (retryGitHub) void refreshGitHub(); else void load(); });
 element('track').addEventListener('click', () => { dialogEpoch++; form.reset(); element('track-error').textContent = ''; dialog.showModal(); });
 element('cancel-track').addEventListener('click', closeDialog);
 dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(); });
@@ -739,8 +853,10 @@ form.addEventListener('submit', event => {
 void load();
 function refreshBackground(): void {
   if (document.hidden) return;
-  void load(true);
+  void load('background');
+  void pollRefreshStatus();
 }
+setInterval(() => { if (refreshJob) void pollRefreshStatus(); }, 1_000);
 setInterval(refreshBackground, 5_000);
 setInterval(() => { if (!document.hidden) void refreshMonitoring(); }, 30_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { void refreshMonitoring(); refreshBackground(); } });

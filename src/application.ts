@@ -10,9 +10,10 @@ export async function startApplication(config: Config | undefined, directory: st
   const runtime = openRuntime(config, directory, clock, desktop, signal, fetch, environment);
   try {
     const local = await listenLocal({
-      store: runtime.profile.store, logs: runtime.logs, delivery: runtime.delivery, track: runtime.track,
+      store: runtime.profile.store, logs: runtime.logs, delivery: runtime.delivery, track: runtime.track, refresh: runtime.refresh,
       settings: runtime.settings, updateSettings: runtime.updateSettings,
       get monitoring() { return runtime.monitoring; },
+      get refreshStatus() { return runtime.refreshStatus; },
       get monitor() { return runtime.monitor; },
       get login() { return runtime.login; },
       get teams() { return runtime.teams; },

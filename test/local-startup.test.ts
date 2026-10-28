@@ -48,6 +48,7 @@ test('saved PRs, activity, notification history, identity and teams serve while 
   app.tick();
   assert.deepEqual(desktop.submissions, []);
   await assert.rejects(app.track('https://github.com/acme/widget/pull/8', new AbortController().signal), /not ready/);
+  assert.throws(() => app.refresh(), /not ready/);
   await assert.rejects(app.delivery.resend(1), /not ready/);
   assert.deepEqual(requests, ['https://api.github.com/user']);
   const untrack = await fetch(app.origin + '/api/tracked-pull-requests/101', { method: 'DELETE',

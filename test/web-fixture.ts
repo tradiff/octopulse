@@ -10,6 +10,7 @@ import { listenLocal } from '../src/server.js';
 import { VirtualClock, RecordingDesktop, completeSources, temporaryProfile } from './fixture.js';
 import { reviewComment } from './comment-fixture.js';
 import { Settings } from '../src/settings.js';
+import type { RefreshStatus } from '../src/scheduler.js';
 
 export async function webFixture(richComments = false, environment: NodeJS.ProcessEnv = { GITHUB_TOKEN: 'fixture-environment-token' }) {
   const directory = await temporaryProfile();
@@ -42,9 +43,15 @@ export async function webFixture(richComments = false, environment: NodeJS.Proce
   logs.write('info', 'Synthetic discovery complete', { count: snapshots.length }); logs.write('warn', 'Synthetic provider timeout', { recovered: true });
   let tracks = 0;
   const settings = new Settings(store, undefined, environment);
+  let refreshStatus: RefreshStatus | null = null;
   const app = {
     store, monitor, delivery, logs, login: 'alex', teams: ['acme/platform'],
     settings, async updateSettings(body: unknown) { settings.update(body); },
+    get refreshStatus() { return refreshStatus; },
+    refresh() {
+      refreshStatus = { id: 'fixture-refresh', phase: 'completed', completed: 0, total: 0, discoveryFailed: false, failedPullRequests: 0 };
+      return refreshStatus;
+    },
     async track(input: string, signal: AbortSignal) {
       signal.throwIfAborted(); tracks++;
       const target = pullRequestUrl(input);

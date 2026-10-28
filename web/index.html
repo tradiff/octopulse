@@ -21,8 +21,9 @@
     <div id="monitoring-warning" role="status" aria-live="polite" hidden><div><strong></strong><p></p></div><a href="/settings">Open Settings</a></div>
     <div id="workbar" class="workbar">
       <nav id="tabs" aria-label="Pull request queues"></nav>
-      <div id="page-actions" class="actions page-actions"><button id="refresh" type="button">Refresh</button><button id="track" class="primary" type="button" data-requires-identity data-focus-key="track" disabled>＋ Track PR</button></div>
+      <div id="page-actions" class="actions page-actions"><button id="refresh" type="button" data-requires-identity data-focus-key="refresh" title="Check GitHub for pull requests and activity" disabled>Refresh</button><button id="track" class="primary" type="button" data-requires-identity data-focus-key="track" disabled>＋ Track PR</button></div>
     </div>
+    <div id="refresh-progress" class="refresh-progress" hidden><progress id="refresh-meter" aria-labelledby="refresh-progress-label"></progress><span id="refresh-progress-label" role="status" aria-live="polite"></span></div>
     <div id="error" role="alert" hidden><span></span> <button id="retry" type="button">Retry</button></div>
     <div id="filter-bar" class="filter-bar"><section id="filters" aria-label="Filters"></section></div>
     <div class="results-meta"><div id="result-summary" class="result-summary" hidden></div><p id="status" role="status" aria-live="polite" class="muted">Loading local state…</p></div>

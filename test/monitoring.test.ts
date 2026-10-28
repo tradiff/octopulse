@@ -389,6 +389,99 @@ test('discovery can overlap polling but never overlaps itself, and shutdown canc
   assert.equal(polls, 1); assert.equal(discoveries, 1);
 });
 
+test('manual refresh discovers and checks all eligible PRs immediately with bounded concurrency and partial results', async t => {
+  const { monitor, store, clock, delivery } = await setup(t);
+  for (let i = 1; i <= 7; i++) monitor.track({ ...A, id: `P${i}`, number: i + 10 }, 'manual');
+  monitor.untrack('P7');
+  monitor.track({ ...A, id: 'grace', number: 40, state: 'closed', closedAt: T }, 'manual');
+  const gate = deferred<void>();
+  const calls: string[] = []; const errors: string[] = [];
+  let active = 0; let maximum = 0; let discoveries = 0;
+  const scheduler = new Scheduler(monitor, delivery, clock, {
+    async discover() { discoveries++; monitor.track({ ...A, id: 'new', number: 41 }, 'discovery'); },
+    async poll(pr) {
+      calls.push(pr.snapshot.id); maximum = Math.max(maximum, ++active);
+      try {
+        await gate.promise;
+        if (pr.snapshot.id === 'P2') throw new Error('Synthetic GitHub failure');
+        return batch({ ...pr.snapshot, title: `Updated ${pr.snapshot.id}` });
+      } finally { active--; }
+    }, report(_error, scope) { errors.push(scope); },
+  });
+  const refresh = scheduler.refresh();
+  assert.equal(scheduler.refreshStatus?.phase, 'discovering');
+  assert.equal(scheduler.refresh(), refresh, 'Concurrent refresh requests share the same work');
+  await setImmediate(); assert.equal(calls.length, 4);
+  assert.equal(scheduler.refreshStatus?.phase, 'checking');
+  assert.equal(scheduler.refreshStatus?.total, 9); assert.equal(scheduler.refreshStatus?.completed, 0);
+  clock.set('2026-10-22T12:15:00Z'); scheduler.tick(); await setImmediate();
+  assert.equal(calls.length, 4, 'Scheduled ticks cannot start duplicate sweeps during a manual refresh');
+  gate.resolve();
+  assert.deepEqual(await refresh, { discoveryFailed: false, failedPullRequests: 1 });
+  assert.equal(discoveries, 1); assert.equal(maximum, 4);
+  assert.deepEqual(new Set(calls), new Set(['A', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'grace', 'new']));
+  assert.equal(calls.length, 9); assert.deepEqual(errors, ['P2']);
+  assert.equal(scheduler.refreshStatus?.completed, 9); assert.equal(scheduler.refreshStatus?.phase, 'completed');
+  assert.equal(store.pr('A')!.snapshot.title, 'Updated A');
+  assert.equal(store.pr('grace')!.snapshot.title, 'Updated grace');
+  assert.equal(scheduler.deadlines().active, '2026-10-22T12:16:00.000Z');
+  await scheduler.stop();
+});
+
+test('manual refresh joins scheduled discovery and polling, then checks newly discovered PRs once', async t => {
+  const { monitor, clock, delivery } = await setup(t);
+  const discovery = deferred<void>(); const poll = deferred<void>();
+  let discoveries = 0; const calls: string[] = [];
+  const scheduler = new Scheduler(monitor, delivery, clock, {
+    async discover() { discoveries++; await discovery.promise; monitor.track({ ...A, id: 'new', number: 8 }, 'discovery'); },
+    async poll(pr) { calls.push(pr.snapshot.id); if (pr.snapshot.id === 'A') await poll.promise; return batch(pr.snapshot); }, report() {},
+  });
+  clock.set('2026-10-22T12:05:00Z'); scheduler.tick(); await setImmediate();
+  const refresh = scheduler.refresh(); await setImmediate();
+  assert.equal(discoveries, 1); assert.deepEqual(calls, ['A']);
+  poll.resolve(); discovery.resolve();
+  assert.deepEqual(await refresh, { discoveryFailed: false, failedPullRequests: 0 });
+  assert.deepEqual(calls, ['A', 'new']); assert.equal(discoveries, 1);
+  assert.equal(scheduler.refreshStatus?.total, 2); assert.equal(scheduler.refreshStatus?.completed, 2);
+  await scheduler.stop();
+});
+
+test('manual refresh retains polling successes after discovery failure and drains on shutdown', async t => {
+  const { monitor, store, clock, delivery } = await setup(t);
+  let hang = false;
+  const scheduler = new Scheduler(monitor, delivery, clock, {
+    async discover() { if (hang) await new Promise(() => {}); throw new Error('Synthetic discovery outage'); },
+    async poll(pr) { return batch({ ...pr.snapshot, title: 'Polled during discovery outage' }); }, report() {},
+  });
+  assert.deepEqual(await scheduler.refresh(), { discoveryFailed: true, failedPullRequests: 0 });
+  assert.equal(store.pr('A')!.snapshot.title, 'Polled during discovery outage');
+  hang = true;
+  const refresh = scheduler.refresh(); const rejected = assert.rejects(refresh, /abort/i);
+  await setImmediate(); await scheduler.stop(); await rejected;
+  assert.equal(scheduler.refreshStatus?.phase, 'failed');
+  await assert.rejects(scheduler.refresh(), /stopped/);
+});
+
+test('refresh progress counts finished checks rather than started requests and starts fresh for each job', async t => {
+  const { monitor, clock, delivery } = await setup(t);
+  monitor.track({ ...A, id: 'B', number: 8 }, 'manual');
+  const gates = new Map([['A', deferred<void>()], ['B', deferred<void>()]]);
+  const scheduler = new Scheduler(monitor, delivery, clock, {
+    async discover() {}, async poll(pr) { await gates.get(pr.snapshot.id)!.promise; return batch(pr.snapshot); }, report() {},
+  });
+  const initial = scheduler.startRefresh();
+  assert.equal(initial.phase, 'discovering');
+  await setImmediate();
+  assert.equal(scheduler.refreshStatus?.completed, 0); assert.equal(scheduler.refreshStatus?.total, 2);
+  gates.get('A')!.resolve(); await setImmediate();
+  assert.equal(scheduler.refreshStatus?.completed, 1); assert.equal(scheduler.refreshStatus?.phase, 'checking');
+  gates.get('B')!.reject(new Error('Synthetic failure')); await scheduler.idle();
+  assert.equal(scheduler.refreshStatus?.completed, 2); assert.equal(scheduler.refreshStatus?.failedPullRequests, 1);
+  const next = scheduler.startRefresh();
+  assert.notEqual(next.id, initial.id); assert.equal(next.completed, 0); assert.equal(next.failedPullRequests, 0);
+  await scheduler.idle(); await scheduler.stop();
+});
+
 test('profile ownership is exclusive across processes and released by abrupt exit', async t => {
   const directory = await temporaryProfile();
   t.after(() => rm(directory, { recursive: true, force: true }));
