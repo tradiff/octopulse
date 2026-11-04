@@ -57,7 +57,7 @@ function button(text: string, action: () => void, selected?: boolean): HTMLButto
   return result;
 }
 function link(text: string, url: string): HTMLAnchorElement {
-  const result = node('a', text); result.href = url; result.rel = 'noreferrer'; return result;
+  const result = node('a', text); result.href = url; result.target = '_blank'; result.rel = 'noreferrer'; return result;
 }
 function avatar(login: string, url: string | null): HTMLElement {
   const result = node('span', login.slice(0, 1).toUpperCase(), 'avatar'); result.title = login; result.setAttribute('role', 'img'); result.setAttribute('aria-label', login);

@@ -58,6 +58,7 @@ export async function prSummary(page, capture) {
   }), 'Queue renders the independently expected PR identity');
   check(await page.locator('[data-pr="A"] .pr-summary').getByText('3 activities', { exact: true }).isVisible(), 'Queue retains its activity count');
   check(await arranged(), 'Queue leads with the state icon and title, with the author avatar beside the username');
+  check(await page.locator('.row-title').evaluateAll(links => links.every(link => link.target === '_blank' && link.relList.contains('noreferrer'))), 'Queue PR links open in a new tab without a referrer or opener');
   await capture('pr-queue.png', { fullPage: false });
   await go('/notification-history');
   const first = page.locator('.notification').first();
@@ -78,6 +79,7 @@ export async function prSummary(page, capture) {
   check(expandedNotification.transform === expandedPr.transform && expandedNotification.background === expandedPr.background, 'Expanded notification disclosure matches the PR orientation and color');
   check(expandedNotification.aligned, 'Expanded notification disclosure is centered with the Git icon');
   check(await first.getByRole('button', { name: 'Resend', exact: true }).isVisible(), 'Resend stays inside notification details');
+  check(await first.locator('a').evaluateAll(links => links.length === 2 && links.every(link => link.target === '_blank' && link.relList.contains('noreferrer'))), 'History title and explicit GitHub links open in a new tab without a referrer or opener');
   await capture('pr-history.png', { fullPage: false });
   const varied = async route => {
     const response = await route.fetch(); const data = await response.json();
