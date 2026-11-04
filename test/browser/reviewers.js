@@ -35,7 +35,7 @@ export async function reviewers(page, capture) {
   check(await summary.locator('.reviewer-group:visible').count() === 4, 'All nonempty status groups are visible immediately');
   check(await summary.locator('.summary-reviewers button').count() === 0, 'Reviewer summaries have no overflow count or disclosure button');
   check(await card.locator('.reviewer-avatar svg').count() === 0, 'Status icons never obscure individual avatars');
-  check(await summary.locator('.pr-summary > .avatar').getAttribute('aria-label') === 'alex', 'Author avatar remains unchanged');
+  check(await summary.locator('.pr-author > .avatar').getAttribute('aria-label') === 'alex', 'Author avatar remains beside the username');
   await people.first().focus();
   check(await people.first().locator('.reviewer-tooltip').isVisible(), 'Keyboard focus exposes the reviewer tooltip');
   check(!await card.evaluate(el => el.open), 'Focusing a reviewer does not expand the PR');

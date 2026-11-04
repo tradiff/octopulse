@@ -43,7 +43,7 @@ export async function themeAndAccessibility(page, capture) {
     await go('/');
     const summary = page.locator('.pr > summary').first();
     check((await summary.boundingBox()).height < 120, 'PR summary is a compact desktop row');
-    const heading = await page.locator('.list-headings span').nth(2).boundingBox();
+    const heading = await page.locator('.list-headings span').filter({ hasText: /^Review$/ }).boundingBox();
     const review = await page.locator('.review-status').first().boundingBox();
     check(Math.abs(heading.x - review.x) < 2, 'Review column aligns with its heading');
     await summary.focus(); await page.keyboard.press('Enter');

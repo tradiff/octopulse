@@ -53,8 +53,8 @@ export async function queueLayout(page, capture) {
       check(await page.getByText('CI passed', { exact: true }).isVisible(), 'Success is labeled, not color-only');
       check(await page.getByText('CI failed', { exact: true }).isVisible(), 'Failure is labeled, not color-only');
       check(await page.getByText('ordering uncertain', { exact: true }).isVisible(), 'Uncertain CI remains visible');
-      await page.waitForFunction(() => !document.querySelector('.pr-summary > .avatar img'));
-      check(await page.locator('.pr-summary > .avatar').first().textContent() === 'A', 'Broken avatar falls back to an initial');
+      await page.waitForFunction(() => !document.querySelector('.pr-author > .avatar img'));
+      check(await page.locator('.pr-author > .avatar').first().textContent() === 'A', 'Broken avatar falls back to an initial');
       const contrast = await page.evaluate(() => {
         const luminance = rgb => {
           const values = rgb.match(/[\d.]+/g).slice(0, 3).map(Number).map(value => {

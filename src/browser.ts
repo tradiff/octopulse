@@ -273,10 +273,12 @@ function prSummary(pr: Pick<PrView, 'snapshot' | 'state' | 'tracked'>, activityC
   const state = node('img', undefined, 'pr-state-icon'); state.src = `/git-${pr.state}-inline.svg`;
   state.alt = pr.state[0]!.toUpperCase() + pr.state.slice(1); state.title = state.alt; state.width = 29; state.height = 29;
   main.append(state, title, repository);
-  const meta = node('div', undefined, 'meta pr-meta'); meta.append(node('span', `by ${pr.snapshot.author}`, 'pr-author'));
+  const author = node('span', undefined, 'pr-author');
+  author.append(node('span', 'by'), avatar(pr.snapshot.author, pr.snapshot.authorAvatar), node('span', pr.snapshot.author));
+  const meta = node('div', undefined, 'meta pr-meta'); meta.append(author);
   if (activityCount !== undefined) meta.append(node('span', `${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`));
   if (!pr.tracked) meta.append(node('span', 'Inactive', 'tracking-status'));
-  main.append(meta); result.append(avatar(pr.snapshot.author, pr.snapshot.authorAvatar), main); return result;
+  main.append(meta); result.append(main); return result;
 }
 function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
   const card = node('details', undefined, 'pr'); card.open = expanded.has(pr.id); card.dataset.pr = pr.id;
@@ -418,7 +420,7 @@ function renderPrs(data: PrPage, quiet = false): void {
   const children: HTMLElement[] = [];
   if (items.length) {
     const headings = node('div', undefined, 'list-headings'); headings.setAttribute('aria-hidden', 'true');
-    for (const label of ['', 'Pull request', 'Review', 'Current-head CI', 'Reviewers', 'Updated ↓']) headings.append(node('span', label));
+    for (const label of ['Pull request', 'Review', 'Current-head CI', 'Reviewers', 'Updated ↓']) headings.append(node('span', label));
     children.push(quiet && content.firstElementChild?.isEqualNode(headings) ? content.firstElementChild as HTMLElement : headings);
     for (const pr of items) {
       const previous = quiet ? oldCards.get(pr.id) : undefined;
