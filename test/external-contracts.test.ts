@@ -439,12 +439,12 @@ test('desktop owner hiding applies at submission, including resends, without alt
     });
     settings.update({ github: {}, display: { hidden_github_owners: ['ACME'] } });
     assert.equal(await desktop.submit(saved.intent, signal()), 'sent');
-    assert.ok(capabilities.length ? messages[0]!.body.startsWith('[widget] acme/title stays intact')
+    assert.ok(capabilities.length ? messages[0]!.body.startsWith('acme/title stays intact<br/>widget #7 alex')
       : messages[0]!.summary.startsWith('widget #7 acme/title stays intact'));
     assert.match(messages[0]!.body, /acme\/comment stays intact/);
     settings.update({ github: {}, display: { hidden_github_owners: [] } });
     assert.equal(await desktop.submit(saved.intent, signal()), 'sent');
-    assert.ok(capabilities.length ? messages[1]!.body.startsWith('[acme/widget]') : messages[1]!.summary.startsWith('acme/widget #7'));
+    assert.ok(capabilities.length ? messages[1]!.body.startsWith('acme/title stays intact<br/>acme/widget #7 alex') : messages[1]!.summary.startsWith('acme/widget #7'));
   }
   assert.deepEqual(store.notification(1), saved);
   assert.deepEqual(store.pr(snapshot.id), pr);
@@ -720,7 +720,7 @@ test('freedesktop protocol maps Notify arguments and variants, opens only defaul
   assert.equal(await desktop.submit(store.notification(1).intent, signal()), 'sent');
   const notify = calls[1]!;
   assert.equal(notify.signature, 'susssasa{sv}i');
-  assert.deepEqual(notify.body.slice(0, 4), ['Octopulse', 0, 'git-open', '']);
+  assert.deepEqual(notify.body.slice(0, 4), ['Octopulse', 0, 'git-open', 'New comment']);
   assert.deepEqual(notify.body[6], { 'desktop-entry': { signature: 's', value: 'octopulse' }, 'sound-name': { signature: 's', value: 'octopulse-comment' } });
   assert.equal(notify.body[7], 0);
   t.mock.timers.enable({ apis: ['setTimeout'] }); t.mock.timers.tick(86_400_000);

@@ -332,8 +332,8 @@ test('desktop renders the current PR title once with rich and plain capability f
       assert.equal(await adapter.submit(saved, signal()), 'sent');
       assert.equal(`${sent.summary}\n${sent.body}`.split(title).length - 1, 1);
       if (capabilities.includes('body-markup')) {
-        assert.equal(sent.summary, '');
-        assert.equal(sent.body, `[acme/widget] ${title} (draft)<br/>&#160;<br/><b>bea</b>: 💬: Please check this change`);
+        assert.equal(sent.summary, 'New comment');
+        assert.equal(sent.body, `${title}<br/>acme/widget #7 alex<br/>&#160;<br/><b>bea</b>: Please check this change`);
       } else assert.equal(sent.body, saved.body);
       assert.equal(store.notification(1).intent.title, saved.title);
     }
@@ -356,7 +356,10 @@ test('cold author and actor avatars survive a download longer than 150 ms', asyn
     async capabilities() { return ['body-markup', 'body-images']; }, async notify(message) { body = message.body; return 1; },
   }, cache);
   assert.equal(await adapter.submit(store.notification(1).intent, signal()), 'sent');
-  assert.equal((body.match(/<img src="file:/g) ?? []).length, 2);
+  for (const url of ['https://avatars.example/author.png', 'https://avatars.example/actor.png']) {
+    const image = await cache.image(url, signal()); assert.ok(image);
+    assert.ok(body.includes(`<img src="${image}"`), 'Author and actor avatars remain distinct from the repository image');
+  }
 });
 
 test('avatars slower than the notification budget finish caching for the next delivery', async t => {
@@ -378,12 +381,13 @@ test('avatars slower than the notification budget finish caching for the next de
     async capabilities() { return ['body-markup', 'body-images']; }, async notify(message) { body = message.body; return 1; },
   }, cache);
   assert.equal(await adapter.submit(store.notification(1).intent, signal()), 'sent');
-  assert.doesNotMatch(body, /<img/);
+  assert.equal((body.match(/<img\b/g) ?? []).length, 1);
+  assert.match(body, /<br\/><img src="file:[^"]+\/repository-/);
   assert.equal(upstream?.aborted, false);
   release();
-  assert.match((await cache.image(url, signal()))!, /^file:/);
+  const image = await cache.image(url, signal()); assert.match(image!, /^file:/);
   assert.equal(await adapter.submit(store.notification(1).intent, signal()), 'sent');
-  assert.match(body, /<img src="file:/);
+  assert.ok(body.includes(`<img src="${image}"`));
   assert.equal(calls, 1);
 });
 

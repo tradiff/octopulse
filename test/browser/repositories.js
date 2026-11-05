@@ -15,10 +15,21 @@ export async function repositories(page, capture) {
       const input = page.getByRole('combobox', { name: 'Repository', exact: true });
       await input.click();
       check(await input.getAttribute('aria-expanded') === 'true', `${path}: click opens the dropdown`);
+      check(await input.evaluate(input => {
+        const box = input.getBoundingClientRect();
+        const menu = document.querySelector('#repository-options').getBoundingClientRect();
+        return Math.abs(box.left - menu.left) < 1 && Math.abs(box.right - menu.right) < 1;
+      }), `${path}: dropdown edges align with the input`);
       check(await page.getByRole('option', { name: 'All repositories', exact: true }).isVisible(), `${path}: all repositories is available`);
+      check(await page.getByRole('option', { name: 'All repositories', exact: true }).locator('img').count() === 0, `${path}: all repositories has no misleading repository icon`);
+      const serviceIcon = page.getByRole('option', { name: 'acme/service', exact: true }).locator('img');
+      check(await serviceIcon.getAttribute('src') === '/repository-icon.svg?repository=acme%2Fservice&v=2', `${path}: dropdown uses the same full repository seed and palette as PR summaries`);
+      check(await serviceIcon.getAttribute('alt') === '', `${path}: decorative icons leave repository option names unchanged`);
+      check(await serviceIcon.evaluate(async image => { await image.decode(); return image.naturalWidth > 0 && image.width === 20 && image.height === 20; }), `${path}: repository icons load at their intended size`);
       await input.fill('SeRvI');
       check(await page.getByRole('option').count() === 1, `${path}: case-insensitive substring search narrows options`);
       check(await page.getByRole('option', { name: 'acme/service', exact: true }).isVisible(), `${path}: matching repository is shown`);
+      check(await page.getByRole('option', { name: 'acme/service', exact: true }).locator('img').count() === 1, `${path}: searching keeps the matching repository icon`);
       check(await parameter('repo') === null, `${path}: typing does not apply a filter`);
       await input.press('Enter'); await ready();
       check(await parameter('repo') === 'acme/service', `${path}: Enter commits the matching option`);
@@ -57,6 +68,20 @@ export async function repositories(page, capture) {
     await input.dispatchEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true });
     check(await parameter('repo') === 'missing/repo', 'IME confirmation does not commit a repository filter');
     await capture('repository-search.png');
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto(origin + '/?repo=' + encodeURIComponent('acme/' + 'long-repository-name-'.repeat(6) + 'settings'));
+      await ready();
+      const repository = page.getByRole('combobox', { name: 'Repository', exact: true });
+      await repository.click();
+      check(await repository.evaluate(input => {
+        const box = input.getBoundingClientRect();
+        const menu = document.querySelector('#repository-options');
+        const bounds = menu.getBoundingClientRect();
+        return Math.abs(box.left - bounds.left) < 1 && Math.abs(box.right - bounds.right) < 1
+          && menu.scrollWidth <= menu.clientWidth + 1 && bounds.right <= innerWidth;
+      }), `${width}px: long repository names wrap inside an input-aligned dropdown`);
+    }
     check(errors.length === 0, `No runtime errors: ${errors.join('; ')}`);
     return { checks, status: 'pass', pages: ['Pull Requests', 'Notification History'] };
   } finally { page.off('pageerror', onError); }

@@ -55,6 +55,12 @@ export async function prSummary(page, capture) {
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   const queue = await fields(page.locator('[data-pr="A"] > summary > .pr-summary'));
+  const repositoryIcon = page.locator('[data-pr="A"] .repository-icon');
+  await repositoryIcon.evaluate(img => img.decode());
+  const repositoryIconSource = await repositoryIcon.getAttribute('src');
+  check(repositoryIconSource === '/repository-icon.svg?repository=acme%2Fwidget&v=2', 'Repository icon uses the full owner/repo seed and refreshed palette');
+  check(await repositoryIcon.evaluate(img => img.naturalWidth === 64 && img.alt === '' && img.width === 20 && img.height === 20),
+    'Repository icon loads locally, fits its metadata row and is decorative beside the repository name');
   check(JSON.stringify(queue) === JSON.stringify({
     title: 'Make workflow retries reliable', href: 'https://github.com/acme/widget/pull/7',
     repository: 'acme/widget#7', author: 'by alex', avatar: 'alex', state: 'Open', inactive: false,
@@ -65,6 +71,7 @@ export async function prSummary(page, capture) {
   await capture('pr-queue.png', { fullPage: false });
   await go('/notification-history');
   const first = page.locator('.notification').first();
+  check(await first.locator('.repository-icon').getAttribute('src') === repositoryIconSource, 'Notification history keeps the same repository icon as the PR queue');
   const collapsedNotification = await disclosure(first.locator('summary'));
   check(collapsedNotification.left === '-23px' && collapsedNotification.beforeIcon, 'Notification disclosure sits to the left of the Git icon');
   check(collapsedNotification.aligned, 'Collapsed notification disclosure is centered with the Git icon');

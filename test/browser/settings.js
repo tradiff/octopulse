@@ -73,6 +73,8 @@ export async function hiddenOwners(page, capture) {
   const input = page.getByRole('combobox', { name: 'Repository', exact: true });
   await input.fill('acme/widget');
   assert.equal(await page.getByRole('option', { name: 'widget', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('option', { name: 'widget', exact: true }).locator('img').getAttribute('src'),
+    await page.locator('.pr .repository-icon').first().getAttribute('src'));
   await input.press('Enter');
   await page.waitForURL(/repo=acme%2Fwidget/);
   await page.waitForFunction(() => document.querySelector('#repository-filter').value === 'widget');

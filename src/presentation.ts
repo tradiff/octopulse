@@ -33,6 +33,41 @@ const wording: Record<Event['kind'], string> = {
   converted_to_draft: 'converted to draft', commit: 'pushed commits', ci_failure: 'CI failed', ci_success: 'CI passed',
 };
 
+export function shortened(text: string, limit: number): string {
+  const characters = Array.from(text);
+  if (characters.length <= limit) return text;
+  const clipped = characters.slice(0, limit - 1).join('');
+  const boundary = clipped.lastIndexOf(' ');
+  return (boundary > limit * .6 ? clipped.slice(0, boundary) : clipped).trimEnd() + '…';
+}
+
+function excerpt(body: string): string {
+  const full = Array.from(readable(body));
+  return full.length > 100 ? `${full.slice(0, 97).join('')}...` : full.join('');
+}
+
+const headings: Record<Event['kind'], string> = {
+  comment: 'New comment', inline_comment: 'New inline comment', review: 'Review submitted',
+  approval: 'Approved', changes_requested: 'Changes requested', review_requested: 'Review requested',
+  close: 'PR closed', merge: 'PR merged', reopen: 'PR reopened', ready_for_review: 'Ready for review',
+  converted_to_draft: 'Converted to draft', commit: 'New commits', ci_failure: 'CI failed', ci_success: 'CI passed',
+};
+
+export function desktopActivity(events: Event[]) {
+  const bundled = events.length > 1;
+  return {
+    summary: events.length === 1 ? events[0]!.kind === 'approval' ? '✅ Approved' : headings[events[0]!.kind] : `${events.length} updates`,
+    updates: events.map(event => {
+      const actor = event.kind.startsWith('ci_') ? null : event.actor;
+      const text = bundled ? shortened(readable(event.body), 42) : excerpt(event.body);
+      const comment = ['comment', 'inline_comment'].includes(event.kind);
+      const action = event.kind === 'approval' ? 'approved' : wording[event.kind].replace(/^[💬✅❗👀]\s*/u, '');
+      return { actor, separator: bundled && !comment ? ' ' : ': ',
+        text: bundled && !comment ? `${action}${text ? `: ${text}` : ''}` : text || headings[event.kind] };
+    }),
+  };
+}
+
 export function intent(snapshot: Snapshot, events: Event[], kind: Intent['kind'], user: string, history: Activity[]): Intent {
   const own = canonical(snapshot.author) === canonical(user);
   const participated = new Set(history.filter(activity => activity.actorType === 'self' && activity.event.kind === 'inline_comment')
@@ -47,10 +82,9 @@ export function intent(snapshot: Snapshot, events: Event[], kind: Intent['kind']
     events: events.map(eventKey),
     title: `${snapshot.repository} #${snapshot.number} ${snapshot.title}`,
     body: events.map(event => {
-      const full = Array.from(readable(event.body));
-      const excerpt = full.length > 100 ? `${full.slice(0, 97).join('')}...` : full.join('');
+      const text = excerpt(event.body);
       const actor = event.actor && !event.kind.startsWith('ci_') ? `${event.actor.login}: ` : '';
-      return `${actor}${wording[event.kind]}${excerpt ? `: ${excerpt}` : ''}`;
+      return `${actor}${wording[event.kind]}${text ? `: ${text}` : ''}`;
     }).join('\n\n'),
     destination: `https://github.com/${snapshot.repository}/pull/${snapshot.number}`,
     expiryMs: sticky ? 0 : 10000,

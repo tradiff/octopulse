@@ -24,6 +24,8 @@
     "maintenance": "node dist/src/maintenance.js"
   },
   "dependencies": {
+    "@dicebear/core": "10.7.0",
+    "@dicebear/styles": "10.6.0",
     "@jellybrick/dbus-next": "0.11.4",
     "better-sqlite3": "13.0.3",
     "markdown-it": "15.0.3",

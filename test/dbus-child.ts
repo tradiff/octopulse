@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { interface as dbusInterface, Variant } from '@jellybrick/dbus-next';
 import { SessionBus } from '../src/session-bus.js';
 import { LinuxDesktop } from '../src/linux-desktop.js';
 import { startTray } from '../src/tray.js';
 import { Profile } from '../src/profile.js';
-import { Intent } from '../src/model.js';
+import { Intent, Snapshot } from '../src/model.js';
+import { Monitor } from '../src/monitor.js';
 import { temporaryProfile, VirtualClock } from './fixture.js';
 
 const { Interface } = dbusInterface;
@@ -126,6 +128,17 @@ try {
   assert.equal(await desktop.submit(plain, signal), 'sent');
   const canceled = new AbortController(); canceled.abort();
   assert.equal(await desktop.submit(plain, canceled.signal), 'transient');
+  const monitor = new Monitor(profile.store, new VirtualClock('2026-10-22T12:00:00Z'), 'alex', [], '2026-10-21T00:00:00Z');
+  monitor.track(Snapshot.parse({ id: 'synthetic', repository: 'acme/widget', number: 7, title: 'Synthetic approval', author: 'alex' }), 'manual');
+  notifications.capabilities = ['body-markup', 'body-images'];
+  assert.equal(await desktop.submit(plain, signal), 'sent');
+  assert.match(String(notifications.messages.at(-1)![2]), /git-open\.svg$/);
+  const match = /<br\/><img src="([^"]+)" alt="" width="18" height="18"\/> acme\/widget/.exec(String(notifications.messages.at(-1)![4]));
+  assert.ok(match, 'D-Bus body places the repository image before its label');
+  const repositoryImage = fileURLToPath(match[1]!);
+  assert.match(repositoryImage, /\/repository-[a-f0-9]{64}\.18\.png$/);
+  assert.deepEqual((await readFile(repositoryImage)).subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  await monitor.stop();
   console.log('Private D-Bus notification, menu, degradation, recovery, and action checks passed');
 } finally {
   tray?.stop(); await desktop.stop(); client.close(); service.close(); profile.close(); await rm(directory, { recursive: true, force: true });

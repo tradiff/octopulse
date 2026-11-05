@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
@@ -8,16 +8,35 @@ import type { Clock, Desktop, Intent } from './model.js';
 import type { Fetch } from './http.js';
 import { abortable } from './cancellation.js';
 import { Store } from './store.js';
-import { intent as present } from './presentation.js';
+import { desktopActivity, intent as present, shortened } from './presentation.js';
 import { Semaphore } from './concurrency.js';
 import { Config } from './config.js';
 import { githubLabel } from './display.js';
+import { repositoryIcon } from './repository-icon.js';
 
 export class AvatarCache {
   private readonly slots = new Semaphore(4);
   private readonly pending = new Map<string, { work: Promise<string | null>; controller: AbortController; users: number }>();
   private readonly failures = new Map<string, number>();
   constructor(private readonly directory: string, private readonly clock: Clock, private readonly fetch: Fetch = globalThis.fetch) {}
+
+  async repositoryImage(repository: string, signal: AbortSignal): Promise<string | null> {
+    let temporary: string | undefined;
+    try {
+      signal.throwIfAborted();
+      const svg = repositoryIcon(repository);
+      const path = join(this.directory, `repository-${createHash('sha256').update(svg).digest('hex')}.18.png`);
+      try { if ((await stat(path)).isFile()) return path; } catch {}
+      const image = await sharp(Buffer.from(svg)).resize(18, 18).png().timeout({ seconds: 5 }).toBuffer();
+      signal.throwIfAborted();
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      temporary = `${path}.${randomUUID()}.tmp`;
+      await writeFile(temporary, image, { mode: 0o600 });
+      await rename(temporary, path);
+      return path;
+    } catch { return null; }
+    finally { if (temporary) await rm(temporary, { force: true }).catch(() => {}); }
+  }
 
   async image(input: string, signal: AbortSignal): Promise<string | null> {
     let url: URL;
@@ -156,6 +175,7 @@ export class FreedesktopTransport implements NotificationTransport {
   reset(): void { this.destinations.clear(); }
 }
 const escape = (text: string) => text.replace(/[&<>"']/g, value => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[value]!);
+const loginLabel = (login: string) => escape(login).replaceAll('-', '\u2060-\u2060');
 
 export class DesktopAdapter implements Desktop {
   constructor(private readonly store: Store, private readonly user: string, private readonly transport: NotificationTransport, private readonly avatars?: AvatarCache) {}
@@ -169,6 +189,8 @@ export class DesktopAdapter implements Desktop {
       const events = intent.events.flatMap(key => history.filter(item => `${item.event.source}:${item.event.id}` === key).map(item => item.event));
       const current = pr && events.length === intent.events.length ? present(pr.snapshot, events, intent.kind, this.store.metadata('login') ?? this.user, history) : intent;
       const state = pr?.snapshot.state === 'open' && pr.snapshot.draft ? 'draft' : pr?.snapshot.state ?? 'open';
+      const loadingRepositoryImage = pr && this.avatars && capabilities.includes('body-markup') && capabilities.includes('body-images')
+        ? this.avatars.repositoryImage(pr.snapshot.repository, signal) : null;
       const images = new Map<string, string | null>();
       if (capabilities.includes('body-markup') && capabilities.includes('body-images') && this.avatars) {
         const urls = [...new Set([
@@ -183,38 +205,35 @@ export class DesktopAdapter implements Desktop {
         catch { signal.throwIfAborted(); }
         finally { clearTimeout(timer); budget.abort(); }
       }
+      const repositoryImage = await loadingRepositoryImage;
       signal.throwIfAborted();
       let body = intent.body;
+      let summary = intent.kind === 'monitoring' ? current.title : githubLabel(current.title, hiddenOwners);
       if (capabilities.includes('body-markup')) {
         body = escape(body);
-        if (events.length === intent.events.length) {
-          const paragraphs = intent.body.split('\n\n');
-          if (paragraphs.length === events.length) {
-            const rendered: string[] = [];
-            for (let i = 0; i < events.length; i++) {
-              const event = events[i]!;
-              const image = event.actor?.avatar && !event.kind.startsWith('ci_') ? images.get(event.actor.avatar) : null;
-              const paragraph = paragraphs[i]!;
-              const actor = event.actor && !event.kind.startsWith('ci_') ? event.actor.login : null;
-              const text = actor && paragraph.startsWith(`${actor}: `)
-                ? `<b>${escape(actor)}</b>${escape(paragraph.slice(actor.length))}` : escape(paragraph);
-              rendered.push(`${image ? `<img src="${escape(image)}" alt="" width="18" height="18"/> ` : ''}${text}`);
-            }
-            body = rendered.join('<br/>&#160;<br/>');
-          }
-        }
         if (pr) {
+          summary = 'PR activity';
+          if (events.length && events.length === intent.events.length) {
+            const activity = desktopActivity(events);
+            summary = activity.summary;
+            body = activity.updates.map(({ actor, separator, text }) => {
+              const uri = actor?.avatar ? images.get(actor.avatar) : null;
+              const image = uri ? `<img src="${escape(uri)}" alt="" width="18" height="18"/> ` : '';
+              return `${image}${actor ? `<b>${loginLabel(actor.login)}</b>${separator}` : ''}${escape(text)}`;
+            }).join('<br/>');
+          } else body = body.replaceAll('\n', '<br/>');
           let image = '';
           if (capabilities.includes('body-images') && pr.snapshot.authorAvatar && this.avatars) {
             const uri = images.get(pr.snapshot.authorAvatar);
             if (uri) image = `<img src="${escape(uri)}" alt="" width="18" height="18"/> `;
           }
-          body = `${image}${escape(`[${githubLabel(pr.snapshot.repository, hiddenOwners)}] ${pr.snapshot.title} (${state})`)}<br/>&#160;<br/>${body}`;
+          const repository = repositoryImage ? `<img src="${escape(pathToFileURL(repositoryImage).href)}" alt="" width="18" height="18"/> ` : '';
+          body = `${escape(shortened(pr.snapshot.title, 52))}<br/>${repository}${escape(githubLabel(pr.snapshot.repository, hiddenOwners))} #${pr.snapshot.number} ${image}${loginLabel(pr.snapshot.author)}<br/>&#160;<br/>${body}`;
         }
       }
       const id = await this.transport.notify({
         appName: 'Octopulse', replacesId: 0, icon: intent.kind === 'monitoring' ? 'dialog-warning' : `git-${state}`,
-        summary: pr && capabilities.includes('body-markup') ? '' : intent.kind === 'monitoring' ? current.title : githubLabel(current.title, hiddenOwners), body,
+        summary, body,
         actions: capabilities.includes('actions') ? ['default', intent.kind === 'monitoring' ? 'Open Settings' : 'Open pull request'] : [],
         hints: { 'desktop-entry': 'octopulse', ...(current.sound && capabilities.includes('sound') ? { 'sound-name': `octopulse-${current.sound}` } : {}) },
         expireTimeout: current.expiryMs,

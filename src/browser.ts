@@ -240,6 +240,7 @@ function filterControls(repositories: string[], isHistory: boolean): void {
     list.replaceChildren(); list.hidden = false; input.setAttribute('aria-expanded', 'true');
     for (const [index, option] of matches.entries()) {
       const item = button(option.label, () => choose(option.value)); item.id = `repository-option-${index}`;
+      if (option.value) item.replaceChildren(repositoryImage(option.value), node('span', option.label));
       item.title = option.value;
       item.setAttribute('role', 'option'); item.setAttribute('aria-selected', 'false'); item.tabIndex = -1;
       item.addEventListener('pointerdown', event => event.preventDefault());
@@ -279,12 +280,18 @@ function actionButton(text: string, action: () => Promise<unknown>): HTMLButtonE
   result.dataset.requiresIdentity = '';
   result.disabled = !identity; return result;
 }
+function repositoryImage(repository: string): HTMLImageElement {
+  const image = node('img', undefined, 'repository-icon');
+  image.src = `/repository-icon.svg?${new URLSearchParams({ repository: repository.toLowerCase(), v: '2' })}`;
+  image.alt = ''; image.width = 20; image.height = 20;
+  return image;
+}
 function prSummary(pr: Pick<PrView, 'snapshot' | 'state' | 'tracked'>): HTMLElement {
   const result = node('div', undefined, 'pr-summary');
   const main = node('div', undefined, 'row-main');
   const repository = node('div', undefined, 'repository');
   const repositoryName = node('span', displayLabel(pr.snapshot.repository)); repositoryName.title = pr.snapshot.repository;
-  repository.append(repositoryName, node('span', `#${pr.snapshot.number}`, 'pr-number'));
+  repository.append(repositoryImage(pr.snapshot.repository), repositoryName, node('span', `#${pr.snapshot.number}`, 'pr-number'));
   const title = link(pr.snapshot.title, `https://github.com/${pr.snapshot.repository}/pull/${pr.snapshot.number}`); title.className = 'row-title';
   const state = node('img', undefined, 'pr-state-icon'); state.src = `/git-${pr.state}-inline.svg`;
   state.alt = pr.state[0]!.toUpperCase() + pr.state.slice(1); state.title = state.alt; state.width = 29; state.height = 29;

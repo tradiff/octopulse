@@ -41,6 +41,7 @@ Octopulse automatically discovers your open PRs and PRs requesting your review.
 - Open **Notification History** to inspect past notifications or resend one; use **Logs** to investigate problems.
 - Use **Settings** to change credentials, polling, retention, or optional System One bot-comment classification.
 - Under **Settings → Display**, hide selected GitHub owner prefixes in repository and team labels, including desktop notifications. This only changes display labels, not GitHub links or stored PR data.
+- Repositories use locally generated [DiceBear Blobs](https://www.dicebear.com/styles/blobs/) icons. People keep their GitHub avatars, and desktop notifications retain their main PR-state icon.
 
 If the GitHub token is missing or rejected, Octopulse shows a warning linking to Settings. Saved PR activity remains available but may be out of date until monitoring resumes.
 

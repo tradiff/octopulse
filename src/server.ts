@@ -13,6 +13,8 @@ import { pullRequestUrl } from './config.js';
 import type { Settings } from './settings.js';
 import type { MonitoringStatus } from './monitoring-health.js';
 import type { RefreshStatus } from './scheduler.js';
+import { repositoryIcon } from './repository-icon.js';
+import { Snapshot } from './model.js';
 
 export interface LocalApplication {
   store: Store; monitor: Monitor; delivery: Pick<Delivery, 'resend'>; logs: Diagnostics; login: string; teams: string[];
@@ -86,6 +88,12 @@ export async function listenLocal(app: LocalApplication, port: number) {
       const page = ['/', '/notification-history', '/logs', '/settings'].includes(url.pathname) ? assets.get('/') : assets.get(url.pathname);
       if (page) { response.writeHead(200, { 'Content-Type': `${page.type}; charset=utf-8` }); response.end(method === 'HEAD' ? undefined : page.data); return; }
       if (url.pathname === '/health') { send(response, 200, { status: 'ok' }, method === 'HEAD'); return; }
+      if (url.pathname === '/repository-icon.svg') {
+        const repository = Snapshot.shape.repository.max(256).safeParse(url.searchParams.get('repository'));
+        if (!repository.success) { send(response, 400, { error: 'Invalid repository' }, method === 'HEAD'); return; }
+        response.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'private, max-age=86400' });
+        response.end(method === 'HEAD' ? undefined : repositoryIcon(repository.data)); return;
+      }
       if (method !== 'GET') { send(response, 404, { error: 'Not found' }, true); return; }
       const activity = /^\/api\/pull-requests\/([^/]+)\/activity$/.exec(url.pathname);
       if (activity) {
