@@ -78,7 +78,7 @@ export async function focusAndRecovery(page, capture) {
     for (const width of [1120, 1440, 1920]) {
       await page.setViewportSize({ width, height: 1000 }); await go('/');
       const first = await page.locator('.pr > summary').first().boundingBox();
-      check(first.y < 300, `${width}: primary results start in a compact desktop work area`);
+      check(first.y < 360, `${width}: page heading and controls leave a compact desktop work area`);
       check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: dense queue fits horizontally`);
     }
     await page.setViewportSize({ width: 1440, height: 1000 }); await go('/');

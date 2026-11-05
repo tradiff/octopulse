@@ -2,6 +2,7 @@ import { filters } from './filters.js';
 import type { ActivityPage, HistoryPage, PrPage, PrView } from './views.js';
 import type { SettingsView } from './settings.js';
 import type { RefreshStatus } from './scheduler.js';
+import type { Event } from './model.js';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const content = element<HTMLElement>('content');
@@ -63,9 +64,10 @@ function avatar(login: string, url: string | null): HTMLElement {
   const result = node('span', login.slice(0, 1).toUpperCase(), 'avatar'); result.title = login; result.setAttribute('role', 'img'); result.setAttribute('aria-label', login);
   try {
     if (url && new URL(url).protocol === 'https:') {
-      const image = node('img'); image.src = url; image.alt = ''; image.loading = 'lazy'; image.referrerPolicy = 'no-referrer';
-      image.addEventListener('error', () => { result.textContent = login.slice(0, 1).toUpperCase(); });
-      result.replaceChildren(image);
+      const image = node('img'); image.alt = ''; image.loading = 'lazy'; image.referrerPolicy = 'no-referrer';
+      image.addEventListener('load', () => image.classList.add('loaded'));
+      image.addEventListener('error', () => image.remove());
+      image.src = url; result.append(image);
     }
   } catch { return result; }
   return result;
@@ -75,6 +77,12 @@ const reviewerStates = {
   requested: { label: 'Requested', path: 'M10 6v4l3 2' },
   approvers: { label: 'Approved', path: 'M5.75 10.5 8.5 13.25 14.25 7.5' },
   commenters: { label: 'Commented', path: 'M5.5 6.25h9a1.75 1.75 0 0 1 1.75 1.75v4A1.75 1.75 0 0 1 14.5 13.75H10l-3.25 2v-2H5.5A1.75 1.75 0 0 1 3.75 12V8A1.75 1.75 0 0 1 5.5 6.25Z' },
+};
+const activityActions: Record<Event['kind'], string> = {
+  comment: 'commented', inline_comment: 'commented inline', review: 'submitted a review', approval: 'approved',
+  changes_requested: 'requested changes', review_requested: 'requested a review', close: 'closed the pull request',
+  merge: 'merged the pull request', reopen: 'reopened the pull request', ready_for_review: 'marked ready for review',
+  converted_to_draft: 'converted to draft', commit: 'pushed commits', ci_failure: 'CI failed', ci_success: 'CI passed',
 };
 function reviewerAvatar(person: { login: string; avatar: string | null }, state: keyof PrView['groups']): HTMLElement {
   const result = node('span', undefined, 'reviewer-avatar');
@@ -171,7 +179,7 @@ function filterControls(repositories: string[], isHistory: boolean): void {
   const filter = filters(new URLSearchParams(location.search), isHistory);
   for (const [title, options, selected] of [
     ['Tracking', ['tracked', 'inactive'], filter.tracking], ['State', ['open', 'merged', 'closed'], filter.lifecycle],
-    ...(isHistory ? [['Actor', ['self', 'human_other', 'bot'], filter.actors]] : []),
+    ...(isHistory ? [['Actor', ['all', 'self', 'human_other', 'bot'], filter.actors]] : []),
   ] as [string, string[], string[]][]) {
     const group = node('fieldset'); group.append(node('legend', title));
     const choices = node('div', undefined, 'filter-options');
@@ -180,7 +188,7 @@ function filterControls(repositories: string[], isHistory: boolean): void {
       changeQuery(query => {
         const current = filters(query, isHistory);
         if (title === 'Actor') {
-          const next = current.actors.includes(value) ? current.actors.filter(item => item !== value) : [...current.actors, value];
+          const next = value === 'all' ? [] : current.actors.includes(value) ? current.actors.filter(item => item !== value) : [...current.actors, value];
           query.delete('actor-type'); next.forEach(item => query.append('actor-type', item));
           if (!query.has('pr-state') && !query.has('repo') && !next.length) query.set('pr-state', 'all');
         } else {
@@ -189,7 +197,7 @@ function filterControls(repositories: string[], isHistory: boolean): void {
           query.delete('pr-state'); (next.length ? next : ['all']).forEach(item => query.append('pr-state', item));
         }
       }, true);
-      }, selected.includes(value));
+      }, title === 'Actor' && value === 'all' ? !selected.length : selected.includes(value));
       control.dataset.focusKey = `filter:${title}:${value}`; choices.append(control);
     }
     group.append(choices);
@@ -267,20 +275,20 @@ function actionButton(text: string, action: () => Promise<unknown>): HTMLButtonE
   result.dataset.requiresIdentity = '';
   result.disabled = !identity; return result;
 }
-function prSummary(pr: Pick<PrView, 'snapshot' | 'state' | 'tracked'>, activityCount?: number): HTMLElement {
+function prSummary(pr: Pick<PrView, 'snapshot' | 'state' | 'tracked'>): HTMLElement {
   const result = node('div', undefined, 'pr-summary');
   const main = node('div', undefined, 'row-main');
   const repository = node('div', undefined, 'repository'); repository.append(node('span', pr.snapshot.repository), node('span', `#${pr.snapshot.number}`, 'pr-number'));
   const title = link(pr.snapshot.title, `https://github.com/${pr.snapshot.repository}/pull/${pr.snapshot.number}`); title.className = 'row-title';
   const state = node('img', undefined, 'pr-state-icon'); state.src = `/git-${pr.state}-inline.svg`;
   state.alt = pr.state[0]!.toUpperCase() + pr.state.slice(1); state.title = state.alt; state.width = 29; state.height = 29;
-  main.append(state, title, repository);
+  main.append(state, title);
   const author = node('span', undefined, 'pr-author');
   author.append(node('span', 'by'), avatar(pr.snapshot.author, pr.snapshot.authorAvatar), node('span', pr.snapshot.author));
   const meta = node('div', undefined, 'meta pr-meta'); meta.append(author);
-  if (activityCount !== undefined) meta.append(node('span', `${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`));
   if (!pr.tracked) meta.append(node('span', 'Inactive', 'tracking-status'));
-  main.append(meta); result.append(main); return result;
+  const context = node('div', undefined, 'row-context'); context.append(repository, meta);
+  main.append(context); result.append(main); return result;
 }
 function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
   const card = node('details', undefined, 'pr'); card.open = expanded.has(pr.id); card.dataset.pr = pr.id;
@@ -290,53 +298,52 @@ function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
   const summary = node('summary'); summary.setAttribute('aria-label', `Details for ${pr.snapshot.repository} #${pr.snapshot.number}: ${pr.snapshot.title}`);
   const review = node('div', undefined, 'review-status');
   const direct = pr.groups.requested.some(person => person.login.toLowerCase() === identity?.login.toLowerCase());
-  let reviewLabel = 'No pending request';
-  if (pr.queue === 'needs-my-review') reviewLabel = direct ? 'Your review requested' : 'Team review requested';
-  else if (pr.groups.decliners.length) reviewLabel = 'Changes requested';
-  else if (pr.groups.requested.length || pr.pendingTeams.length) reviewLabel = 'Awaiting review';
-  else if (pr.groups.approvers.length) reviewLabel = 'Approved';
-  review.append(node('span', reviewLabel, `review-label${pr.queue === 'needs-my-review' ? ' review-required' : ''}`));
+  let reviewLabel: HTMLElement | null = node('span', 'No pending request', 'review-label');
+  if (pr.queue === 'needs-my-review') {
+    reviewLabel.textContent = direct ? 'Your review requested' : 'Team review requested'; reviewLabel.classList.add('review-required');
+  } else if (pr.groups.decliners.length) {
+    reviewLabel.textContent = 'Changes requested'; reviewLabel.classList.add('state-failing');
+  } else if (pr.groups.requested.length || pr.pendingTeams.length) reviewLabel.textContent = 'Awaiting review';
+  else if (pr.groups.approvers.length) reviewLabel = null;
+  if (reviewLabel) review.append(reviewLabel);
   const ci = node('div', undefined, `ci-status ci-${pr.ci.outcome ?? 'pending'}`);
-  const counts = Object.entries(pr.ci.counts).filter(([, count]) => count > 0).map(([key, count]) => `${count} ${key}`).join(' · ');
-  if (counts || pr.ci.outcome || pr.ci.workflows.length || pr.ci.uncertain) {
-    ci.append(node('span', pr.ci.outcome === 'failure' ? 'CI failed' : pr.ci.outcome === 'success' ? 'CI passed' : pr.ci.counts.pending ? 'CI in progress' : 'CI results', 'ci-label'),
-      node('span', counts || 'No job details', 'ci-counts'));
-    if (pr.ci.uncertain) ci.append(node('span', 'ordering uncertain', 'ci-uncertain'));
+  if (Object.values(pr.ci.counts).some(count => count > 0) || pr.ci.outcome || pr.ci.workflows.length || pr.ci.uncertain) {
+    ci.append(node('span', pr.ci.outcome === 'failure' ? 'CI failed' : pr.ci.outcome === 'success' ? 'CI passed' : pr.ci.counts.pending ? 'CI in progress' : 'CI results', 'ci-label'));
   } else {
     ci.classList.add('ci-empty'); ci.append(node('span', 'No current-head results', 'ci-label'));
   }
-  const groups = node('div', undefined, 'groups');
+  ci.querySelector('.ci-label')!.prepend(reviewerIcon(pr.ci.outcome === 'failure' ? 'decliners' : pr.ci.outcome === 'success' ? 'approvers' : 'requested'));
   const reviewerOrder = ['decliners', 'requested', 'approvers', 'commenters'] as const;
-  for (const key of reviewerOrder) {
-    if (!pr.groups[key].length) continue;
-    const group = node('div', undefined, 'group'); group.append(node('span', reviewerStates[key].label, 'group-label'), reviewerGroup(key, pr.groups[key])); groups.append(group);
-  }
   const reviewers = node('div', undefined, 'summary-reviewers');
   for (const state of reviewerOrder) if (pr.groups[state].length) reviewers.append(reviewerGroup(state, pr.groups[state]));
   if (reviewers.childElementCount) review.append(reviewers);
   if (pr.pendingTeams.length) {
-    const teams = node('div', undefined, 'pending-teams');
+    const teams = node('ul', undefined, 'pending-teams'); teams.setAttribute('aria-label', 'Teams awaiting review');
     for (const team of pr.pendingTeams) {
-      const chip = node('span', undefined, 'reviewer-group reviewer-requested pending-team');
-      chip.setAttribute('role', 'img'); chip.setAttribute('aria-label', `Awaiting review from ${team}`);
-      chip.title = `Awaiting review from ${team}`;
-      chip.append(reviewerIcon('requested'), node('span', team)); teams.append(chip);
+      const item = node('li', undefined, 'reviewer-requested pending-team');
+      item.setAttribute('aria-label', `Awaiting review from ${team}`); item.title = `Awaiting review from ${team}`;
+      item.append(reviewerIcon('requested'), node('span', team)); teams.append(item);
     }
     review.append(teams);
   }
   if (!reviewers.childElementCount && !pr.pendingTeams.length) review.append(node('span', 'No reviewers', 'muted merge-status'));
-  if (pr.merge) review.append(node('span', pr.merge, 'merge-status'));
-  const updated = node('div', undefined, 'row-updated'); updated.append(time(pr.latestAt));
-  summary.append(prSummary(pr, pr.activityCount), review, ci, updated); card.append(summary);
+  if (pr.merge) {
+    const merge = node('span', pr.merge, 'merge-status');
+    const mergeState = pr.snapshot.mergeStatus;
+    if (mergeState === 'dirty' || mergeState === 'blocked' || mergeState === 'behind' || mergeState === 'unstable') {
+      merge.classList.add(mergeState === 'dirty' ? 'state-failing' : 'state-pending');
+      merge.prepend(reviewerIcon(mergeState === 'dirty' ? 'decliners' : 'requested'));
+    }
+    ci.append(merge);
+  }
+  const updated = node('div', undefined, 'row-updated'); updated.append(node('span', 'Updated ', 'updated-label'), time(pr.latestAt));
+  summary.append(prSummary(pr), review, ci, updated); card.append(summary);
   const body = node('div', undefined, 'pr-body');
   const actions = node('div', undefined, 'actions detail-toolbar'); actions.append(actionButton(pr.tracked ? 'Untrack' : 'Retrack', () => pr.tracked
     ? mutation(`/api/tracked-pull-requests/${encodeURIComponent(pr.id)}`, 'DELETE', {})
     : mutation('/api/tracked-pull-requests', 'POST', { url: pr.destination })));
   actions.append(node('span', pr.baselineComplete ? 'Baseline complete' : 'Initial baseline incomplete', 'muted'));
   const freshness = node('span', 'Last local update: ', 'detail-freshness muted'); freshness.append(time(pr.recordedAt)); actions.append(freshness);
-  if (groups.childElementCount) {
-    const reviewSection = node('section', undefined, 'review-section'); reviewSection.append(node('h3', 'Review state'), groups); body.append(reviewSection);
-  }
   const columns = node('div', undefined, 'detail-columns');
   const activitySection = node('section', undefined, 'activity-section'); activitySection.append(node('h3', 'Activity timeline'));
   const timeline = node('ol', undefined, 'timeline');
@@ -369,8 +376,8 @@ function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
       for (const activity of page.items) {
         const item = node('li'); const header = node('div', undefined, 'meta');
         if (activity.event.actor) header.append(avatar(activity.event.actor.login, activity.event.actor.avatar ?? null));
-        header.append(node('strong', `${activity.event.actor?.login ? `${activity.event.actor.login}: ` : ''}${activity.event.kind.replaceAll('_', ' ')}`),
-          time(activity.event.occurredAt));
+        if (activity.event.actor) header.append(node('strong', activity.event.actor.login));
+        header.append(node('span', activityActions[activity.event.kind]), time(activity.event.occurredAt));
         if (activity.decision !== 'eligible') header.append(node('span', activity.decision.replaceAll('_', ' '), 'badge'));
         item.append(header);
         if (activity.bodyHtml) {
@@ -396,12 +403,17 @@ function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
     }
   }
   activitySection.append(timeline, activityStatus, more);
-  const ciSection = node('section', undefined, 'ci-section'); ciSection.append(node('h3', 'Current-head CI'));
+  const ciSection = node('section', undefined, 'ci-section'); ciSection.append(node('h3', 'Status'));
   if (pr.ci.uncertain) ciSection.append(node('p', 'Workflow ordering is uncertain. Last established results are retained.', 'muted'));
   if (!pr.ci.workflows.length) ciSection.append(node('p', 'No current-head workflow results.', 'muted'));
   for (const workflow of pr.ci.workflows) {
     const group = node('section', undefined, 'ci'); group.append(node('strong', `${workflow.name || `Workflow ${workflow.id}`} · ${workflow.trigger} · attempt ${workflow.attempt ?? '?'} · ${workflow.state}`));
-    const jobs = node('ul'); for (const job of workflow.jobs) jobs.append(node('li', `${job.name}: ${job.state}`, `state-${job.state}`)); group.append(jobs); ciSection.append(group);
+    const jobs = node('ul');
+    for (const job of workflow.jobs) {
+      const item = node('li', `${job.name}: ${job.state}`, `state-${job.state}`);
+      item.prepend(reviewerIcon(job.state === 'passing' ? 'approvers' : job.state === 'failing' ? 'decliners' : 'requested')); jobs.append(item);
+    }
+    group.append(jobs); ciSection.append(group);
   }
   columns.append(activitySection, ciSection); body.append(columns, actions);
   card.append(body); return card;
@@ -419,7 +431,9 @@ function renderPrs(data: PrPage, quiet = false): void {
     const queue = button('', () => changeQuery(query => query.set('tab', key), true), key === tab);
     queue.setAttribute('aria-label', `${label} (${data.counts[key]})`);
     queue.dataset.focusKey = `queue:${key}`;
-    queue.append(node('span', label), node('span', String(data.counts[key]), 'queue-count'));
+    const shortLabel = node('span', key === 'my-prs' ? 'Mine' : key === 'needs-my-review' ? 'Needs review' : 'Requests', 'queue-short-label');
+    shortLabel.setAttribute('aria-hidden', 'true');
+    queue.append(node('span', label, 'queue-label'), shortLabel, node('span', String(data.counts[key]), 'queue-count'));
     const previous = oldTabs[newTabs.length];
     newTabs.push(quiet && previous?.isEqualNode(queue) ? previous as HTMLElement : queue);
   }
@@ -432,7 +446,11 @@ function renderPrs(data: PrPage, quiet = false): void {
   const children: HTMLElement[] = [];
   if (items.length) {
     const headings = node('div', undefined, 'list-headings'); headings.setAttribute('aria-hidden', 'true');
-    for (const label of ['Pull request', 'Review', 'Current-head CI', 'Updated ↓']) headings.append(node('span', label));
+    for (const label of ['Pull request', 'Review', 'Status', 'Updated']) headings.append(node('span', label));
+    const sortIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    sortIcon.setAttribute('viewBox', '0 0 20 20'); sortIcon.setAttribute('aria-hidden', 'true');
+    const sortPath = document.createElementNS(sortIcon.namespaceURI, 'path'); sortPath.setAttribute('d', 'M10 4v12m-4-4 4 4 4-4'); sortIcon.append(sortPath);
+    headings.lastElementChild!.append(sortIcon);
     children.push(quiet && content.firstElementChild?.isEqualNode(headings) ? content.firstElementChild as HTMLElement : headings);
     for (const pr of items) {
       const previous = quiet ? oldCards.get(pr.id) : undefined;
@@ -443,7 +461,11 @@ function renderPrs(data: PrPage, quiet = false): void {
     }
   }
   if (!items.length) {
-    const empty = node('div', undefined, 'empty'); empty.append(node('span', '✓', 'empty-symbol'), node('h2', 'No matching pull requests'),
+    const symbol = node('span', undefined, 'empty-symbol');
+    const searchIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); searchIcon.setAttribute('viewBox', '0 0 24 24'); searchIcon.setAttribute('aria-hidden', 'true');
+    const circle = document.createElementNS(searchIcon.namespaceURI, 'circle'); circle.setAttribute('cx', '10'); circle.setAttribute('cy', '10'); circle.setAttribute('r', '6');
+    const handle = document.createElementNS(searchIcon.namespaceURI, 'path'); handle.setAttribute('d', 'm14.5 14.5 5 5'); searchIcon.append(circle, handle); symbol.append(searchIcon);
+    const empty = node('div', undefined, 'empty'); empty.append(symbol, node('h2', 'No matching pull requests'),
       node('p', 'No pull requests match this queue and its filters.'), node('p', 'Try another queue or adjust the filters above.', 'empty-hint')); children.push(empty);
   }
   trackRow.hidden = false; children.push(trackRow);
@@ -467,9 +489,24 @@ function renderHistory(data: HistoryPage): void {
   for (const record of data.items) {
     const card = node('details', undefined, 'notification'); const header = node('summary', undefined, 'notification-header');
     const snapshot = record.pr.snapshot;
-    const description = node('div', undefined, 'notification-description'); description.append(prSummary(record.pr));
-    const excerpt = Array.from(record.intent.body.replace(/\s+/g, ' ').trim());
-    if (excerpt.length) description.append(node('span', `${excerpt.slice(0, 180).join('')}${excerpt.length > 180 ? '…' : ''}`, 'notification-preview'));
+    const description = node('div', undefined, 'notification-description');
+    const identity = prSummary(record.pr); const main = identity.querySelector('.row-main')!;
+    const metadata = main.querySelector('.row-context')!;
+    const context = node('div', undefined, 'notification-context'); context.append(main.querySelector('.row-title')!, ...metadata.children); metadata.remove();
+    main.append(context); description.append(identity);
+    const excerpt = Array.from(record.intent.body.replace(/(^|\n\n)([^:\n]+): ✅ approval: Approved(?=$|\n\n)/g, '$1$2: ✅ Approved').replace(/\s+/g, ' ').trim());
+    if (excerpt.length) {
+      const preview = node('span', undefined, 'notification-preview');
+      const icons = { '✅': 'approvers', '💬': 'commenters', '❗': 'decliners', '👀': 'requested' } as const;
+      for (const part of `${excerpt.slice(0, 180).join('')}${excerpt.length > 180 ? '…' : ''}`.split(/(✅|💬|❗|👀)/u)) {
+        if (Object.hasOwn(icons, part)) {
+          const state = icons[part as keyof typeof icons];
+          const icon = node('span', undefined, `event-icon event-${state}`); icon.setAttribute('role', 'img'); icon.setAttribute('aria-label', reviewerStates[state].label);
+          icon.append(reviewerIcon(state)); preview.append(icon);
+        } else preview.append(document.createTextNode(part));
+      }
+      main.append(preview);
+    }
     if (record.status !== 'sent') description.append(node('span', record.status === 'failed' ? 'Failed' : 'Pending', `delivery-status delivery-${record.status}`));
     header.append(description, time(record.createdAt, true));
     const body = node('div', undefined, 'notification-detail');
@@ -651,6 +688,10 @@ async function load(mode: 'foreground' | 'background' | 'refresh' = 'foreground'
   }
   const path = location.pathname;
   const title = path === '/settings' ? 'Settings' : path === '/logs' ? 'Logs' : path === '/notification-history' ? 'Notification History' : 'Pull Requests';
+  document.querySelector('main')!.classList.toggle('logs-page', path === '/logs');
+  element('page-title').parentElement!.hidden = path === '/settings';
+  element('page-actions').hidden = path !== '/';
+  element('page-title').textContent = title;
   element('filter-bar').hidden = path === '/settings';
   if (!renderedView || new URL(renderedView).pathname !== path) {
     renderedView = undefined; clearContent(); controls.replaceChildren(); tabs.replaceChildren(); element('result-summary').hidden = true;

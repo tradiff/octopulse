@@ -10,11 +10,14 @@ export async function prSummary(page, capture) {
     const image = el.querySelector('.pr-author > .avatar');
     const username = el.querySelector('.pr-author > :last-child').getBoundingClientRect();
     const a = icon.getBoundingClientRect(); const b = title.getBoundingClientRect(); const avatar = image.getBoundingClientRect();
+    const history = !!el.closest('.notification');
+    const lead = el.querySelector('.notification-preview')?.getBoundingClientRect() ?? b;
+    const iconSize = !history && innerWidth <= 700 ? 24 : 29;
     return !el.querySelector(':scope > .avatar') && avatar.right <= username.left && username.left - avatar.right <= 5
       && Math.abs(avatar.top + avatar.height / 2 - username.top - username.height / 2) < 1
-      && avatar.top > b.bottom && a.right < b.left && Math.abs(a.top - b.top) <= 4
-      && a.width === 29 && a.height === 29 && avatar.width === 18 && avatar.height === 18
-      && icon.width === 29 && icon.height === 29 && !el.querySelector('.repository .pr-state-icon');
+      && a.right < lead.left && Math.abs(a.top - lead.top) <= 4 && (history ? b.top >= a.bottom : avatar.top > b.bottom)
+      && a.width === iconSize && a.height === iconSize && avatar.width === 20 && avatar.height === 20
+      && icon.width === iconSize && icon.height === iconSize && !el.querySelector('.repository .pr-state-icon');
   }));
   const fields = summary => summary.evaluate(el => ({
     title: el.querySelector('.row-title').textContent, href: el.querySelector('.row-title').href,
@@ -27,7 +30,7 @@ export async function prSummary(page, capture) {
     const style = getComputedStyle(identity, '::before');
     const git = el.querySelector('.pr-state-icon').getBoundingClientRect();
     const iconCenter = identity.getBoundingClientRect().top + parseFloat(style.top);
-    return { left: style.left, transform: style.transform, shape: style.clipPath, background: style.backgroundColor,
+    return { left: style.left, transform: style.transform, shape: style.clipPath, background: style.borderTopColor,
       aligned: style.translate === '0px -50%' && Math.abs(iconCenter - (git.top + git.height / 2)) < 1,
       beforeIcon: identity.getBoundingClientRect().left + parseFloat(style.left) + parseFloat(style.width) < git.left };
   });
@@ -35,10 +38,10 @@ export async function prSummary(page, capture) {
   const collapsedPr = await disclosure(page.locator('[data-pr="A"] > summary'));
   check(collapsedPr.left === '-23px' && collapsedPr.beforeIcon, 'PR disclosure sits to the left of the Git icon');
   check(collapsedPr.aligned, 'Collapsed PR disclosure is centered with the Git icon');
-  check(collapsedPr.shape === 'polygon(25% 0px, 83.333% 50%, 25% 100%)' && collapsedPr.transform === 'none', 'Collapsed PR uses a solid right-pointing disclosure');
+  check(collapsedPr.shape === 'none' && collapsedPr.transform === 'matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)', 'Collapsed PR uses a right-pointing chevron');
   await page.locator('[data-pr="A"] > summary').press('Enter');
   const expandedPr = await disclosure(page.locator('[data-pr="A"] > summary'));
-  check(expandedPr.transform === 'matrix(0, 1, -1, 0, 0, 0)' && expandedPr.background === 'rgb(130, 170, 255)', 'Expanded PR disclosure points down in the accent color');
+  check(expandedPr.transform === 'matrix(-0.707107, 0.707107, -0.707107, -0.707107, 0, 0)' && expandedPr.background === 'rgb(130, 170, 255)', 'Expanded PR disclosure points down in the accent color');
   check(expandedPr.aligned, 'Expanded PR disclosure is centered with the Git icon');
   await page.locator('[data-pr="A"] > summary').press('Space');
   await page.locator('[data-pr="A"] .review-status').evaluate(el => { el.style.minHeight = '180px'; });
@@ -56,7 +59,7 @@ export async function prSummary(page, capture) {
     title: 'Make workflow retries reliable', href: 'https://github.com/acme/widget/pull/7',
     repository: 'acme/widget#7', author: 'by alex', avatar: 'alex', state: 'Open', inactive: false,
   }), 'Queue renders the independently expected PR identity');
-  check(await page.locator('[data-pr="A"] .pr-summary').getByText('3 activities', { exact: true }).isVisible(), 'Queue retains its activity count');
+  check(!/\b\d+ activit(?:y|ies)\b/.test(await page.locator('[data-pr="A"] .pr-summary').innerText()), 'Queue omits its activity count');
   check(await arranged(), 'Queue leads with the state icon and title, with the author avatar beside the username');
   check(await page.locator('.row-title').evaluateAll(links => links.every(link => link.target === '_blank' && link.relList.contains('noreferrer'))), 'Queue PR links open in a new tab without a referrer or opener');
   await capture('pr-queue.png', { fullPage: false });
@@ -65,16 +68,18 @@ export async function prSummary(page, capture) {
   const collapsedNotification = await disclosure(first.locator('summary'));
   check(collapsedNotification.left === '-23px' && collapsedNotification.beforeIcon, 'Notification disclosure sits to the left of the Git icon');
   check(collapsedNotification.aligned, 'Collapsed notification disclosure is centered with the Git icon');
-  check(collapsedNotification.shape === collapsedPr.shape && collapsedNotification.transform === collapsedPr.transform, 'Notifications use the same solid disclosure as PRs');
+  check(collapsedNotification.shape === collapsedPr.shape && collapsedNotification.transform === collapsedPr.transform, 'Notifications use the same chevron disclosure as PRs');
   check(JSON.stringify(await fields(first.locator('.pr-summary'))) === JSON.stringify(queue), 'Both pages use the same PR identity fields, link, avatar and lifecycle');
   check(await arranged(), 'History shares the same icon/title/author arrangement');
-  check(await first.locator('.notification-preview').textContent() === 'cam: ✅ approval: Approved', 'Recorded event excerpt remains distinct from PR identity');
+  check((await first.locator('.notification-preview').textContent()).replace(/\s+/g, ' ') === 'cam: Approved'
+    && await first.locator('.event-icon').getAttribute('aria-label') === 'Approved', 'Recorded excerpt uses an accessible status icon and remains distinct from PR identity');
   check(await first.locator('.notification-header > time').isVisible(), 'Notification time is retained');
   await page.evaluate(() => document.addEventListener('click', event => { if (event.target.closest('.pr-summary a')) event.preventDefault(); }));
   await first.locator('.row-title').click();
   check(!await first.evaluate(el => el.open), 'Opening the PR link does not toggle notification details');
   await first.locator('summary').focus(); await first.locator('summary').press('Enter');
   check(await first.locator('.notification-body').isVisible(), 'Notification still expands from the keyboard');
+  check(await first.locator('.notification-body').textContent() === 'cam: ✅ approval: Approved', 'Expanded history preserves the original notification text');
   const expandedNotification = await disclosure(first.locator('summary'));
   check(expandedNotification.transform === expandedPr.transform && expandedNotification.background === expandedPr.background, 'Expanded notification disclosure matches the PR orientation and color');
   check(expandedNotification.aligned, 'Expanded notification disclosure is centered with the Git icon');
@@ -97,8 +102,9 @@ export async function prSummary(page, capture) {
     check(await page.locator('.notification-header').getByText('Original saved notification title', { exact: true }).count() === 0, 'Header uses current title rather than saved notification title');
     check(await page.locator('.notification .pr-state-icon').evaluateAll(icons => icons.map(icon => icon.alt).join(',') === 'Draft,Merged,Closed,Open'), 'Shared lifecycle icons cover all PR states');
     check(await page.locator('.notification .pr-state-icon').evaluateAll(icons => icons.every(icon => icon.getAttribute('src') === `/git-${icon.alt.toLowerCase()}-inline.svg` && icon.title === icon.alt)), 'Each lifecycle uses its matching inline SVG and tooltip');
+    check(await page.locator('.notification .repository').evaluateAll(items => items.every(item => !/\b(draft|open|merged|closed)\b/i.test(item.textContent))), 'Lifecycle states have no redundant metadata labels');
     await page.waitForFunction(() => [...document.querySelectorAll('.notification .pr-state-icon')].every(icon => icon.complete && icon.naturalWidth > 0));
-    check(await page.locator('.notification .badge').count() === 0, 'Lifecycle text badges are replaced by icons');
+    check(await page.locator('.notification .badge').count() === 0, 'Lifecycle presentation remains separate from internal category badges');
     check(await page.locator('.notification').nth(2).locator('.tracking-status').textContent() === 'Inactive', 'Inactive tracking is visible');
     check(await page.locator('.delivery-failed').textContent() === 'Failed' && await page.locator('.delivery-pending').textContent() === 'Pending', 'Delivery exceptions remain visible');
     check(await page.locator('.notification-header .row-title img').count() === 0, 'PR titles are inert text');
@@ -106,7 +112,7 @@ export async function prSummary(page, capture) {
     for (const width of [1120, 720, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: shared summaries fit long titles`);
-      check(await arranged(), `${width}: state stays at the first title line when long titles wrap`);
+      check(await arranged(), `${width}: history state stays aligned with the leading event while context wraps`);
       check((await disclosure(page.locator('.notification-header').first())).beforeIcon, `${width}: notification disclosure stays left without overlapping the Git icon`);
       for (const summary of await page.locator('.notification-header').all()) {
         check((await disclosure(summary)).aligned, `${width}: notification disclosure aligns with single-line and wrapped titles`);

@@ -30,6 +30,9 @@ export async function listenLocal(app: LocalApplication, port: number) {
     ['/app.js', { type: 'text/javascript', data: await readFile(new URL('./browser.js', import.meta.url)) }],
     ['/filters.js', { type: 'text/javascript', data: await readFile(new URL('./filters.js', import.meta.url)) }],
     ['/app.css', { type: 'text/css', data: await readFile(new URL('../../web/app.css', import.meta.url)) }],
+    ['/InterVariable.woff2', { type: 'font/woff2', data: await readFile(new URL('../../assets/InterVariable.woff2', import.meta.url)) }],
+    ['/chevron-down.svg', { type: 'image/svg+xml', data: await readFile(new URL('../../assets/chevron-down.svg', import.meta.url)) }],
+    ['/checkmark.svg', { type: 'image/svg+xml', data: await readFile(new URL('../../assets/checkmark.svg', import.meta.url)) }],
     ['/icon.svg', { type: 'image/svg+xml', data: await readFile(new URL('../../assets/octopulse-mark-blue.svg', import.meta.url)) }],
     ['/favicon.svg', { type: 'image/svg+xml', data: await readFile(new URL('../../assets/octopulse-mark-small-blue.svg', import.meta.url)) }],
   ]);

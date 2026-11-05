@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import sharp from 'sharp';
+import { webFixture } from './web-fixture.js';
+
+test('the bundled variable UI font is licensed and served locally without changing its bytes', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  const font = await readFile(new URL('../../assets/InterVariable.woff2', import.meta.url));
+  assert.equal(font.subarray(0, 4).toString(), 'wOF2');
+  const response = await fetch(`${fixture.local.origin}/InterVariable.woff2`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type')!, /^font\/woff2/);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), font);
+  assert.match(await readFile(new URL('../../assets/Inter-LICENSE.txt', import.meta.url), 'utf8'), /SIL OPEN FONT LICENSE Version 1\.1/);
+});
 
 test('inline PR state icons have transparent backgrounds and colored glyphs at web size', async () => {
   for (const [state, color] of [['open', [195, 232, 141]], ['draft', [163, 172, 203]], ['closed', [255, 117, 127]], ['merged', [192, 153, 255]]] as const) {

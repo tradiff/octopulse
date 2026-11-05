@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Octopulse</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/app.css">
   <script type="module" src="/app.js"></script>
 </head>
@@ -13,15 +14,15 @@
   <header class="masthead">
     <a class="brand" href="/" aria-label="Octopulse"><img class="brand-symbol" src="/icon.svg" alt="" width="48" height="42"><span class="brand-wordmark" aria-hidden="true">octopulse</span></a>
     <nav aria-label="Pages">
-      <a href="/">Pull Requests</a><a href="/notification-history">Notification History</a><a href="/logs">Logs</a><a href="/settings">Settings</a>
+      <a href="/">Pull Requests</a><a href="/notification-history" aria-label="Notification History"><span class="nav-label">Notification History</span><span class="nav-short-label" aria-hidden="true">History</span></a><a href="/logs">Logs</a><a href="/settings">Settings</a>
     </nav>
     <span id="identity" class="muted">Loading identity…</span>
   </header>
   <main aria-label="Pull Requests">
+    <div class="page-heading"><h1 id="page-title">Pull Requests</h1><div id="page-actions" class="actions page-actions"><button id="refresh" type="button" data-requires-identity data-focus-key="refresh" title="Check GitHub for pull requests and activity" disabled>Refresh</button></div></div>
     <div id="monitoring-warning" role="status" aria-live="polite" hidden><div><strong></strong><p></p></div><a href="/settings">Open Settings</a></div>
     <div id="workbar" class="workbar">
       <nav id="tabs" aria-label="Pull request queues"></nav>
-      <div id="page-actions" class="actions page-actions"><button id="refresh" type="button" data-requires-identity data-focus-key="refresh" title="Check GitHub for pull requests and activity" disabled>Refresh</button></div>
     </div>
     <div id="refresh-progress" class="refresh-progress" hidden><progress id="refresh-meter" aria-labelledby="refresh-progress-label"></progress><span id="refresh-progress-label" role="status" aria-live="polite"></span></div>
     <div id="error" role="alert" hidden><span></span> <button id="retry" type="button">Retry</button></div>
@@ -32,7 +33,7 @@
   </main>
   <dialog id="track-dialog" aria-labelledby="track-title">
     <form id="track-form">
-      <h2 id="track-title">Add pull request</h2>
+      <h2 id="track-title">Track pull request</h2>
       <label for="pr-url">GitHub pull request URL</label>
       <input id="pr-url" name="url" type="url" required placeholder="https://github.com/owner/repo/pull/123" autocomplete="off">
       <p id="track-error" role="alert"></p>

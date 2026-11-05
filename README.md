@@ -35,7 +35,7 @@ Open [127.0.0.1:3000](http://127.0.0.1:3000) in your browser.
 Octopulse automatically discovers your open PRs and PRs requesting your review.
 
 - Switch between **My PRs**, **Needs My Review**, and **Review Requests**, and filter by tracking status, PR state, or repository.
-- Expand a PR to read activity and check reviews and CI. Use **Untrack** to stop monitoring it or **Retrack** to resume.
+- Check reviewers under **Review** and CI and merge blockers under **Status**. Expand a PR for activity and workflow details; use **Untrack** to stop monitoring it or **Retrack** to resume.
 - Use **Track a pull request** below the PR list to add another PR by its GitHub URL.
 - Use **Refresh** to check GitHub now; progress appears while the check runs in the background.
 - Open **Notification History** to inspect past notifications or resend one; use **Logs** to investigate problems.

@@ -34,7 +34,7 @@ export async function navigation(page, capture) {
   await page.getByRole('option', { name: 'acme/service', exact: true }).click(); await ready();
   check(await page.locator('.pr').count() === 1, 'Repository filters intersect queue');
   check(await page.getByText('Blocked by rules', { exact: true }).isVisible(), 'Blocked merge label is separate');
-  check(await page.getByRole('img', { name: 'Awaiting review from acme/platform', exact: true }).isVisible(), 'Pending team has its own labeled status chip');
+  check(await page.getByRole('listitem', { name: 'Awaiting review from acme/platform', exact: true }).isVisible(), 'Pending team has its own accessible list entry');
   check((await parameter('pr-state', true)).includes('tracked'), 'Repository change preserves selected tracking filter');
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click(); await ready();
   await page.getByRole('button', { name: 'My PRs (2)', exact: true }).click(); await ready();
@@ -58,6 +58,11 @@ export async function navigation(page, capture) {
   check(await page.locator('.notification').count() > 0 && await page.locator('.notification').count() < 50, 'Last page contains remaining records');
   await page.getByRole('button', { name: 'Other human', exact: true }).click(); await ready();
   check(await parameter('page') === null, 'History filter resets page');
+  check(await page.getByRole('button', { name: 'All', exact: true }).getAttribute('aria-pressed') === 'false', 'Actor filter shows its non-default selection');
+  await page.getByRole('button', { name: 'All', exact: true }).click(); await ready();
+  check(await parameter('actor-type') === null
+    && await page.getByRole('button', { name: 'All', exact: true }).getAttribute('aria-pressed') === 'true', 'All actors explicitly clears the actor restriction');
+  await page.getByRole('button', { name: 'Other human', exact: true }).click(); await ready();
   const before = await page.evaluate(async () => (await (await fetch('/api/notification-history')).json()).total);
   await page.locator('.notification > summary').first().click();
   await page.getByRole('button', { name: 'Resend', exact: true }).first().click(); await ready();

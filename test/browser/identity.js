@@ -3,6 +3,18 @@ export async function identity(page, capture) {
   let checks = 0;
   const check = (value, message) => { if (!value) throw Error(message); checks++; };
   const avatarUrl = 'https://github.com/alex.png?size=64';
+  let releaseAvatar;
+  let finishAvatar;
+  const pendingAvatar = new Promise(resolve => { releaseAvatar = resolve; });
+  const finishedAvatar = new Promise(resolve => { finishAvatar = resolve; });
+  await page.route(avatarUrl, async route => { await pendingAvatar; await route.abort(); finishAvatar(); });
+  await page.goto(origin, { waitUntil: 'domcontentloaded' });
+  await page.locator('#identity img').waitFor({ state: 'attached' });
+  check(await page.locator('#identity .avatar').textContent() === 'A'
+    && await page.locator('#identity img').evaluate(image => getComputedStyle(image).opacity === '0'), 'A readable initial stays visible while the image loads');
+  releaseAvatar();
+  await finishedAvatar;
+  await page.unroute(avatarUrl);
   await page.route(avatarUrl, route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#82aaff"/></svg>' }));
   await page.goto(origin);
   await page.waitForFunction(() => document.querySelector('#identity img')?.naturalWidth > 0);

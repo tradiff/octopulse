@@ -31,9 +31,12 @@ export async function reviewers(page, capture) {
   const card = page.locator('[data-pr="A"]');
   const summary = card.locator(':scope > summary');
   const people = summary.locator('.reviewer-avatar:visible');
-  check(await page.locator('.list-headings > span').allTextContents().then(labels => labels.join('|') === 'Pull request|Review|Current-head CI|Updated ↓'), 'Review and reviewers share one column');
+  check(await page.locator('.list-headings > span').allTextContents().then(labels => labels.join('|') === 'Pull request|Review|Status|Updated')
+    && await page.locator('.list-headings > span:last-child > svg').count() === 1, 'Review and reviewers share one column; the last-activity sort uses a vector icon');
   check(await summary.locator(':scope > .review-status .summary-reviewers').count() === 1
     && await summary.locator(':scope > *').count() === 4, 'Reviewer groups are inside the Review column');
+  check(await summary.locator('.summary-reviewers > .reviewer-group').evaluateAll(groups => groups.every(group =>
+    !/\b(approvals?|approved|comments?|commented|requests?|requested|changes)\b/i.test(group.innerText))), 'Reviewer badges omit visible status words while retaining icons and avatars');
   check((await people.evaluateAll(items => items.map(item => item.getAttribute('aria-label')))).join('|')
     === 'Changes requested: blocker|Requested: requested|Approved: approved|Commented: commented|Commented: another-commenter', 'All reviewers are visible, with action-first labels and blockers first');
   check(await summary.locator('.reviewer-avatar').evaluateAll(avatars => avatars.every(avatar =>
@@ -55,15 +58,15 @@ export async function reviewers(page, capture) {
     return { color: style.stroke, size: parseFloat(style.width), path: el.querySelector('path').getAttribute('d'), circle: !!el.querySelector('circle') };
   });
   const requested = await iconStyle('requested'); const commented = await iconStyle('commenters');
-  check(requested.color === 'rgb(255, 199, 119)' && commented.color === 'rgb(163, 172, 203)', 'Pending requests are amber; comments remain neutral');
+  check(requested.color === 'rgb(255, 199, 119)' && commented.color === 'rgb(166, 175, 195)', 'Pending requests are amber; comments remain neutral');
   check(requested.circle && !commented.circle && requested.path === 'M10 6v4l3 2', 'Requests use a pending clock while comments use a speech bubble');
   check(requested.size >= 16 && commented.size >= 16, 'Status icons remain legible outside the avatars');
   await page.waitForFunction(() => !document.querySelector('[data-pr="A"] > summary .reviewer-avatar .avatar img'));
   check(await people.nth(2).locator('.avatar').textContent() === 'A'
     && await summary.locator('.reviewer-approvers > svg').count() === 1, 'Failed avatar falls back to an initial without losing the group status');
   await summary.focus(); await summary.press('Enter');
-  check(await card.locator('.groups .reviewer-avatar').count() === 5
-    && await card.locator('.groups .reviewer-group').count() === 4, 'Expanded details use the same grouped pills');
+  check(await card.locator('.reviewer-avatar').count() === 5
+    && await card.locator('.reviewer-group').count() === 4, 'Expanded rows retain every reviewer without duplicating the summary');
   for (const width of [1120, 720, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     check(await people.count() === 5, `${width}: summary reviewers remain visible`);
@@ -103,13 +106,21 @@ export async function reviewers(page, capture) {
   await page.waitForFunction(() => document.querySelector('#status').textContent.includes('refreshed'));
   const teams = summary.locator('.pending-team');
   check(await teams.count() === 3 && await teams.locator(':scope > svg').count() === 3, 'Every outstanding team has its own status icon');
+  check(await summary.getByRole('list', { name: 'Teams awaiting review' }).getByRole('listitem').count() === 3, 'Team requests form an accessible list');
   check(await teams.first().getAttribute('aria-label') === 'Awaiting review from acme/platform', 'Team status is accessible without relying on color or hover');
   check(await summary.locator('.reviewer-approvers .reviewer-avatar').count() === 1
     && await teams.first().locator('svg path').getAttribute('d') === requested.path, 'Individual approval does not clear team requests; teams share the pending-review icon');
   for (const width of [1440, 720, 390]) {
     await page.setViewportSize({ width, height: 1000 });
-    check(await teams.last().isVisible() && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: long team chips wrap without hiding reviewers or overflowing`);
-    await capture(`review-team-chips-${width}.png`, { fullPage: false });
+    check(await teams.evaluateAll(items => items.every((item, index) => {
+      const style = getComputedStyle(item), bounds = item.getBoundingClientRect();
+      const previous = items[index - 1]?.getBoundingClientRect();
+      return style.borderTopWidth === '0px' && style.borderRadius === '0px'
+        && getComputedStyle(item.querySelector('svg')).stroke === 'rgb(255, 199, 119)'
+        && (!previous || bounds.y >= previous.bottom + 3 && Math.abs(bounds.x - previous.x) < 1);
+    })), `${width}: teams are borderless stacked text rows with amber status icons`);
+    check(await teams.last().isVisible() && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: long team names wrap without hiding reviewers or overflowing`);
+    await capture(`review-team-list-${width}.png`, { fullPage: false });
   }
   return { checks, status: 'pass' };
 }

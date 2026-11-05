@@ -23,7 +23,8 @@ export async function queueLayout(page, capture) {
       pr.snapshot.authorAvatar = 'https://avatar.invalid/broken.png';
       pr.state = index === 1 ? 'draft' : 'open';
       pr.snapshot.draft = index === 1;
-      pr.merge = index === 1 ? 'Blocked by rules' : index === 2 ? 'Merge conflicts' : 'No merge conflicts';
+       pr.merge = index === 1 ? 'Blocked by rules' : index === 2 ? 'Merge conflicts' : 'No merge conflicts';
+       pr.snapshot.mergeStatus = index === 1 ? 'blocked' : index === 2 ? 'dirty' : 'clean';
       pr.ci.outcome = index === 2 ? 'failure' : index === 0 ? 'success' : null;
       pr.ci.counts = { passing: index === 2 ? 8 : 12, pending: index === 1 ? 3 : 0, failing: index === 2 ? 2 : 0, skipped: 1, terminal: 0, unknown: 0 };
       pr.ci.uncertain = index === 1;
@@ -50,9 +51,16 @@ export async function queueLayout(page, capture) {
       await page.setViewportSize({ width: 1440, height: 1080 }); await go('/');
       check(await page.getByRole('button', { name: 'My PRs (3)', exact: true }).getAttribute('aria-pressed') === 'true', 'Queue count and selected state stay accessible');
       check(await page.locator('#result-summary').textContent() === '3 pull requests', 'Visible result count matches rows');
-      check(await page.getByText('CI passed', { exact: true }).isVisible(), 'Success is labeled, not color-only');
-      check(await page.getByText('CI failed', { exact: true }).isVisible(), 'Failure is labeled, not color-only');
-      check(await page.getByText('ordering uncertain', { exact: true }).isVisible(), 'Uncertain CI remains visible');
+       check(await page.getByText('CI passed', { exact: true }).isVisible(), 'Success is labeled, not color-only');
+       check(await page.getByRole('img', { name: 'Draft', exact: true }).isVisible()
+         && await page.getByText('Draft', { exact: true }).count() === 0, 'Draft state uses its accessible icon without a redundant text label');
+       check(await page.getByText('CI failed', { exact: true }).isVisible(), 'Failure is labeled, not color-only');
+       check(await page.locator('.ci-status > .merge-status.state-failing').textContent() === 'Merge conflicts'
+         && await page.locator('.ci-status > .merge-status.state-pending').textContent() === 'Blocked by rules'
+         && await page.locator('.review-status > .merge-status:not(.muted)').count() === 0, 'Merge impediments appear in Status rather than Review');
+       check(await page.locator('.pr > summary').evaluateAll(rows => rows.every(row =>
+         !/Workflow order uncertain|\b\d+ (passing|pending|failing|skipped|terminal|unknown|activities)\b/.test(row.innerText))), 'Rows omit workflow uncertainty, job totals, and activity counts');
+       check(await page.locator('[data-pr="design-1"] .ci-section').textContent().then(text => text.includes('Workflow ordering is uncertain.')), 'Expanded details retain the workflow diagnostic');
       await page.waitForFunction(() => !document.querySelector('.pr-author > .avatar img'));
       check(await page.locator('.pr-author > .avatar').first().textContent() === 'A', 'Broken avatar falls back to an initial');
       const contrast = await page.evaluate(() => {
@@ -76,7 +84,7 @@ export async function queueLayout(page, capture) {
       const summary = page.locator('.pr summary').first(); await summary.focus(); await page.keyboard.press('Enter');
       check(await page.locator('.pr[open]').count() === 1, 'Keyboard expands the PR');
       check(await page.getByRole('heading', { name: 'Activity timeline' }).first().isVisible(), 'Expanded activity section is visible');
-      check(await page.getByRole('heading', { name: 'Current-head CI' }).first().isVisible(), 'Expanded CI section is visible');
+       check(await page.getByRole('heading', { name: 'Status', exact: true }).first().isVisible(), 'Expanded Status section is visible');
       await capture(`queue-${colorScheme}-expanded.png`);
       for (const width of [1280, 1920]) {
         await page.setViewportSize({ width, height: 900 });

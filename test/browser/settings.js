@@ -20,7 +20,7 @@ export async function settings(page, capture) {
   assert.equal(await token.inputValue(), '********************ken');
   assert.equal(await token.getAttribute('type'), 'text');
   assert.equal(await source.innerText(), 'Using $GITHUB_TOKEN');
-  assert.ok(await source.evaluate(el => getComputedStyle(el).color === 'rgb(195, 232, 141)'));
+  assert.ok(await source.evaluate(el => getComputedStyle(el).color === 'rgb(168, 213, 181)'));
   await capture('settings-desktop.png');
   assert.deepEqual((await save(page)).github, {}, 'An unchanged environment preview is never submitted as a token');
   await token.fill('browser-override');
