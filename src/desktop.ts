@@ -10,6 +10,8 @@ import { abortable } from './cancellation.js';
 import { Store } from './store.js';
 import { intent as present } from './presentation.js';
 import { Semaphore } from './concurrency.js';
+import { Config } from './config.js';
+import { githubLabel } from './display.js';
 
 export class AvatarCache {
   private readonly slots = new Semaphore(4);
@@ -160,6 +162,7 @@ export class DesktopAdapter implements Desktop {
 
   async submit(intent: Intent, signal: AbortSignal): Promise<'sent' | 'transient'> {
     try {
+      const hiddenOwners = Config.shape.display.parse(JSON.parse(this.store.metadata('settings') ?? '{}').display).hidden_github_owners;
       const capabilities = z.array(z.string()).parse(await this.transport.capabilities(signal));
       const pr = intent.kind === 'monitoring' ? undefined : this.store.pr(intent.prId);
       const history = this.store.activities(intent.prId);
@@ -206,12 +209,12 @@ export class DesktopAdapter implements Desktop {
             const uri = images.get(pr.snapshot.authorAvatar);
             if (uri) image = `<img src="${escape(uri)}" alt="" width="18" height="18"/> `;
           }
-          body = `${image}${escape(`[${pr.snapshot.repository}] ${pr.snapshot.title} (${state})`)}<br/>&#160;<br/>${body}`;
+          body = `${image}${escape(`[${githubLabel(pr.snapshot.repository, hiddenOwners)}] ${pr.snapshot.title} (${state})`)}<br/>&#160;<br/>${body}`;
         }
       }
       const id = await this.transport.notify({
         appName: 'Octopulse', replacesId: 0, icon: intent.kind === 'monitoring' ? 'dialog-warning' : `git-${state}`,
-        summary: pr && capabilities.includes('body-markup') ? '' : current.title, body,
+        summary: pr && capabilities.includes('body-markup') ? '' : intent.kind === 'monitoring' ? current.title : githubLabel(current.title, hiddenOwners), body,
         actions: capabilities.includes('actions') ? ['default', intent.kind === 'monitoring' ? 'Open Settings' : 'Open pull request'] : [],
         hints: { 'desktop-entry': 'octopulse', ...(current.sound && capabilities.includes('sound') ? { 'sound-name': `octopulse-${current.sound}` } : {}) },
         expireTimeout: current.expiryMs,

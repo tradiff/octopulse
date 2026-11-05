@@ -11,7 +11,9 @@ test('database settings round-trip all values and preserve secrets without expos
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
   let profile = new Profile(directory); t.after(() => profile.close());
   let settings = new Settings(profile.store, undefined, { GITHUB_TOKEN: 'environment-secret' });
+  assert.deepEqual(settings.view().display.hidden_github_owners, []);
   settings.update({ github: { token: 'saved-secret' },
+    display: { hidden_github_owners: [' SonarSource ', 'tidelift', 'tradiff'] },
     system_one: { base_url: 'https://provider.example/v1', api_key: 'provider-secret', model: 'custom-model' },
     timings: { tracked_poll_interval: '30s' }, logging: { level: 'debug' } });
   const { token_source, environment_detected, token_preview } = settings.view().github;
@@ -30,6 +32,9 @@ test('database settings round-trip all values and preserve secrets without expos
   for (const invalid of [{ ...body, timings: { tracked_poll_interval: '0s' } }, { ...body, unknown: true },
     { ...body, system_one: { base_url: 'file:///secret', model: 'model' } }, { ...body, github: { token: '' } },
     { ...body, github: { token: settings.view().github.token_preview } },
+    { ...body, display: { hidden_github_owners: ['owner/repo'] } },
+    { ...body, display: { hidden_github_owners: [''] } },
+    { ...body, display: { hidden_github_owners: 'SonarSource' } },
     { ...body, system_one: { ...body.system_one, api_key: settings.view().system_one!.api_key_preview } }]) {
     assert.throws(() => settings.update(invalid)); assert.equal(profile.store.metadata('settings'), before);
   }
@@ -37,6 +42,7 @@ test('database settings round-trip all values and preserve secrets without expos
   settings = new Settings(profile.store, undefined, {});
   assert.equal(settings.effective().system_one!.model, 'replacement');
   assert.equal(settings.effective().github.token, 'saved-secret');
+  assert.deepEqual(settings.view().display.hidden_github_owners, ['SonarSource', 'tidelift', 'tradiff']);
 });
 
 test('System One keys can be replaced, preserved or cleared without losing provider configuration', async t => {

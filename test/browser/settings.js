@@ -55,6 +55,44 @@ export async function settings(page, capture) {
   return { checks: 24, status: 'pass' };
 }
 
+export async function hiddenOwners(page, capture) {
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  const owners = page.getByLabel('Hide GitHub owners in labels', { exact: true });
+  assert.equal(await owners.inputValue(), '');
+  await owners.fill(' ACME, tidelift, tradiff, ');
+  const result = await save(page);
+  assert.deepEqual(result.body.display.hidden_github_owners, ['ACME', 'tidelift', 'tradiff']);
+  await page.reload();
+  assert.equal(await owners.inputValue(), 'ACME, tidelift, tradiff');
+  await capture('hidden-owners-settings.png');
+  await page.getByRole('link', { name: 'Pull Requests', exact: true }).click();
+  await page.locator('.pr').first().waitFor();
+  assert.equal(await page.locator('.repository span').first().innerText(), 'widget');
+  assert.equal(await page.locator('.repository span').first().getAttribute('title'), 'acme/widget');
+  assert.match(await page.locator('.row-title').first().getAttribute('href'), /github\.com\/acme\/widget\/pull\/7$/);
+  const input = page.getByRole('combobox', { name: 'Repository', exact: true });
+  await input.fill('acme/widget');
+  assert.equal(await page.getByRole('option', { name: 'widget', exact: true }).count(), 1);
+  await input.press('Enter');
+  await page.waitForURL(/repo=acme%2Fwidget/);
+  await page.waitForFunction(() => document.querySelector('#repository-filter').value === 'widget');
+  await page.getByRole('button', { name: /^Needs My Review/ }).click();
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await page.locator('.pending-team').first().waitFor();
+  assert.equal(await page.locator('.pending-team span').last().innerText(), 'platform');
+  assert.equal(await page.locator('.pending-team').first().getAttribute('title'), 'Awaiting review from acme/platform');
+  await capture('hidden-owner-labels.png');
+  await page.getByRole('link', { name: 'Notification History', exact: true }).click();
+  await page.locator('.notification').first().waitFor();
+  assert.equal(await page.locator('.repository span').first().innerText(), 'widget');
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await owners.fill(''); await save(page);
+  await page.getByRole('link', { name: 'Pull Requests', exact: true }).click();
+  await page.locator('.pr').first().waitFor();
+  assert.equal(await page.locator('.repository span').first().innerText(), 'acme/widget');
+  return { checks: 11, status: 'pass' };
+}
+
 export async function settingsWithoutEnvironment(page, capture) {
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await page.getByRole('heading', { name: 'Settings', exact: true }).waitFor();

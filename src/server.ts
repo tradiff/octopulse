@@ -29,6 +29,7 @@ export async function listenLocal(app: LocalApplication, port: number) {
     ['/', { type: 'text/html', data: await readFile(new URL('../../web/index.html', import.meta.url)) }],
     ['/app.js', { type: 'text/javascript', data: await readFile(new URL('./browser.js', import.meta.url)) }],
     ['/filters.js', { type: 'text/javascript', data: await readFile(new URL('./filters.js', import.meta.url)) }],
+    ['/display.js', { type: 'text/javascript', data: await readFile(new URL('./display.js', import.meta.url)) }],
     ['/app.css', { type: 'text/css', data: await readFile(new URL('../../web/app.css', import.meta.url)) }],
     ['/InterVariable.woff2', { type: 'font/woff2', data: await readFile(new URL('../../assets/InterVariable.woff2', import.meta.url)) }],
     ['/chevron-down.svg', { type: 'image/svg+xml', data: await readFile(new URL('../../assets/chevron-down.svg', import.meta.url)) }],
@@ -102,7 +103,8 @@ export async function listenLocal(app: LocalApplication, port: number) {
       switch (url.pathname) {
         case '/api/refresh': conditional(request, response, url, () => app.refreshStatus); return;
         case '/api/settings': send(response, 200, app.settings?.view() ?? {}); return;
-        case '/api/me': conditional(request, response, url, () => ({ login: app.login, teams: app.teams, actionToken: token, monitoring: app.monitoring })); return;
+        case '/api/me': conditional(request, response, url, () => ({ login: app.login, teams: app.teams, actionToken: token, monitoring: app.monitoring,
+          hiddenGithubOwners: app.settings?.effective().display.hidden_github_owners ?? [] })); return;
         case '/api/monitoring': conditional(request, response, url, () => app.monitoring ?? { state: 'ready', since: null }); return;
         case '/api/tracked-pull-requests':
         case '/api/inactive-pull-requests':

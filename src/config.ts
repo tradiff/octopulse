@@ -28,6 +28,7 @@ const ProviderUrl = nonblank.refine(value => {
 }, 'Invalid provider root').transform(value => value.replace(/\/+$/, '').replace(/\/v1$/, '') + '/v1/systemone');
 export const Config = z.strictObject({
   github: z.strictObject({ token: nonblank }),
+  display: z.strictObject({ hidden_github_owners: z.array(nonblank.regex(/^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i)).default([]) }).prefault({}),
   system_one: z.strictObject({ base_url: ProviderUrl, api_key: nonblank, model: nonblank.default('jev-latest') }).optional(),
   timings: z.strictObject({
     tracked_poll_interval: Duration.prefault('1m'), discovery_poll_interval: Duration.prefault('5m'), grace_period: Duration.prefault('7 days'),

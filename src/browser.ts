@@ -1,4 +1,5 @@
 import { filters } from './filters.js';
+import { githubLabel } from './display.js';
 import type { ActivityPage, HistoryPage, PrPage, PrView } from './views.js';
 import type { SettingsView } from './settings.js';
 import type { RefreshStatus } from './scheduler.js';
@@ -15,6 +16,8 @@ const form = element<HTMLFormElement>('track-form');
 const trackRow = element<HTMLElement>('track-row');
 const track = element<HTMLButtonElement>('track');
 let identity: { login: string; teams: string[]; actionToken: string } | null = null;
+let hiddenGithubOwners: string[] = [];
+const displayLabel = (value: string) => githubLabel(value, hiddenGithubOwners);
 let sequence = 0;
 let controller: AbortController | undefined;
 let dialogEpoch = 0;
@@ -208,17 +211,17 @@ function filterControls(repositories: string[], isHistory: boolean): void {
   const picker = node('div', undefined, 'repository-picker');
   const input = node('input'); input.id = 'repository-filter'; input.type = 'search'; input.autocomplete = 'off';
   input.dataset.focusKey = 'repository';
-  input.placeholder = 'All repositories'; input.value = filter.repository;
+  input.placeholder = 'All repositories'; input.value = displayLabel(filter.repository); input.title = filter.repository;
   input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list');
   input.setAttribute('aria-controls', 'repository-options'); input.setAttribute('aria-expanded', 'false');
   const list = node('div', undefined, 'repository-options'); list.id = 'repository-options'; list.setAttribute('role', 'listbox');
   list.setAttribute('aria-label', 'Repositories'); list.hidden = true;
-  const options = [{ value: '', label: 'All repositories' }, ...[...new Set([...repositories, ...(filter.repository ? [filter.repository] : [])])].map(repo => ({ value: repo, label: repo }))];
+  const options = [{ value: '', label: 'All repositories' }, ...[...new Set([...repositories, ...(filter.repository ? [filter.repository] : [])])].map(repo => ({ value: repo, label: displayLabel(repo) }))];
   let matches = options;
   let active = -1;
   const close = () => {
     list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant');
-    input.value = filter.repository;
+    input.value = displayLabel(filter.repository);
   };
   const activate = (index: number) => {
     list.children.item(active)?.setAttribute('aria-selected', 'false');
@@ -228,15 +231,16 @@ function filterControls(repositories: string[], isHistory: boolean): void {
     else input.removeAttribute('aria-activedescendant');
   };
   const choose = (value: string) => {
-    close(); input.value = value;
+    close(); input.value = displayLabel(value);
     changeQuery(query => { query.set('repo', value); }, true);
   };
   const show = (query = '') => {
     const search = query.trim().toLowerCase();
-    matches = options.filter(option => option.label.toLowerCase().includes(search));
+    matches = options.filter(option => option.label.toLowerCase().includes(search) || option.value.toLowerCase().includes(search));
     list.replaceChildren(); list.hidden = false; input.setAttribute('aria-expanded', 'true');
     for (const [index, option] of matches.entries()) {
       const item = button(option.label, () => choose(option.value)); item.id = `repository-option-${index}`;
+      item.title = option.value;
       item.setAttribute('role', 'option'); item.setAttribute('aria-selected', 'false'); item.tabIndex = -1;
       item.addEventListener('pointerdown', event => event.preventDefault());
       list.append(item);
@@ -278,7 +282,9 @@ function actionButton(text: string, action: () => Promise<unknown>): HTMLButtonE
 function prSummary(pr: Pick<PrView, 'snapshot' | 'state' | 'tracked'>): HTMLElement {
   const result = node('div', undefined, 'pr-summary');
   const main = node('div', undefined, 'row-main');
-  const repository = node('div', undefined, 'repository'); repository.append(node('span', pr.snapshot.repository), node('span', `#${pr.snapshot.number}`, 'pr-number'));
+  const repository = node('div', undefined, 'repository');
+  const repositoryName = node('span', displayLabel(pr.snapshot.repository)); repositoryName.title = pr.snapshot.repository;
+  repository.append(repositoryName, node('span', `#${pr.snapshot.number}`, 'pr-number'));
   const title = link(pr.snapshot.title, `https://github.com/${pr.snapshot.repository}/pull/${pr.snapshot.number}`); title.className = 'row-title';
   const state = node('img', undefined, 'pr-state-icon'); state.src = `/git-${pr.state}-inline.svg`;
   state.alt = pr.state[0]!.toUpperCase() + pr.state.slice(1); state.title = state.alt; state.width = 29; state.height = 29;
@@ -295,7 +301,7 @@ function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
   card.addEventListener('toggle', () => {
     if (card.open) { expanded.add(pr.id); if (!loaded) void loadActivity(); } else expanded.delete(pr.id);
   });
-  const summary = node('summary'); summary.setAttribute('aria-label', `Details for ${pr.snapshot.repository} #${pr.snapshot.number}: ${pr.snapshot.title}`);
+  const summary = node('summary'); summary.setAttribute('aria-label', `Details for ${displayLabel(pr.snapshot.repository)} #${pr.snapshot.number}: ${pr.snapshot.title}`);
   const review = node('div', undefined, 'review-status');
   const direct = pr.groups.requested.some(person => person.login.toLowerCase() === identity?.login.toLowerCase());
   let reviewLabel: HTMLElement | null = node('span', 'No pending request', 'review-label');
@@ -321,8 +327,8 @@ function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
     const teams = node('ul', undefined, 'pending-teams'); teams.setAttribute('aria-label', 'Teams awaiting review');
     for (const team of pr.pendingTeams) {
       const item = node('li', undefined, 'reviewer-requested pending-team');
-      item.setAttribute('aria-label', `Awaiting review from ${team}`); item.title = `Awaiting review from ${team}`;
-      item.append(reviewerIcon('requested'), node('span', team)); teams.append(item);
+      item.setAttribute('aria-label', `Awaiting review from ${displayLabel(team)}`); item.title = `Awaiting review from ${team}`;
+      item.append(reviewerIcon('requested'), node('span', displayLabel(team))); teams.append(item);
     }
     review.append(teams);
   }
@@ -419,7 +425,7 @@ function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
   card.append(body); return card;
 }
 function renderPrs(data: PrPage, quiet = false): void {
-  const repositories = JSON.stringify(data.repositories);
+  const repositories = JSON.stringify([data.repositories, hiddenGithubOwners]);
   if (!quiet || repositories !== renderedRepositories && !controls.contains(document.activeElement)) {
     filterControls(data.repositories, false); renderedRepositories = repositories;
   }
@@ -454,7 +460,7 @@ function renderPrs(data: PrPage, quiet = false): void {
     children.push(quiet && content.firstElementChild?.isEqualNode(headings) ? content.firstElementChild as HTMLElement : headings);
     for (const pr of items) {
       const previous = quiet ? oldCards.get(pr.id) : undefined;
-      const signature = JSON.stringify(pr);
+      const signature = JSON.stringify([pr, hiddenGithubOwners]);
       const card = previous && (cardData.get(previous) === signature || previous.contains(document.activeElement)) ? previous : prCard(pr, previous);
       if (card !== previous) cardData.set(card, signature);
       children.push(card);
@@ -510,7 +516,7 @@ function renderHistory(data: HistoryPage): void {
     if (record.status !== 'sent') description.append(node('span', record.status === 'failed' ? 'Failed' : 'Pending', `delivery-status delivery-${record.status}`));
     header.append(description, time(record.createdAt, true));
     const body = node('div', undefined, 'notification-detail');
-    const preview = node('section'); preview.append(node('h3', 'Notification content'), node('p', record.intent.body || record.intent.title, 'notification-body'),
+    const preview = node('section'); preview.append(node('h3', 'Notification content'), node('p', record.intent.body || displayLabel(record.intent.title), 'notification-body'),
       link('Open pull request on GitHub ↗', `https://github.com/${snapshot.repository}/pull/${snapshot.number}`));
     const delivery = node('section'); delivery.append(node('h3', 'Recorded delivery state'));
     const created = node('p', undefined, 'meta'); created.append(node('span', 'Created'), time(record.createdAt)); delivery.append(created);
@@ -583,6 +589,11 @@ function renderSettings(data: SettingsView): void {
   };
   token.addEventListener('focus', () => { if (preview && token.value === preview) token.select(); });
   token.addEventListener('input', updateToken); updateToken();
+  const display = section('Display');
+  const hiddenOwners = field(display, 'hidden-github-owners', 'Hide GitHub owners in labels', data.display.hidden_github_owners.join(', '),
+    'Comma-separated organization or user names. Hides their prefixes in repository and team labels, including desktop notifications. GitHub links and stored PR data stay unchanged.');
+  hiddenOwners.spellcheck = false; hiddenOwners.autocapitalize = 'none';
+  hiddenOwners.placeholder = 'e.g. your-organization, your-username';
   const timings = section('Polling and tracking');
   const polling = [['30 s', '30 seconds'], ['1 m', '1 minute'], ['2 m', '2 minutes'], ['5 m', '5 minutes'],
     ['10 m', '10 minutes'], ['15 m', '15 minutes'], ['30 m', '30 minutes'], ['1 h', '1 hour']] as const;
@@ -633,6 +644,7 @@ function renderSettings(data: SettingsView): void {
     event.preventDefault(); save.disabled = true; feedback.textContent = 'Saving settings…';
     const body = {
       github: token.value === preview ? {} : { token: token.value.trim() || null },
+      display: { hidden_github_owners: hiddenOwners.value.split(',').map(owner => owner.trim()).filter(Boolean) },
       timings: { tracked_poll_interval: tracked.value, discovery_poll_interval: discovery.value, grace_period: grace.value },
       logging: { level: level.value, retention: retention.value }, history: { raw_payload_retention: payloads.value },
       system_one: enabled.checked ? { base_url: base.value, model: model.value,
@@ -723,6 +735,10 @@ async function load(mode: 'foreground' | 'background' | 'refresh' = 'foreground'
       if (mode !== 'background') { identity = null; element('identity').textContent = 'Identity unavailable'; }
       throw new Error('Identity response is invalid');
     }
+    if (!('hiddenGithubOwners' in me) || !Array.isArray(me.hiddenGithubOwners) || !me.hiddenGithubOwners.every(owner => typeof owner === 'string')) {
+      throw new Error('Display settings response is invalid');
+    }
+    hiddenGithubOwners = me.hiddenGithubOwners;
     identity = { login: me.login, teams: me.teams, actionToken: me.actionToken };
     if (meResult && 'monitoring' in me) renderMonitoring(me.monitoring);
     if (meResult) meCache = meResult;
@@ -750,7 +766,7 @@ async function load(mode: 'foreground' | 'background' | 'refresh' = 'foreground'
       renderSettings(data as SettingsView); renderedView = location.href; status.textContent = ''; return;
     }
     if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)) throw new Error('Local data response is invalid');
-    const signature = JSON.stringify(data);
+    const signature = JSON.stringify([data, hiddenGithubOwners]);
     if (quiet && (document.hidden || dialog.open || document.querySelector('[data-busy=true]') || window.getSelection()?.toString())) return;
     if (quiet && signature === renderedData) {
       renderedETag = pageResult.etag;

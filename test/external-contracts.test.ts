@@ -423,6 +423,33 @@ test('desktop contract keeps sticky lifetime, inert markup, saved text and capab
   assert.equal(store.notification(1).intent.body, intent.body);
 });
 
+test('desktop owner hiding applies at submission, including resends, without altering saved PRs or notifications', async t => {
+  const { store, monitor } = await setup(t);
+  await monitor.observe({ snapshot: { ...snapshot, title: 'acme/title stays intact' }, sources: completeSources, events: [
+    { source: 'issue_comment', id: 'display', kind: 'comment', occurredAt: T, actor: { login: 'bea' }, body: 'acme/comment stays intact' },
+  ] });
+  const saved = store.notification(1);
+  const pr = store.pr(snapshot.id);
+  const settings = new Settings(store, undefined, {});
+  for (const capabilities of [[], ['body-markup']]) {
+    const messages: DesktopMessage[] = [];
+    const desktop = new DesktopAdapter(store, 'alex', {
+      async capabilities() { return capabilities; },
+      async notify(message, destination) { messages.push(message); assert.equal(destination, saved.intent.destination); return 42; },
+    });
+    settings.update({ github: {}, display: { hidden_github_owners: ['ACME'] } });
+    assert.equal(await desktop.submit(saved.intent, signal()), 'sent');
+    assert.ok(capabilities.length ? messages[0]!.body.startsWith('[widget] acme/title stays intact')
+      : messages[0]!.summary.startsWith('widget #7 acme/title stays intact'));
+    assert.match(messages[0]!.body, /acme\/comment stays intact/);
+    settings.update({ github: {}, display: { hidden_github_owners: [] } });
+    assert.equal(await desktop.submit(saved.intent, signal()), 'sent');
+    assert.ok(capabilities.length ? messages[1]!.body.startsWith('[acme/widget]') : messages[1]!.summary.startsWith('acme/widget #7'));
+  }
+  assert.deepEqual(store.notification(1), saved);
+  assert.deepEqual(store.pr(snapshot.id), pr);
+});
+
 test('fatal identity failure and successful empty discovery stay distinguishable', async t => {
   const directory = await temporaryProfile(); t.after(() => rm(directory, { recursive: true, force: true }));
   await assert.rejects(startRuntime(Config.parse(configInput), directory, new VirtualClock(T), new RecordingDesktop(), signal(), async () => json({}, 401)), /startup failed/);

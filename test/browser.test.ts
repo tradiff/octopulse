@@ -18,7 +18,7 @@ import { queueLayout } from './browser/layout/queue.js';
 import { themeAndAccessibility } from './browser/layout/theme.js';
 import { pagination } from './browser/pagination.js';
 import { identity } from './browser/identity.js';
-import { settings, settingsWithoutEnvironment, systemOneSettings, intervalPresets } from './browser/settings.js';
+import { settings, settingsWithoutEnvironment, systemOneSettings, intervalPresets, hiddenOwners } from './browser/settings.js';
 import { monitoringHealth } from './browser/monitoring-health.js';
 import { autoRefresh } from './browser/auto-refresh.js';
 import { conditionalRefresh } from './browser/conditional-refresh.js';
@@ -33,6 +33,7 @@ const cases: [string, (page: Page, capture: Capture) => Promise<{ checks: number
   ['subtle tracking footer', trackingFooter],
   ['monitoring credential warnings', monitoringHealth],
   ['settings and credential sources', settings],
+  ['hidden GitHub owner labels', hiddenOwners],
   ['settings without environment credentials', settingsWithoutEnvironment, {}],
   ['System One API key settings', systemOneSettings],
   ['interval and retention presets', intervalPresets],
