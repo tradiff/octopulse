@@ -72,7 +72,7 @@ function avatar(login: string, url: string | null): HTMLElement {
 }
 const reviewerStates = {
   decliners: { label: 'Changes requested', path: 'M7 7l6 6m0-6-6 6' },
-  requested: { label: 'Requested', path: 'M2.5 10c1.75-2.75 4.25-4.25 7.5-4.25s5.75 1.5 7.5 4.25c-1.75 2.75-4.25 4.25-7.5 4.25S4.25 12.75 2.5 10Z' },
+  requested: { label: 'Requested', path: 'M10 6v4l3 2' },
   approvers: { label: 'Approved', path: 'M5.75 10.5 8.5 13.25 14.25 7.5' },
   commenters: { label: 'Commented', path: 'M5.5 6.25h9a1.75 1.75 0 0 1 1.75 1.75v4A1.75 1.75 0 0 1 14.5 13.75H10l-3.25 2v-2H5.5A1.75 1.75 0 0 1 3.75 12V8A1.75 1.75 0 0 1 5.5 6.25Z' },
 };
@@ -94,20 +94,22 @@ function reviewerAvatar(person: { login: string; avatar: string | null }, state:
   image.removeAttribute('title'); image.removeAttribute('role'); image.removeAttribute('aria-label'); image.setAttribute('aria-hidden', 'true');
   result.append(image, tooltip); return result;
 }
-function reviewerGroup(state: keyof PrView['groups'], people: PrView['groups'][typeof state]): HTMLElement {
-  const { label, path } = reviewerStates[state];
-  const group = node('span', undefined, `reviewer-group reviewer-${state}`);
-  group.setAttribute('role', 'group'); group.setAttribute('aria-label', label);
+function reviewerIcon(state: keyof PrView['groups']): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 20 20'); svg.setAttribute('aria-hidden', 'true');
-  const shape = document.createElementNS(svg.namespaceURI, 'path'); shape.setAttribute('d', path); svg.append(shape);
+  const shape = document.createElementNS(svg.namespaceURI, 'path'); shape.setAttribute('d', reviewerStates[state].path); svg.append(shape);
   if (state === 'requested') {
     const circle = document.createElementNS(svg.namespaceURI, 'circle');
-    circle.setAttribute('cx', '10'); circle.setAttribute('cy', '10'); circle.setAttribute('r', '2'); svg.append(circle);
+    circle.setAttribute('cx', '10'); circle.setAttribute('cy', '10'); circle.setAttribute('r', '7'); svg.append(circle);
   }
+  return svg;
+}
+function reviewerGroup(state: keyof PrView['groups'], people: PrView['groups'][typeof state]): HTMLElement {
+  const group = node('span', undefined, `reviewer-group reviewer-${state}`);
+  group.setAttribute('role', 'group'); group.setAttribute('aria-label', reviewerStates[state].label);
   const avatars = node('span', undefined, 'avatar-stack');
   for (const person of people) avatars.append(reviewerAvatar(person, state));
-  group.append(svg, avatars); return group;
+  group.append(reviewerIcon(state), avatars); return group;
 }
 function time(input: string | null, precise = false): HTMLElement {
   if (!input) return node('span', 'No activity yet');
@@ -294,8 +296,6 @@ function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
   else if (pr.groups.requested.length || pr.pendingTeams.length) reviewLabel = 'Awaiting review';
   else if (pr.groups.approvers.length) reviewLabel = 'Approved';
   review.append(node('span', reviewLabel, `review-label${pr.queue === 'needs-my-review' ? ' review-required' : ''}`));
-  if (pr.merge) review.append(node('span', pr.merge, 'merge-status'));
-  if (pr.pendingTeams.length) review.append(node('p', `Requested teams: ${pr.pendingTeams.join(', ')}`, 'pending-teams'));
   const ci = node('div', undefined, `ci-status ci-${pr.ci.outcome ?? 'pending'}`);
   const counts = Object.entries(pr.ci.counts).filter(([, count]) => count > 0).map(([key, count]) => `${count} ${key}`).join(' · ');
   if (counts || pr.ci.outcome || pr.ci.workflows.length || pr.ci.uncertain) {
@@ -313,9 +313,21 @@ function prCard(pr: PrView, previous?: HTMLElement): HTMLElement {
   }
   const reviewers = node('div', undefined, 'summary-reviewers');
   for (const state of reviewerOrder) if (pr.groups[state].length) reviewers.append(reviewerGroup(state, pr.groups[state]));
-  if (!reviewers.childElementCount) reviewers.append(node('span', 'None', 'muted'));
+  if (reviewers.childElementCount) review.append(reviewers);
+  if (pr.pendingTeams.length) {
+    const teams = node('div', undefined, 'pending-teams');
+    for (const team of pr.pendingTeams) {
+      const chip = node('span', undefined, 'reviewer-group reviewer-requested pending-team');
+      chip.setAttribute('role', 'img'); chip.setAttribute('aria-label', `Awaiting review from ${team}`);
+      chip.title = `Awaiting review from ${team}`;
+      chip.append(reviewerIcon('requested'), node('span', team)); teams.append(chip);
+    }
+    review.append(teams);
+  }
+  if (!reviewers.childElementCount && !pr.pendingTeams.length) review.append(node('span', 'No reviewers', 'muted merge-status'));
+  if (pr.merge) review.append(node('span', pr.merge, 'merge-status'));
   const updated = node('div', undefined, 'row-updated'); updated.append(time(pr.latestAt));
-  summary.append(prSummary(pr, pr.activityCount), review, ci, reviewers, updated); card.append(summary);
+  summary.append(prSummary(pr, pr.activityCount), review, ci, updated); card.append(summary);
   const body = node('div', undefined, 'pr-body');
   const actions = node('div', undefined, 'actions detail-toolbar'); actions.append(actionButton(pr.tracked ? 'Untrack' : 'Retrack', () => pr.tracked
     ? mutation(`/api/tracked-pull-requests/${encodeURIComponent(pr.id)}`, 'DELETE', {})
@@ -420,7 +432,7 @@ function renderPrs(data: PrPage, quiet = false): void {
   const children: HTMLElement[] = [];
   if (items.length) {
     const headings = node('div', undefined, 'list-headings'); headings.setAttribute('aria-hidden', 'true');
-    for (const label of ['Pull request', 'Review', 'Current-head CI', 'Reviewers', 'Updated ↓']) headings.append(node('span', label));
+    for (const label of ['Pull request', 'Review', 'Current-head CI', 'Updated ↓']) headings.append(node('span', label));
     children.push(quiet && content.firstElementChild?.isEqualNode(headings) ? content.firstElementChild as HTMLElement : headings);
     for (const pr of items) {
       const previous = quiet ? oldCards.get(pr.id) : undefined;

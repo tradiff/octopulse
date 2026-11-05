@@ -20,6 +20,10 @@ export async function reviewers(page, capture) {
       approvers: [], commenters: [], decliners: [],
       requested: scenario === 'many' ? Array.from({ length: 24 }, (_, i) => ({ login: `reviewer-${i}`, avatar: null })) : [],
     };
+    if (scenario === 'teams') {
+      data.items[0].groups = { approvers: [{ login: 'approved', avatar: null }], requested: [], decliners: [], commenters: [] };
+      data.items[0].pendingTeams = ['acme/platform', 'acme/security', `acme/${'long-team-name-'.repeat(12)}`];
+    }
     await route.fulfill({ response, json: data });
   });
   await page.goto(origin);
@@ -27,6 +31,9 @@ export async function reviewers(page, capture) {
   const card = page.locator('[data-pr="A"]');
   const summary = card.locator(':scope > summary');
   const people = summary.locator('.reviewer-avatar:visible');
+  check(await page.locator('.list-headings > span').allTextContents().then(labels => labels.join('|') === 'Pull request|Review|Current-head CI|Updated ↓'), 'Review and reviewers share one column');
+  check(await summary.locator(':scope > .review-status .summary-reviewers').count() === 1
+    && await summary.locator(':scope > *').count() === 4, 'Reviewer groups are inside the Review column');
   check((await people.evaluateAll(items => items.map(item => item.getAttribute('aria-label')))).join('|')
     === 'Changes requested: blocker|Requested: requested|Approved: approved|Commented: commented|Commented: another-commenter', 'All reviewers are visible, with action-first labels and blockers first');
   check(await summary.locator('.reviewer-avatar').evaluateAll(avatars => avatars.every(avatar =>
@@ -49,7 +56,7 @@ export async function reviewers(page, capture) {
   });
   const requested = await iconStyle('requested'); const commented = await iconStyle('commenters');
   check(requested.color === 'rgb(255, 199, 119)' && commented.color === 'rgb(163, 172, 203)', 'Pending requests are amber; comments remain neutral');
-  check(requested.circle && !commented.circle && requested.path !== commented.path, 'Requests use an eye while comments use a speech bubble');
+  check(requested.circle && !commented.circle && requested.path === 'M10 6v4l3 2', 'Requests use a pending clock while comments use a speech bubble');
   check(requested.size >= 16 && commented.size >= 16, 'Status icons remain legible outside the avatars');
   await page.waitForFunction(() => !document.querySelector('[data-pr="A"] > summary .reviewer-avatar .avatar img'));
   check(await people.nth(2).locator('.avatar').textContent() === 'A'
@@ -59,7 +66,9 @@ export async function reviewers(page, capture) {
     && await card.locator('.groups .reviewer-group').count() === 4, 'Expanded details use the same grouped pills');
   for (const width of [1120, 720, 390]) {
     await page.setViewportSize({ width, height: 1000 });
-    const reviewer = width > 1100 ? people.first() : card.locator('.groups .reviewer-avatar').first();
+    check(await people.count() === 5, `${width}: summary reviewers remain visible`);
+    const reviewer = people.first();
+    await summary.focus();
     await reviewer.focus();
     const bounds = await reviewer.locator('.reviewer-tooltip').boundingBox();
     check(bounds.x >= 0 && bounds.x + bounds.width <= width, `${width}: focused tooltip stays inside the viewport`);
@@ -77,7 +86,7 @@ export async function reviewers(page, capture) {
     check(await avatarsHorizontal(), `${width}: all four commenters stay in a horizontal stack`);
     const first = await summary.locator('.reviewer-decliners').boundingBox();
     const last = await summary.locator('.reviewer-commenters').boundingBox();
-    check(last.y >= first.y + first.height, `${width}: the complete commenter pill wraps to the next line`);
+    check(last.y >= first.y && (last.y >= first.y + first.height || last.x >= first.x + first.width), `${width}: complete reviewer pills do not overlap`);
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: all reviewer pills fit the row`);
   }
   await capture('reviewer-all-avatars-wrapping.png', { fullPage: false });
@@ -88,7 +97,19 @@ export async function reviewers(page, capture) {
   check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'A large pill wraps within the reviewer column');
   scenario = 'empty'; await page.goto(origin);
   await page.waitForFunction(() => document.querySelector('#status').textContent.includes('refreshed'));
-  check(await summary.locator('.summary-reviewers').textContent() === 'None'
-    && await summary.locator('.reviewer-group').count() === 0, 'No reviewers renders None without empty pills');
+  check(await summary.getByText('No reviewers', { exact: true }).isVisible()
+    && await summary.locator('.reviewer-group').count() === 0, 'No reviewers renders a label without empty pills');
+  scenario = 'teams'; await page.goto(origin);
+  await page.waitForFunction(() => document.querySelector('#status').textContent.includes('refreshed'));
+  const teams = summary.locator('.pending-team');
+  check(await teams.count() === 3 && await teams.locator(':scope > svg').count() === 3, 'Every outstanding team has its own status icon');
+  check(await teams.first().getAttribute('aria-label') === 'Awaiting review from acme/platform', 'Team status is accessible without relying on color or hover');
+  check(await summary.locator('.reviewer-approvers .reviewer-avatar').count() === 1
+    && await teams.first().locator('svg path').getAttribute('d') === requested.path, 'Individual approval does not clear team requests; teams share the pending-review icon');
+  for (const width of [1440, 720, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    check(await teams.last().isVisible() && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}: long team chips wrap without hiding reviewers or overflowing`);
+    await capture(`review-team-chips-${width}.png`, { fullPage: false });
+  }
   return { checks, status: 'pass' };
 }

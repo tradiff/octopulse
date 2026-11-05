@@ -34,7 +34,7 @@ export async function navigation(page, capture) {
   await page.getByRole('option', { name: 'acme/service', exact: true }).click(); await ready();
   check(await page.locator('.pr').count() === 1, 'Repository filters intersect queue');
   check(await page.getByText('Blocked by rules', { exact: true }).isVisible(), 'Blocked merge label is separate');
-  check(await page.getByText('Requested teams: acme/platform', { exact: true }).isVisible(), 'Pending team is separate');
+  check(await page.getByRole('img', { name: 'Awaiting review from acme/platform', exact: true }).isVisible(), 'Pending team has its own labeled status chip');
   check((await parameter('pr-state', true)).includes('tracked'), 'Repository change preserves selected tracking filter');
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click(); await ready();
   await page.getByRole('button', { name: 'My PRs (2)', exact: true }).click(); await ready();
