@@ -228,7 +228,7 @@ export class DesktopAdapter implements Desktop {
             if (uri) image = `<img src="${escape(uri)}" alt="" width="18" height="18"/> `;
           }
           const repository = repositoryImage ? `<img src="${escape(pathToFileURL(repositoryImage).href)}" alt="" width="18" height="18"/> ` : '';
-          body = `${escape(shortened(pr.snapshot.title, 52))}<br/>${repository}${escape(githubLabel(pr.snapshot.repository, hiddenOwners))} #${pr.snapshot.number} ${image}${loginLabel(pr.snapshot.author)}<br/>&#160;<br/>${body}`;
+          body = `${escape(shortened(pr.snapshot.title, 52))}<br/>${repository}${escape(githubLabel(pr.snapshot.repository, hiddenOwners))} #${pr.snapshot.number} · ${image}${loginLabel(pr.snapshot.author)}<br/>&#160;<br/>${body}`;
         }
       }
       const id = await this.transport.notify({

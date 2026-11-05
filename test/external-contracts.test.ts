@@ -439,12 +439,12 @@ test('desktop owner hiding applies at submission, including resends, without alt
     });
     settings.update({ github: {}, display: { hidden_github_owners: ['ACME'] } });
     assert.equal(await desktop.submit(saved.intent, signal()), 'sent');
-    assert.ok(capabilities.length ? messages[0]!.body.startsWith('acme/title stays intact<br/>widget #7 alex')
+    assert.ok(capabilities.length ? messages[0]!.body.startsWith('acme/title stays intact<br/>widget #7 · alex')
       : messages[0]!.summary.startsWith('widget #7 acme/title stays intact'));
     assert.match(messages[0]!.body, /acme\/comment stays intact/);
     settings.update({ github: {}, display: { hidden_github_owners: [] } });
     assert.equal(await desktop.submit(saved.intent, signal()), 'sent');
-    assert.ok(capabilities.length ? messages[1]!.body.startsWith('acme/title stays intact<br/>acme/widget #7 alex') : messages[1]!.summary.startsWith('acme/widget #7'));
+    assert.ok(capabilities.length ? messages[1]!.body.startsWith('acme/title stays intact<br/>acme/widget #7 · alex') : messages[1]!.summary.startsWith('acme/widget #7'));
   }
   assert.deepEqual(store.notification(1), saved);
   assert.deepEqual(store.pr(snapshot.id), pr);

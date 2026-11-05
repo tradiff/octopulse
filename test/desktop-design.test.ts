@@ -39,6 +39,7 @@ test('rich desktop layout has an unconditional context separator, compact update
   const saved = fixture.store.notifications().find(record => record.data.intent.prId === 'A')!.data.intent;
   const history = fixture.store.activities('A');
   const approval = history.find(activity => activity.event.kind === 'approval')!.event;
+  assert.equal(saved.body, 'cam: ✅ approved: Approved');
   const comment = history.find(activity => activity.event.kind === 'comment')!.event;
   let sent!: DesktopMessage;
   const adapter = new DesktopAdapter(fixture.store, 'alex', {
@@ -49,7 +50,7 @@ test('rich desktop layout has an unconditional context separator, compact update
   for (const events of [[approval], [comment, approval]]) {
     assert.equal(await adapter.submit({ ...saved, events: events.map(eventKey) }, signal), 'sent');
     assert.equal(sent.summary, events.length === 1 ? '✅ Approved' : '2 updates');
-    assert.ok(sent.body.startsWith('Make workflow retries reliable<br/>acme/widget #7 alex<br/>&#160;<br/>'));
+    assert.ok(sent.body.startsWith('Make workflow retries reliable<br/>acme/widget #7 · alex<br/>&#160;<br/>'));
     assert.equal(sent.body.split('<br/>&#160;<br/>').length, 2);
     assert.doesNotMatch(sent.body, /\(open\)|💬|✅/);
     assert.match(sent.body, /<b>cam<\/b>/);
@@ -84,7 +85,7 @@ test('desktop keeps hyphenated identities intact without changing stored logins,
     });
     assert.equal(await desktop.submit(intent, new AbortController().signal), 'sent');
     if (capabilities.length) {
-      assert.match(sent.body, /#7 byte\u2060-\u2060bot<br\/>/);
+      assert.match(sent.body, /#7 · byte\u2060-\u2060bot<br\/>/);
       assert.match(sent.body, /<b>cache\u2060-\u2060goblin<\/b>: byte-bot in the comment stays unchanged/);
     } else assert.equal(sent.body, intent.body);
   }

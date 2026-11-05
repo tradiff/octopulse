@@ -86,7 +86,7 @@ export async function prSummary(page, capture) {
   check(!await first.evaluate(el => el.open), 'Opening the PR link does not toggle notification details');
   await first.locator('summary').focus(); await first.locator('summary').press('Enter');
   check(await first.locator('.notification-body').isVisible(), 'Notification still expands from the keyboard');
-  check(await first.locator('.notification-body').textContent() === 'cam: ✅ approval: Approved', 'Expanded history preserves the original notification text');
+  check(await first.locator('.notification-body').textContent() === 'cam: ✅ approved: Approved', 'Expanded history uses approved for the generated label while preserving the review text');
   const expandedNotification = await disclosure(first.locator('summary'));
   check(expandedNotification.transform === expandedPr.transform && expandedNotification.background === expandedPr.background, 'Expanded notification disclosure matches the PR orientation and color');
   check(expandedNotification.aligned, 'Expanded notification disclosure is centered with the Git icon');
@@ -97,7 +97,12 @@ export async function prSummary(page, capture) {
     const response = await route.fetch(); const data = await response.json();
     data.items = data.items.slice(0, 4).map((record, index) => ({ ...record,
       status: index === 1 ? 'failed' : index === 2 ? 'pending' : 'sent',
-      intent: { ...record.intent, title: 'Original saved notification title' },
+      intent: { ...record.intent, title: 'Original saved notification title', body: [
+        'cam: ✅ approval: Keep the approval checklist unchanged.',
+        'cam: ✅ approved: Approved',
+        'bea: 💬: The approval checklist is ready.',
+        '✅ approval\n\nbea: 💬: The approval checklist is ready.',
+      ][index] },
       pr: { ...record.pr, state: ['draft', 'merged', 'closed', 'open'][index], tracked: index !== 2,
         snapshot: { ...record.pr.snapshot, title: index === 3 ? '<img src=x onerror=alert(1)>' + 'LongTitle'.repeat(30) : `Current PR title ${index + 1}` } },
     }));
@@ -106,6 +111,16 @@ export async function prSummary(page, capture) {
   await page.route('**/api/notification-history*', varied);
   try {
     await go('/notification-history');
+    const legacy = page.locator('.notification').first();
+    check((await legacy.locator('.notification-preview').textContent()).replace(/\s+/g, ' ') === 'cam: approved: Keep the approval checklist unchanged.', 'Old history uses approved without replacing approval inside review text');
+    await legacy.locator('summary').click();
+    check(await legacy.locator('.notification-body').textContent() === 'cam: ✅ approved: Keep the approval checklist unchanged.', 'Expanded legacy history uses the same approved label as its summary');
+    const comment = page.locator('.notification').nth(2);
+    await comment.locator('summary').click();
+    check(await comment.locator('.notification-body').textContent() === 'bea: 💬: The approval checklist is ready.', 'Comment content is not rewritten');
+    const anonymous = page.locator('.notification').nth(3);
+    await anonymous.locator('summary').click();
+    check(await anonymous.locator('.notification-body').textContent() === '✅ approved\n\nbea: 💬: The approval checklist is ready.', 'Legacy bundled labels without an actor or excerpt use approved too');
     check(await page.locator('.notification-header').getByText('Original saved notification title', { exact: true }).count() === 0, 'Header uses current title rather than saved notification title');
     check(await page.locator('.notification .pr-state-icon').evaluateAll(icons => icons.map(icon => icon.alt).join(',') === 'Draft,Merged,Closed,Open'), 'Shared lifecycle icons cover all PR states');
     check(await page.locator('.notification .pr-state-icon').evaluateAll(icons => icons.every(icon => icon.getAttribute('src') === `/git-${icon.alt.toLowerCase()}-inline.svg` && icon.title === icon.alt)), 'Each lifecycle uses its matching inline SVG and tooltip');

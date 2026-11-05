@@ -59,7 +59,7 @@ test('desktop notifications put an 18px repository PNG before the repository nam
   assert.equal(messages[0]!.summary, intent.title);
   assert.equal(messages[0]!.body, intent.body);
   assert.doesNotMatch(messages[1]!.body, /<img\b/);
-  assert.match(messages[1]!.body, /<br\/>acme\/widget #7 alex<br\/>/);
+  assert.match(messages[1]!.body, /<br\/>acme\/widget #7 · alex<br\/>/);
   assert.doesNotMatch(messages[1]!.body, /\(open\)/);
   assert.equal(generating.mock.callCount(), 1, 'Only desktops supporting inline images need a repository PNG');
   const match = /<br\/><img src="([^"]+)" alt="" width="18" height="18"\/> acme\/widget/.exec(messages[2]!.body);
@@ -80,7 +80,7 @@ test('desktop notifications put an 18px repository PNG before the repository nam
   }, broken);
   assert.equal(await adapter.submit(intent, signal), 'sent');
   assert.equal(messages.at(-1)!.icon, 'git-open', 'Image failures retain the existing PR-state icon');
-  assert.match(messages.at(-1)!.body, /<br\/>acme\/widget #7 alex/, 'An image failure still delivers the repository label');
+  assert.match(messages.at(-1)!.body, /<br\/>acme\/widget #7 · alex/, 'An image failure still delivers the repository label');
   assert.equal(await adapter.submit({ ...intent, kind: 'monitoring' }, signal), 'sent');
   assert.equal(messages.at(-1)!.icon, 'dialog-warning', 'Monitoring warnings never use a repository icon');
   const canceled = new AbortController(); canceled.abort();

@@ -507,7 +507,8 @@ function renderHistory(data: HistoryPage): void {
     const metadata = main.querySelector('.row-context')!;
     const context = node('div', undefined, 'notification-context'); context.append(main.querySelector('.row-title')!, ...metadata.children); metadata.remove();
     main.append(context); description.append(identity);
-    const excerpt = Array.from(record.intent.body.replace(/(^|\n\n)([^:\n]+): ✅ approval: Approved(?=$|\n\n)/g, '$1$2: ✅ Approved').replace(/\s+/g, ' ').trim());
+    const notificationBody = record.intent.body.replace(/(^|\n\n)((?:[^:\n]+: )?✅ )approval(?=:|\n\n|$)/g, '$1$2approved');
+    const excerpt = Array.from(notificationBody.replace(/(^|\n\n)([^:\n]+): ✅ approved: Approved(?=$|\n\n)/g, '$1$2: ✅ Approved').replace(/\s+/g, ' ').trim());
     if (excerpt.length) {
       const preview = node('span', undefined, 'notification-preview');
       const icons = { '✅': 'approvers', '💬': 'commenters', '❗': 'decliners', '👀': 'requested' } as const;
@@ -523,7 +524,7 @@ function renderHistory(data: HistoryPage): void {
     if (record.status !== 'sent') description.append(node('span', record.status === 'failed' ? 'Failed' : 'Pending', `delivery-status delivery-${record.status}`));
     header.append(description, time(record.createdAt, true));
     const body = node('div', undefined, 'notification-detail');
-    const preview = node('section'); preview.append(node('h3', 'Notification content'), node('p', record.intent.body || displayLabel(record.intent.title), 'notification-body'),
+    const preview = node('section'); preview.append(node('h3', 'Notification content'), node('p', notificationBody || displayLabel(record.intent.title), 'notification-body'),
       link('Open pull request on GitHub ↗', `https://github.com/${snapshot.repository}/pull/${snapshot.number}`));
     const delivery = node('section'); delivery.append(node('h3', 'Recorded delivery state'));
     const created = node('p', undefined, 'meta'); created.append(node('span', 'Created'), time(record.createdAt)); delivery.append(created);
