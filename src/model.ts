@@ -36,7 +36,7 @@ export const Event = z.strictObject({
   kind: z.enum([
     'comment', 'inline_comment', 'review', 'approval', 'changes_requested',
     'review_requested', 'close', 'merge', 'reopen', 'ready_for_review',
-    'converted_to_draft', 'commit', 'ci_failure', 'ci_success',
+    'converted_to_draft', 'commit', 'ci_failure', 'ci_success', 'merge_conflict',
   ]),
   occurredAt: Instant,
   updatedAt: Instant.optional(),
@@ -120,6 +120,7 @@ export const PullRequest = z.strictObject({
   recordedAt: Instant.nullable().default(null),
   graceUntil: Instant.nullable().default(null),
   ci: z.record(z.string(), CiState).default({}),
+  mergeConflict: z.boolean().nullable().default(null),
   fetchState: FetchState.default({ pages: {}, progress: { comments: null, inlineComments: null } }),
 });
 export const Activity = z.strictObject({

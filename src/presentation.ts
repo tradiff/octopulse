@@ -31,6 +31,7 @@ const wording: Record<Event['kind'], string> = {
   approval: '✅ approved', changes_requested: '❗ requested changes', review_requested: '👀 review requested',
   close: 'closed', merge: 'merged', reopen: 'reopened', ready_for_review: 'ready for review',
   converted_to_draft: 'converted to draft', commit: 'pushed commits', ci_failure: 'CI failed', ci_success: 'CI passed',
+  merge_conflict: 'Merge conflicts',
 };
 
 export function shortened(text: string, limit: number): string {
@@ -51,6 +52,7 @@ const headings: Record<Event['kind'], string> = {
   approval: 'Approved', changes_requested: 'Changes requested', review_requested: 'Review requested',
   close: 'PR closed', merge: 'PR merged', reopen: 'PR reopened', ready_for_review: 'Ready for review',
   converted_to_draft: 'Converted to draft', commit: 'New commits', ci_failure: 'CI failed', ci_success: 'CI passed',
+  merge_conflict: 'Merge conflicts',
 };
 
 export function desktopActivity(events: Event[], truncate = true) {

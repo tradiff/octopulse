@@ -11,6 +11,7 @@ import { Monitor } from '../src/monitor.js';
 import { Store } from '../src/store.js';
 import { Delivery } from '../src/delivery.js';
 import { readable } from '../src/presentation.js';
+import { notificationHistory } from '../src/views.js';
 import { completeSources, RecordingDesktop, temporaryProfile, VirtualClock } from './fixture.js';
 
 const T = '2026-10-22T12:00:00.000Z';
@@ -40,6 +41,73 @@ async function setup(t: TestContext, classifier?: Classifier) {
 }
 
 const notify = { type: 'Choice', choice: 'notify', probabilities: { notify: 0.9, suppress: 0.1 }, confidence: 0.9 };
+
+test('merge conflict notifications follow confirmed transitions and survive restart and discovery', async t => {
+  const { path, store, monitor, delivery, desktop } = await setup(t);
+  const observe = (mergeStatus: string | null) => monitor.observe({ snapshot: { ...A, mergeStatus }, sources: completeSources, events: [] });
+  await observe('clean');
+  // Discovery can replace the displayed snapshot before the next detail poll.
+  monitor.track({ ...A, mergeStatus: 'dirty' }, 'discovery');
+  await observe('dirty');
+  await observe('dirty');
+  await delivery.runDue();
+  assert.equal(desktop.submissions.length, 1);
+  assert.equal(desktop.submissions[0]!.body, 'Merge conflicts');
+  assert.equal(desktop.submissions[0]!.destination, 'https://github.com/acme/widget/pull/7');
+  store.close();
+  const reopened = new Store(path);
+  t.after(() => reopened.close());
+  const restarted = new Monitor(reopened, new VirtualClock(T), 'alex', [], T);
+  for (const mergeStatus of [null, 'unknown', 'future-state', 'dirty']) {
+    await restarted.observe({ snapshot: { ...A, mergeStatus }, sources: completeSources, events: [] });
+  }
+  assert.equal(reopened.notifications().length, 1);
+  for (const mergeStatus of ['blocked', 'dirty', 'behind', 'dirty', 'unstable', 'dirty', 'has_hooks', 'dirty']) {
+    await restarted.observe({ snapshot: { ...A, mergeStatus }, sources: completeSources, events: [] });
+  }
+  assert.equal(reopened.notifications().length, 5);
+  assert.equal(reopened.activities('A').filter(item => item.event.kind === 'merge_conflict').length, 5);
+});
+
+test('merge conflicts are silent at baseline, when unknown, on others’ PRs, and after close', async t => {
+  const { store, monitor } = await setup(t);
+  for (const snapshot of [A, B, { ...A, id: 'C', number: 9 }]) {
+    if (snapshot.id === 'C') monitor.track(snapshot, 'manual');
+    for (const mergeStatus of ['dirty', 'dirty']) {
+      await monitor.observe({ snapshot: { ...snapshot, mergeStatus }, sources: completeSources, events: [] });
+    }
+  }
+  assert.equal(store.notifications().length, 0);
+  for (const snapshot of [B, { ...A, state: 'closed' }]) {
+    for (const mergeStatus of ['clean', 'dirty']) {
+      await monitor.observe({ snapshot: { ...snapshot, mergeStatus }, sources: completeSources, events: [] });
+    }
+  }
+  assert.equal(store.notifications().length, 0);
+});
+
+test('incomplete conflict observations do not consume the transition', async t => {
+  const { store, monitor } = await setup(t);
+  await monitor.observe({ snapshot: { ...A, mergeStatus: 'clean' }, sources: completeSources, events: [] });
+  await monitor.observe({ snapshot: { ...A, mergeStatus: 'dirty' }, sources: { ...completeSources, reviews: 'incomplete' }, events: [] });
+  assert.equal(store.notifications().length, 0);
+  await monitor.observe({ snapshot: { ...A, mergeStatus: 'dirty' }, sources: completeSources, events: [] });
+  assert.equal(store.notifications().length, 1);
+});
+
+test('conflict history displays the event without claiming a GitHub transition timestamp', async t => {
+  const { store, monitor, delivery } = await setup(t);
+  for (const mergeStatus of ['clean', 'dirty']) {
+    await monitor.observe({ snapshot: { ...A, mergeStatus }, sources: completeSources, events: [] });
+  }
+  await delivery.runDue();
+  const record = notificationHistory(store, new URLSearchParams()).items[0]!;
+  assert.equal(record.presentation!.summary, 'Merge conflicts');
+  assert.equal(record.timing.lagMs, null);
+  assert.equal(record.timing.ciExcluded, false);
+  assert.equal(record.timing.unavailableReason,
+    'Merge conflict transitions are timed locally, so GitHub-to-notification lag is unavailable.');
+});
 const classificationCases: { name: string; answer?: unknown; error?: boolean; absent?: boolean; decision: string; reason?: string }[] = [
   { name: 'notify', answer: notify, decision: 'eligible' },
   { name: 'low confidence suppress', answer: { ...notify, choice: 'suppress', confidence: 0.001 }, decision: 'classified_suppress' },

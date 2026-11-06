@@ -86,6 +86,7 @@ const activityActions: Record<Event['kind'], string> = {
   changes_requested: 'requested changes', review_requested: 'requested a review', close: 'closed the pull request',
   merge: 'merged the pull request', reopen: 'reopened the pull request', ready_for_review: 'marked ready for review',
   converted_to_draft: 'converted to draft', commit: 'pushed commits', ci_failure: 'CI failed', ci_success: 'CI passed',
+  merge_conflict: 'Merge conflicts',
 };
 function reviewerAvatar(person: { login: string; avatar: string | null }, state: keyof PrView['groups']): HTMLElement {
   const result = node('span', undefined, 'reviewer-avatar');

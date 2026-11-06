@@ -134,7 +134,10 @@ export class Monitor {
     if (pr.snapshot.head !== observation.snapshot.head && (observation.sources.workflows === 'unchanged' || observation.sources.jobs === 'unchanged')) {
       throw new Error('Workflow cache does not belong to the current head');
     }
-    const unchanged = pr.baselineComplete && sourceNames.every(source => observation.sources[source] === 'unchanged')
+    const mergeStatus = observation.snapshot.mergeStatus;
+    const mergeConflict = mergeStatus === 'dirty' ? true
+      : ['clean', 'blocked', 'behind', 'unstable', 'has_hooks'].includes(mergeStatus ?? '') ? false : pr.mergeConflict;
+    const unchanged = pr.baselineComplete && mergeConflict === pr.mergeConflict && sourceNames.every(source => observation.sources[source] === 'unchanged')
       && !observation.events.length && !observation.reviews.length && !observation.workflows?.length && !observation.rawIds.length
       && isDeepStrictEqual(pr.snapshot, observation.snapshot)
       && (!observation.fetchState || isDeepStrictEqual(pr.fetchState, observation.fetchState));
@@ -172,6 +175,13 @@ export class Monitor {
         return;
       }
       if (result.event && !known.has(eventKey(result.event))) fresh.set(eventKey(result.event), { event: result.event, observedAt: this.clock.now() });
+    }
+    if (pr.baselineComplete && this.own(pr) && pr.snapshot.state === 'open' && mergeConflict === true && pr.mergeConflict === false) {
+      const event: Event = {
+        source: 'timeline', id: `merge-conflict:${pr.generation}:${pr.revision}`, kind: 'merge_conflict',
+        occurredAt: this.clock.now(), actor: null, body: '',
+      };
+      fresh.set(eventKey(event), { event, observedAt: this.clock.now() });
     }
     const events = [...fresh.values()].sort((a, b) => compareEvents(a.event, b.event));
     const all = [...history.map(activity => activity.event), ...events.map(item => item.event)];
@@ -234,7 +244,7 @@ export class Monitor {
       const bundled = decisions.filter(item => item.delivery === 'bundle').map(item => item.event);
       if (bundled.length) this.prepare(pr, bundled, 'bundled', combined);
       const reviewBatch = batches.findLast(batch => batch.data.observation.sources.reviews === 'complete');
-      this.save({ ...pr, baselineComplete: true, reviews: reviewBatch?.data.observation.reviews ?? pr.reviews,
+      this.save({ ...pr, baselineComplete: true, mergeConflict, reviews: reviewBatch?.data.observation.reviews ?? pr.reviews,
         fetchState: observation.fetchState ?? pr.fetchState });
       for (const activity of history) {
         if (activity.event.kind === 'review' && activity.visible && !readable(activity.event.body) && linkedReviews.has(activity.event.id)) {
