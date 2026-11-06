@@ -94,8 +94,9 @@ export async function focusAndRecovery(page, capture) {
     check(await page.getByText('CI in progress', { exact: true }).isVisible(), 'Pending CI remains independent and visible');
 
     await go('/notification-history');
-    const first = page.locator('.notification-header').first();
-    check(!(await first.locator('time').textContent()).includes('ago') && (await first.locator('time').textContent()).includes(':'), 'History shows a precise date and time');
+    const first = page.locator('.notification-meta').first();
+    const timestamp = first.locator('time').first();
+    check((await timestamp.textContent()).includes('ago') && (await first.locator(`#${await timestamp.getAttribute('aria-describedby')}`).textContent()).includes(':'), 'History shows relative creation time with the precise date and time available as a description');
     check(await first.locator('.notification-repository').count() === 0, 'History does not repeat the repository and title');
     await capture('history.png', { fullPage: false });
     check(errors.length === 0, `No runtime errors: ${errors.join('; ')}`);

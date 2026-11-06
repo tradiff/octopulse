@@ -13,6 +13,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { webFixture } from './web-fixture.js';
 import { completeSources, temporaryProfile, VirtualClock, RecordingDesktop } from './fixture.js';
 import type { RefreshStatus } from '../src/scheduler.js';
+import { desktopActivity } from '../src/presentation.js';
 
 test('filter defaults distinguish omitted, recognized empty and unknown values', () => {
   assert.deepEqual(filters(new URLSearchParams()), { tracking: ['tracked'], lifecycle: ['open'], repository: '', actors: [] });
@@ -74,6 +75,110 @@ test('history filters before counting, clamps pages, preserves bundles and uses 
   const inactive = notificationHistory(store, new URLSearchParams('pr-state=inactive&pr-state=closed'));
   assert.ok(inactive.total > 50); assert.equal(inactive.items[0]!.pr.snapshot.title, 'Renamed current PR');
   assert.notEqual(inactive.items[0]!.intent.title, 'Renamed current PR');
+});
+
+test('history preserves full event text and saved order while desktop excerpts stay truncated, with bounded reads and a saved-body fallback', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  const { store, monitor } = fixture;
+  const snapshot = store.pr('A')!.snapshot;
+  const events = [
+    Event.parse({ source: 'issue_comment', id: 'history-comment', kind: 'comment', actor: { login: 'bea', avatar: 'https://example.com/bea.png' }, occurredAt: fixture.clock.now(), body: 'Keep cancellation intact when retries overlap shutdown. '.repeat(5) }),
+    Event.parse({ source: 'review', id: 'history-review', kind: 'approval', actor: { login: 'cam' }, occurredAt: fixture.clock.now(), body: 'Looks good to merge.' }),
+  ];
+  await monitor.observe({ snapshot, sources: completeSources, events });
+  const saved = store.notifications().at(-1)!.data;
+  store.insertNotification({ ...saved, createdAt: '2026-10-23T12:00:00Z', intent: { ...saved.intent, events: events.map(event => `${event.source}:${event.id}`) } });
+  t.mock.method(store, 'activities', () => { throw new Error('History cannot read the entire PR activity log'); });
+  const record = notificationHistory(store, new URLSearchParams()).items[0]!;
+  assert.deepEqual(record.presentation, { ...desktopActivity(events, false), updates: desktopActivity(events, false).updates.map((update, index) => ({
+    ...update, bodyHtml: `<p>${events[index]!.body.trim()}</p>\n`,
+  })) });
+  assert.equal(record.presentation!.summary, '2 updates');
+  assert.equal(record.presentation!.updates[0]!.actor!.avatar, 'https://example.com/bea.png');
+  assert.equal(record.presentation!.updates[0]!.text, events[0]!.body.trim());
+  assert.ok(desktopActivity(events).updates[0]!.text.length <= 42);
+  assert.deepEqual(record.decisions, ['eligible', 'eligible']);
+  store.insertNotification({ ...saved, createdAt: '2026-10-23T13:00:00Z', intent: { ...saved.intent, events: ['issue_comment:history-comment'] } });
+  const single = notificationHistory(store, new URLSearchParams()).items[0]!;
+  assert.equal(single.presentation!.updates[0]!.text, events[0]!.body.trim());
+  assert.ok(desktopActivity([events[0]!]).updates[0]!.text.length <= 100);
+  store.insertNotification({ ...saved, createdAt: '2026-10-24T12:00:00Z', intent: { ...saved.intent, events: ['issue_comment:missing'], body: 'The original saved body.' } });
+  const fallback = notificationHistory(store, new URLSearchParams()).items[0]!;
+  assert.equal(fallback.presentation, null);
+  assert.equal(fallback.intent.body, 'The original saved body.');
+});
+
+test('notification history renders source Markdown with the PR comment sanitizer', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  const saved = fixture.store.notifications()[0]!.data;
+  const activity = Activity.parse({ event: { source: 'issue_comment', id: 'history-markdown', kind: 'comment', occurredAt: fixture.clock.now(),
+    body: '**Keep cancellation** and `retry()`\n\n- First item\n- [ ] Pending\n\n[Guide](docs/retries.md)\n\n```ts\nconst retry = true;\n```\n\n<script>alert(1)</script><img src="javascript:alert(1)" onerror="alert(1)" alt="unsafe">' },
+    observedAt: fixture.clock.now(), actorType: 'human_other', decision: 'eligible', delivery: 'immediate', classification: null, visible: true });
+  fixture.store.saveActivity(saved.intent.prId, activity);
+  fixture.store.insertNotification({ ...saved, createdAt: '2026-10-24T12:00:00Z', intent: { ...saved.intent, events: ['issue_comment:history-markdown'] } });
+  const html = notificationHistory(fixture.store, new URLSearchParams()).items[0]!.presentation!.updates[0]!.bodyHtml;
+  assert.match(html, /<strong>Keep cancellation<\/strong> and <code>retry\(\)<\/code>/);
+  assert.match(html, /<ul>/); assert.match(html, /type="checkbox" disabled/);
+  assert.ok(html.includes(`href="https://github.com/${fixture.store.pr(saved.intent.prId)!.snapshot.repository}/docs/retries.md"`));
+  assert.match(html, /<pre><code>const retry = true;/);
+  assert.doesNotMatch(html, /<script|javascript:|onerror=/);
+});
+
+test('notification lag uses the earliest GitHub event and original successful delivery, including resends', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  const { store } = fixture;
+  const saved = store.notifications()[0]!.data;
+  const early = Activity.parse({ event: { source: 'issue_comment', id: 'lag-early', kind: 'comment', occurredAt: '2026-10-23T12:58:00+01:00', body: 'Earlier event' },
+    observedAt: '2026-10-23T11:59:00Z', actorType: 'human_other', decision: 'eligible', delivery: 'bundle', classification: null, visible: true });
+  const late = Activity.parse({ ...early, event: { ...early.event, id: 'lag-late', occurredAt: '2026-10-23T11:59:40Z' }, observedAt: '2026-10-23T11:59:50Z' });
+  for (const activity of [late, early]) store.saveActivity(saved.intent.prId, activity);
+  const data = { ...saved, createdAt: '2026-10-23T12:00:00Z', status: 'sent' as const, deliveredAt: '2026-10-23T12:00:10Z',
+    intent: { ...saved.intent, events: ['issue_comment:lag-late', 'issue_comment:lag-early'] } };
+  const id = store.insertNotification(data);
+  t.mock.method(store, 'activities', () => { throw new Error('Unbounded history activity read'); });
+  t.mock.method(store, 'attempts', () => { throw new Error('History must project first delivery in its bounded storage query'); });
+  const timing = () => notificationHistory(store, new URLSearchParams()).items.find(record => record.id === id)!.timing;
+  assert.deepEqual(timing(), { eventAt: early.event.occurredAt, observedAt: early.observedAt, deliveredAt: data.deliveredAt,
+    lagMs: 130000, detectionMs: 60000, deliveryMs: 70000, ciExcluded: false, unavailableReason: null });
+  // Attempts are deliberately inserted out of chronological order.
+  store.insertAttempt(id, { startedAt: '2026-10-23T17:59:59Z', finishedAt: '2026-10-23T18:00:00Z', result: 'sent' });
+  store.insertAttempt(id, { startedAt: '2026-10-23T12:00:00Z', finishedAt: data.deliveredAt, result: 'sent' });
+  store.insertAttempt(id, { startedAt: '2026-10-23T11:59:59Z', finishedAt: '2026-10-23T12:00:00Z', result: 'transient' });
+  store.saveNotification(id, { ...data, deliveredAt: '2026-10-23T18:00:00Z' });
+  assert.equal(timing().lagMs, 130000, 'A resend cannot inflate original delivery lag');
+  assert.equal(timing().deliveredAt, data.deliveredAt);
+  store.saveNotification(id, { ...data, status: 'pending', deliveredAt: null });
+  assert.equal(timing().lagMs, 130000, 'An in-progress resend retains the original successful timing');
+  store.saveNotification(id, { ...data, status: 'failed', deliveredAt: null, reason: 'transient' });
+  assert.equal(timing().lagMs, 130000, 'A failed resend retains the original successful timing');
+});
+
+test('notification lag explains pending, missing, local CI and inconsistent-clock timing instead of inventing values', async t => {
+  const fixture = await webFixture(); t.after(() => fixture.close());
+  const { store } = fixture;
+  const saved = store.notifications()[0]!.data;
+  const activity = Activity.parse({ event: { source: 'issue_comment', id: 'lag-source', kind: 'comment', occurredAt: '2026-10-23T11:59:00Z' },
+    observedAt: '2026-10-23T11:59:30Z', actorType: 'human_other', decision: 'eligible', delivery: 'immediate', classification: null, visible: true });
+  store.saveActivity(saved.intent.prId, activity);
+  store.saveActivity(saved.intent.prId, { ...activity, event: Event.parse({ source: 'ci', id: 'lag-ci', kind: 'ci_success', occurredAt: activity.observedAt }) });
+  const data = { ...saved, createdAt: '2026-10-23T12:00:00Z', status: 'pending' as const, deliveredAt: null,
+    intent: { ...saved.intent, events: ['issue_comment:lag-source'] } };
+  const id = store.insertNotification(data);
+  const timing = () => notificationHistory(store, new URLSearchParams()).items.find(record => record.id === id)!.timing;
+  assert.equal(timing().lagMs, null); assert.match(timing().unavailableReason!, /No successful/);
+  store.saveNotification(id, { ...data, status: 'sent', deliveredAt: '2026-10-23T12:00:00Z' });
+  assert.equal(timing().lagMs, 60000);
+  store.saveNotification(id, { ...data, status: 'sent', deliveredAt: '2026-10-23T12:00:00Z', intent: { ...data.intent, events: ['ci:lag-ci'] } });
+  assert.equal(timing().lagMs, null); assert.match(timing().unavailableReason!, /CI transitions/);
+  store.saveNotification(id, { ...data, status: 'sent', deliveredAt: '2026-10-23T12:00:00Z', intent: { ...data.intent, events: ['ci:lag-ci', ...data.intent.events] } });
+  assert.equal(timing().lagMs, 60000); assert.equal(timing().ciExcluded, true, 'Mixed bundles use only genuine GitHub timestamps');
+  store.saveNotification(id, { ...data, status: 'sent', deliveredAt: '2026-10-23T12:00:00Z', intent: { ...data.intent, events: [...data.intent.events, 'issue_comment:missing'] } });
+  assert.equal(timing().lagMs, null); assert.match(timing().unavailableReason!, /unavailable/);
+  store.saveNotification(id, { ...data, status: 'sent', deliveredAt: '2026-10-23T11:59:20Z' });
+  assert.equal(timing().lagMs, null); assert.match(timing().unavailableReason!, /clock/);
+  store.saveNotification(id, { ...data, status: 'sent', deliveredAt: '2026-10-23T12:00:00Z' });
+  store.updateActivity(saved.intent.prId, { ...activity, observedAt: '2026-10-23T11:58:59Z' });
+  assert.equal(timing().lagMs, null); assert.match(timing().unavailableReason!, /clock/);
 });
 
 test('PR pages filter and count queues in storage with stable ordering and bounded projections', async t => {

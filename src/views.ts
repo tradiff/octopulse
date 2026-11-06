@@ -1,7 +1,7 @@
 import { canonical } from './model.js';
-import type { Actor, PullRequest } from './model.js';
+import type { Activity, Actor, PullRequest } from './model.js';
 import { ciSummary } from './ci.js';
-import { readable } from './presentation.js';
+import { desktopActivity, readable } from './presentation.js';
 import { commentHtml } from './comment.js';
 import { Monitor } from './monitor.js';
 import { ActivityCursor, Store } from './store.js';
@@ -67,9 +67,28 @@ export function notificationHistory(store: Store, query: URLSearchParams) {
   const page = store.notificationPage(query);
   return {
     ...page, filters: filter, repositories: store.repositories(),
-    items: page.items.map(({ id, data, snapshot, tracked, decisions }) => {
+    items: page.items.map(({ id, data, snapshot, tracked, activities, firstDeliveredAt }) => {
+      const complete = activities.length > 0 && activities.length === data.intent.events.length;
+      const githubEvents = activities.filter(activity => activity.event.source !== 'ci');
+      const earliest = complete ? githubEvents.reduce<Activity | null>((first, activity) =>
+        !first || Date.parse(activity.event.occurredAt) < Date.parse(first.event.occurredAt) ? activity : first, null) : null;
+      const deliveredAt = firstDeliveredAt ?? data.deliveredAt;
+      const detectionMs = earliest ? Date.parse(earliest.observedAt) - Date.parse(earliest.event.occurredAt) : null;
+      const deliveryMs = earliest && deliveredAt ? Date.parse(deliveredAt) - Date.parse(earliest.observedAt) : null;
+      const unavailableReason = !complete ? 'Source event timestamps are unavailable.'
+        : !earliest ? 'CI transitions are timed locally, so GitHub-to-notification lag is unavailable.'
+        : !deliveredAt ? 'No successful desktop delivery has been recorded.'
+        : detectionMs! < 0 || deliveryMs! < 0 ? 'The recorded timestamps are inconsistent; check the system clock.' : null;
+      const presentation = complete ? desktopActivity(activities.map(activity => activity.event), false) : null;
       return { id, intent: data.intent, createdAt: data.createdAt, deliveredAt: data.deliveredAt, status: data.status, reason: data.reason,
-        pr: { snapshot, state: snapshot.state === 'open' && snapshot.draft ? 'draft' : snapshot.state, tracked }, decisions };
+        pr: { snapshot, state: snapshot.state === 'open' && snapshot.draft ? 'draft' : snapshot.state, tracked },
+        decisions: activities.map(activity => activity.decision),
+        timing: { eventAt: earliest?.event.occurredAt ?? null, observedAt: earliest?.observedAt ?? null, deliveredAt,
+          lagMs: unavailableReason ? null : detectionMs! + deliveryMs!, detectionMs: unavailableReason ? null : detectionMs,
+          deliveryMs: unavailableReason ? null : deliveryMs, ciExcluded: githubEvents.length < activities.length, unavailableReason },
+        presentation: presentation ? { ...presentation,
+          updates: presentation.updates.map((update, index) => ({ ...update,
+            bodyHtml: commentHtml(activities[index]!.event.body, snapshot.repository) })) } : null };
     }),
   };
 }

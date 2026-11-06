@@ -31,7 +31,7 @@ export async function themeAndAccessibility(page, capture) {
       if (path === '/notification-history') {
         check(await page.locator('.notification-header .badge').count() === 0, 'History omits internal delivery categories');
         check(await page.getByText('Accepted by service', { exact: true }).count() === 0, 'History omits routine successful-delivery labels');
-        check(await page.locator('.notification-header > time').first().isVisible(), 'History retains notification timestamps');
+        check(await page.locator('.notification-delivery time').first().isVisible(), 'History retains notification timestamps');
       }
       const primaryText = path === '/logs' ? '.log-message' : '.row-title';
       const secondaryText = path === '/' ? '.repository' : path === '/logs' ? '.log > time' : '.notification-preview';
@@ -77,9 +77,8 @@ export async function themeAndAccessibility(page, capture) {
     check(await page.getByText('Your review requested', { exact: true }).isVisible(), 'Direct responsibility is labeled');
     check(await page.getByText('Team review requested', { exact: true }).isVisible(), 'Team responsibility is labeled separately');
     await go('/notification-history');
-    await page.locator('.notification > summary').first().click();
-    check(await page.getByRole('heading', { name: 'Recorded delivery state', exact: true }).first().isVisible(), 'History reveals recorded delivery state');
-    check(await page.getByText('Accepted by desktop service', { exact: true }).first().isVisible(), 'Acceptance timestamp has accurate wording');
+    check(await page.locator('.notification-delivery').first().isVisible(), 'History keeps recorded delivery state visible');
+    check(await page.locator('.delivery-sent').count() === 0, 'Successful deliveries do not add routine status labels');
     check(await page.getByRole('button', { name: 'Resend', exact: true }).first().isEnabled(), 'Resend remains an authenticated local action');
     await capture('theme-history-expanded.png');
     await go('/logs?level=warn');

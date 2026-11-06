@@ -231,14 +231,17 @@ export class Store {
     const total = z.number().int().parse(this.db.prepare(`SELECT count(*) ${from}`).pluck().get(...where.values));
     const bounds = pageBounds(total, query);
     const items = this.db.prepare(`SELECT n.id, n.data, json_extract(p.data, '$.snapshot') snapshot, json_extract(p.data, '$.tracked') tracked,
-      (SELECT json_group_array(json_extract(a.data, '$.decision') ORDER BY CAST(e.key AS INTEGER))
+      (SELECT json_extract(t.data, '$.finishedAt') FROM attempts t WHERE t.notification_id = n.id
+        AND json_extract(t.data, '$.result') = 'sent' AND json_extract(t.data, '$.finishedAt') IS NOT NULL
+        ORDER BY julianday(json_extract(t.data, '$.finishedAt')), t.id LIMIT 1) firstDeliveredAt,
+      (SELECT json_group_array(json(a.data) ORDER BY CAST(e.key AS INTEGER))
         FROM json_each(n.data, '$.intent.events') e JOIN activities a ON a.pr_id = n.pr_id
-          AND a.source = substr(e.value, 1, instr(e.value, ':') - 1) AND a.source_id = substr(e.value, instr(e.value, ':') + 1)) decisions
+           AND a.source = substr(e.value, 1, instr(e.value, ':') - 1) AND a.source_id = substr(e.value, instr(e.value, ':') + 1)) activities
       ${from} ORDER BY julianday(json_extract(n.data, '$.createdAt')) DESC, n.id DESC LIMIT 50 OFFSET ?`)
       .all(...where.values, (bounds.page - 1) * 50).map(row => {
-        const value = IdRow.extend({ snapshot: z.string(), tracked: z.number(), decisions: z.string() }).parse(row);
+        const value = IdRow.extend({ snapshot: z.string(), tracked: z.number(), activities: z.string(), firstDeliveredAt: Instant.nullable() }).parse(row);
         return { id: value.id, data: Notification.parse(JSON.parse(value.data)), snapshot: Snapshot.parse(JSON.parse(value.snapshot)),
-          tracked: value.tracked === 1, decisions: z.array(z.string()).parse(JSON.parse(value.decisions)) };
+          tracked: value.tracked === 1, activities: z.array(Activity).parse(JSON.parse(value.activities)), firstDeliveredAt: value.firstDeliveredAt };
       });
     return { ...bounds, items };
   }

@@ -48,11 +48,8 @@ export async function navigation(page, capture) {
 
   await go('/notification-history');
   check(await page.locator('.notification').count() === 50, 'History page size is fifty');
-  check(await page.locator('.notification-body').first().isHidden(), 'History content starts collapsed');
-  const notificationSummary = page.locator('.notification > summary').first();
-  await notificationSummary.focus(); await page.keyboard.press('Enter');
-  check(await page.locator('.notification-body').first().isVisible(), 'Keyboard expands saved notification content');
-  check(await page.getByText('Service acceptance does not confirm the notification was displayed or read.', { exact: true }).first().isVisible(), 'Transport acceptance is not presented as user acknowledgement');
+  check(await page.locator('.notification-body').first().isVisible(), 'History content is visible without expansion');
+  check(await page.locator('.notification > summary').count() === 0, 'History has no disclosure controls');
   check(await page.getByText('Accepted by service', { exact: true }).count() === 0, 'Sent records omit routine delivery labels');
   await page.getByRole('button', { name: 'Next', exact: true }).click(); await ready();
   check(await page.locator('.notification').count() > 0 && await page.locator('.notification').count() < 50, 'Last page contains remaining records');
@@ -64,12 +61,10 @@ export async function navigation(page, capture) {
     && await page.getByRole('button', { name: 'All', exact: true }).getAttribute('aria-pressed') === 'true', 'All actors explicitly clears the actor restriction');
   await page.getByRole('button', { name: 'Other human', exact: true }).click(); await ready();
   const before = await page.evaluate(async () => (await (await fetch('/api/notification-history')).json()).total);
-  await page.locator('.notification > summary').first().click();
   await page.getByRole('button', { name: 'Resend', exact: true }).first().click(); await ready();
   const after = await page.evaluate(async () => (await (await fetch('/api/notification-history')).json()).total);
   check(before === after, 'Resend retains the history record count');
   await page.route('**/api/notification-records/*/resend', route => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"Synthetic resend failure"}' }));
-  await page.locator('.notification > summary').first().click();
   await page.getByRole('button', { name: 'Resend', exact: true }).first().click();
   await page.getByText('Synthetic resend failure', { exact: true }).waitFor(); check(true, 'Resend failures are visible');
   await page.unroute('**/api/notification-records/*/resend');

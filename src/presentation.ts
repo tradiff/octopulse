@@ -53,16 +53,16 @@ const headings: Record<Event['kind'], string> = {
   converted_to_draft: 'Converted to draft', commit: 'New commits', ci_failure: 'CI failed', ci_success: 'CI passed',
 };
 
-export function desktopActivity(events: Event[]) {
+export function desktopActivity(events: Event[], truncate = true) {
   const bundled = events.length > 1;
   return {
     summary: events.length === 1 ? events[0]!.kind === 'approval' ? '✅ Approved' : headings[events[0]!.kind] : `${events.length} updates`,
     updates: events.map(event => {
       const actor = event.kind.startsWith('ci_') ? null : event.actor;
-      const text = bundled ? shortened(readable(event.body), 42) : excerpt(event.body);
+      const text = !truncate ? readable(event.body) : bundled ? shortened(readable(event.body), 42) : excerpt(event.body);
       const comment = ['comment', 'inline_comment'].includes(event.kind);
       const action = event.kind === 'approval' ? 'approved' : wording[event.kind].replace(/^[💬✅❗👀]\s*/u, '');
-      return { actor, separator: bundled && !comment ? ' ' : ': ',
+      return { actor, separator: bundled && !comment ? ' ' : ': ', action: bundled && !comment ? action : '',
         text: bundled && !comment ? `${action}${text ? `: ${text}` : ''}` : text || headings[event.kind] };
     }),
   };

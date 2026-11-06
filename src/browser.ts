@@ -135,6 +135,35 @@ function time(input: string | null, precise = false): HTMLElement {
   result.dateTime = date.toISOString(); result.title = new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'long' }).format(date);
   return result;
 }
+function notificationHint(target: HTMLElement, description: string, id: string): HTMLElement {
+  const wrapper = node('span', undefined, 'notification-hint');
+  const tooltip = node('span', description, 'notification-tooltip'); tooltip.id = id; tooltip.hidden = true; tooltip.setAttribute('role', 'tooltip');
+  target.tabIndex = 0; target.removeAttribute('title'); target.setAttribute('aria-describedby', id);
+  const show = () => {
+    tooltip.hidden = false;
+    const anchor = target.getBoundingClientRect(), bounds = tooltip.getBoundingClientRect();
+    tooltip.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - bounds.width - 8))}px`;
+    tooltip.style.top = `${anchor.bottom + bounds.height + 8 <= innerHeight ? anchor.bottom + 8 : Math.max(8, anchor.top - bounds.height - 8)}px`;
+  };
+  wrapper.addEventListener('mouseenter', show); target.addEventListener('focus', show);
+  wrapper.addEventListener('mouseleave', () => { if (document.activeElement !== target) tooltip.hidden = true; });
+  target.addEventListener('blur', () => { if (!wrapper.matches(':hover')) tooltip.hidden = true; });
+  target.addEventListener('keydown', event => { if (event.key === 'Escape') tooltip.hidden = true; });
+  wrapper.append(target, tooltip); return wrapper;
+}
+function duration(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1000);
+  if (milliseconds > 0 && seconds === 0) return '<1s';
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m${seconds % 60 ? ` ${seconds % 60}s` : ''}`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`;
+  return `${Math.floor(hours / 24)}d${hours % 24 ? ` ${hours % 24}h` : ''}`;
+}
+const notificationDateTime = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short',
+});
 function fail(error: unknown): void {
   errorBox.hidden = false;
   errorBox.querySelector('span')!.textContent = error instanceof Error ? error.message : 'Operation failed';
@@ -500,40 +529,70 @@ function pagination(data: Pick<HistoryPage, 'page' | 'pages' | 'from' | 'to' | '
 function renderHistory(data: HistoryPage): void {
   filterControls(data.repositories, true); tabs.replaceChildren(); clearContent();
   for (const record of data.items) {
-    const card = node('details', undefined, 'notification'); const header = node('summary', undefined, 'notification-header');
-    const snapshot = record.pr.snapshot;
-    const description = node('div', undefined, 'notification-description');
-    const identity = prSummary(record.pr); const main = identity.querySelector('.row-main')!;
-    const metadata = main.querySelector('.row-context')!;
-    const context = node('div', undefined, 'notification-context'); context.append(main.querySelector('.row-title')!, ...metadata.children); metadata.remove();
-    main.append(context); description.append(identity);
-    const notificationBody = record.intent.body.replace(/(^|\n\n)((?:[^:\n]+: )?✅ )approval(?=:|\n\n|$)/g, '$1$2approved');
-    const excerpt = Array.from(notificationBody.replace(/(^|\n\n)([^:\n]+): ✅ approved: Approved(?=$|\n\n)/g, '$1$2: ✅ Approved').replace(/\s+/g, ' ').trim());
-    if (excerpt.length) {
-      const preview = node('span', undefined, 'notification-preview');
-      const icons = { '✅': 'approvers', '💬': 'commenters', '❗': 'decliners', '👀': 'requested' } as const;
-      for (const part of `${excerpt.slice(0, 180).join('')}${excerpt.length > 180 ? '…' : ''}`.split(/(✅|💬|❗|👀)/u)) {
-        if (Object.hasOwn(icons, part)) {
-          const state = icons[part as keyof typeof icons];
-          const icon = node('span', undefined, `event-icon event-${state}`); icon.setAttribute('role', 'img'); icon.setAttribute('aria-label', reviewerStates[state].label);
-          icon.append(reviewerIcon(state)); preview.append(icon);
-        } else preview.append(document.createTextNode(part));
-      }
-      main.append(preview);
+    const card = node('article', undefined, 'notification');
+    const preview = node('div', undefined, 'notification-preview');
+    const heading = node('h2', record.presentation?.summary.replace(/^✅ /u, '') ?? 'PR activity', 'notification-header');
+    heading.id = `notification-${record.id}`; card.setAttribute('aria-labelledby', heading.id);
+    if (record.presentation?.summary === '✅ Approved') {
+      const icon = node('span', undefined, 'event-icon event-approvers'); icon.append(reviewerIcon('approvers')); heading.prepend(icon);
     }
-    if (record.status !== 'sent') description.append(node('span', record.status === 'failed' ? 'Failed' : 'Pending', `delivery-status delivery-${record.status}`));
-    header.append(description, time(record.createdAt, true));
-    const body = node('div', undefined, 'notification-detail');
-    const preview = node('section'); preview.append(node('h3', 'Notification content'), node('p', notificationBody || displayLabel(record.intent.title), 'notification-body'),
-      link('Open pull request on GitHub ↗', `https://github.com/${snapshot.repository}/pull/${snapshot.number}`));
-    const delivery = node('section'); delivery.append(node('h3', 'Recorded delivery state'));
-    const created = node('p', undefined, 'meta'); created.append(node('span', 'Created'), time(record.createdAt)); delivery.append(created);
-    if (record.deliveredAt) { const accepted = node('p', undefined, 'meta'); accepted.append(node('span', 'Accepted by desktop service'), time(record.deliveredAt)); delivery.append(accepted); }
-    if (record.reason) delivery.append(node('p', record.reason, 'delivery-reason'));
-    delivery.append(node('p', [...new Set(record.decisions)].join(', ').replaceAll('_', ' '), 'muted'),
-      node('p', 'Service acceptance does not confirm the notification was displayed or read.', 'delivery-note'),
+    const identity = prSummary(record.pr);
+    const state = identity.querySelector('.pr-state-icon')!; preview.append(state, heading);
+    preview.append(...identity.querySelector('.row-main')!.children);
+    const body = node('div', undefined, 'notification-body');
+    if (record.presentation) {
+      for (const update of record.presentation.updates) {
+        const line = node('p');
+        if (update.actor) {
+          line.append(avatar(update.actor.login, update.actor.avatar ?? null), node('strong', update.actor.login), document.createTextNode(update.separator));
+        }
+        line.append(document.createTextNode(update.bodyHtml ? update.action : update.text));
+        if (line.textContent) body.append(line);
+        if (update.bodyHtml) {
+          const comment = node('div', undefined, 'comment-body');
+          // Only the server's allowlisted Markdown output enters this HTML sink.
+          comment.innerHTML = update.bodyHtml; body.append(comment);
+        }
+      }
+    } else {
+      body.append(node('p', record.intent.body.replace(/(^|\n\n)((?:[^:\n]+: )?✅ )approval(?=:|\n\n|$)/g, '$1$2approved') || displayLabel(record.intent.title)));
+    }
+    preview.append(body);
+    if (record.presentation && record.presentation.updates.length > 6) {
+      body.classList.add('notification-scroll'); body.tabIndex = 0; body.setAttribute('role', 'region');
+      body.setAttribute('aria-label', `Notification activity for ${record.pr.snapshot.title}`);
+      preview.append(node('p', `Scroll to see all ${record.presentation.updates.length} updates`, 'notification-scroll-hint'));
+    }
+    const delivery = node('div', undefined, 'notification-delivery');
+    if (record.status !== 'sent') delivery.append(node('span', record.status === 'failed' ? 'Failed' : 'Pending', `delivery-status delivery-${record.status}`));
+    const metadata = node('div', undefined, 'notification-meta');
+    const created = time(record.createdAt); created.setAttribute('aria-label', `Created ${created.textContent}`);
+    const behavior = node('span', record.intent.expiryMs === 0 ? 'Sticky' : 'Ephemeral', `notification-behavior ${record.intent.expiryMs === 0 ? 'behavior-sticky' : 'behavior-ephemeral'}`);
+    metadata.append(notificationHint(created, `Created ${notificationDateTime.format(new Date(record.createdAt))}`, `notification-${record.id}-created`));
+    const lag = node('span', undefined, 'notification-lag'); lag.append(node('span', '(Lag '), node('span', record.timing.lagMs === null ? '—' : duration(record.timing.lagMs), 'lag-value'), document.createTextNode(')'));
+    const lagDetails = record.timing.unavailableReason ?? [
+      `GitHub → desktop service: ${duration(record.timing.lagMs!)}`,
+      `Detection: ${duration(record.timing.detectionMs!)}`,
+      `Processing / delivery: ${duration(record.timing.deliveryMs!)}`,
+      '',
+      ...[
+        ['Earliest event', record.timing.eventAt], ['Observed', record.timing.observedAt], ['First delivery', record.timing.deliveredAt],
+      ].map(([label, at]) => `${label}: ${notificationDateTime.format(new Date(at!))}`),
+      '',
+      'Earliest GitHub event → first successful service acceptance. Includes batching and retries. Display is not confirmed.',
+      ...(record.timing.ciExcluded ? ['Locally timed CI updates are excluded.'] : []),
+    ].join('\n');
+    if (record.reason) {
+      const reasons = { transient: 'Desktop service temporarily unavailable.', permanent: 'Desktop service rejected the notification.', exhausted: 'Delivery retries exhausted.', expired: 'Notification expired before delivery.', untracked: 'Pull request is no longer tracked.', ambiguous: 'Delivery outcome could not be confirmed.' };
+      delivery.append(node('p', reasons[record.reason], 'delivery-reason'));
+    }
+    const actions = node('div', undefined, 'notification-actions');
+    const open = link('Open PR ↗', `https://github.com/${record.pr.snapshot.repository}/pull/${record.pr.snapshot.number}`); open.className = 'notification-open';
+    actions.append(open,
       actionButton('Resend', () => mutation(`/api/notification-records/${record.id}/resend`, 'POST', {})));
-    body.append(preview, delivery); card.append(header, body); content.append(card);
+    metadata.append(notificationHint(lag, lagDetails, `notification-${record.id}-lag`));
+    delivery.append(notificationHint(behavior, record.intent.expiryMs === 0 ? 'Stays until dismissed.' : 'Automatically dismisses after 10 seconds.', `notification-${record.id}-behavior`), metadata, actions);
+    card.append(preview, delivery); content.append(card);
   }
   if (!data.items.length) content.append(node('p', 'No notifications match these filters.', 'empty'));
   content.append(pagination(data, 'Notification pages'));

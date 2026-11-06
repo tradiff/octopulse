@@ -23,3 +23,4 @@
 - Run `npm run check`, `npm test`, and `npm run build` for implementation changes. Browser tests require Playwright Chromium; desktop integration tests require `dbus-run-session`.
 - Keep automated test coverage aligned with the current implementation.
 - Use disposable profiles and simulated service management for verification. Live deployment and legacy state migration are separate operations; the rewrite cannot open the legacy database schema.
+- Before ending any turn in which you change project files, redeploy the live service with `npm run user-service:restart` after verification, and confirm it is running and healthy. Report any deployment failure.
