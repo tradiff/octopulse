@@ -49,17 +49,18 @@ test('rich desktop layout has an unconditional context separator, compact update
   const signal = new AbortController().signal;
   for (const events of [[approval], [comment, approval]]) {
     assert.equal(await adapter.submit({ ...saved, events: events.map(eventKey) }, signal), 'sent');
-    assert.equal(sent.summary, events.length === 1 ? '✅ Approved' : '2 updates');
-    assert.ok(sent.body.startsWith('Make workflow retries reliable<br/>acme/widget #7 · alex<br/>&#160;<br/>'));
+    assert.equal(sent.summary, '');
+    assert.ok(sent.body.startsWith(`Make workflow retries reliable<br/><b>${events.length === 1 ? '✅ Approved' : '2 updates'}</b><br/>acme/widget #7 · alex<br/>&#160;<br/>`));
     assert.equal(sent.body.split('<br/>&#160;<br/>').length, 2);
-    assert.doesNotMatch(sent.body, /\(open\)|💬|✅/);
+    assert.doesNotMatch(sent.body, /\(open\)|💬/);
     assert.match(sent.body, /<b>cam<\/b>/);
     assert.doesNotMatch(sent.body, /commented/);
     if (events.length > 1) assert.match(sent.body, /<b>bea<\/b>: Looks good\./);
     assert.equal(sent.icon, 'git-open');
   }
   assert.equal(await adapter.submit({ ...saved, events: ['review:expired'], body: 'Saved <text>\n\nNext' }, signal), 'sent');
-  assert.equal(sent.summary, 'PR activity');
+  assert.equal(sent.summary, '');
+  assert.match(sent.body, /<b>PR activity<\/b>/);
   assert.ok(sent.body.endsWith('Saved &lt;text&gt;<br/><br/>Next'));
   assert.equal(await adapter.submit({ ...saved, prId: 'missing', title: 'Saved title', body: 'Saved <text>' }, signal), 'sent');
   assert.equal(sent.summary, 'Saved title');
@@ -87,7 +88,7 @@ test('desktop keeps hyphenated identities intact without changing stored logins,
     if (capabilities.length) {
       assert.match(sent.body, /#7 · byte\u2060-\u2060bot<br\/>/);
       assert.match(sent.body, /<b>cache\u2060-\u2060goblin<\/b>: byte-bot in the comment stays unchanged/);
-    } else assert.equal(sent.body, intent.body);
+    } else assert.ok(sent.body.endsWith(intent.body));
   }
   assert.equal(fixture.store.pr('A')!.snapshot.author, 'byte-bot');
   assert.equal(fixture.store.activities('A').find(item => eventKey(item.event) === eventKey(activity))!.event.actor!.login, 'cache-goblin');

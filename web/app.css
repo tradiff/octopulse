@@ -276,6 +276,8 @@ summary::-webkit-details-marker { display: none; }
 .empty p { margin: 6px 0; font-size: var(--text-body); }
 .notification { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; align-items: start; padding: 16px 24px; margin-bottom: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .notification-preview { position: relative; min-width: 0; overflow-wrap: anywhere; }
+.notification-title { display: flex; align-items: baseline; gap: 6px; margin: 0 60px 6px 0; }
+.notification-title .avatar { align-self: center; }
 .notification-header { display: flex; align-items: center; gap: 6px; margin: 0 60px 4px 0; font-size: var(--text-title); font-weight: 600; line-height: 1.4; }
 .notification-header .event-icon { align-items: center; justify-content: center; width: 16px; height: 16px; margin: 0; border-radius: 3px; background: var(--success); color: var(--surface); }
 .notification-header .event-icon svg { width: 14px; height: 14px; }
@@ -284,7 +286,7 @@ summary::-webkit-details-marker { display: none; }
 .event-approvers { color: var(--success); }
 .event-decliners { color: var(--danger); }
 .event-requested { color: var(--warning); }
-.notification .row-title { display: block; font-size: var(--text-body); font-weight: 400; color: var(--ink); margin: 0 60px 6px 0; }
+.notification .row-title { display: block; font-size: var(--text-body); font-weight: 400; color: var(--ink); margin: 0; }
 .notification .row-title:hover { color: var(--accent); }
 .notification .row-context { gap: 4px 10px; }
 .notification .row-context > .pr-meta::before { display: none; }
@@ -409,7 +411,7 @@ dialog .actions { justify-content: flex-end; margin-top: 24px; }
   .detail-columns { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .ci-section { border-left: 0; border-top: 1px solid var(--line); padding: 20px 0 0; }
   .notification { grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 16px; }
-  .notification-header, .notification .row-title { margin-right: 48px; }
+  .notification-header, .notification-title { margin-right: 48px; }
   .notification .pr-state-icon { width: 32px; height: 32px; }
   .notification-delivery { padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .notification-actions { margin-top: 0; padding-top: 0; }

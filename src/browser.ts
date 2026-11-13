@@ -532,14 +532,17 @@ function renderHistory(data: HistoryPage): void {
   for (const record of data.items) {
     const card = node('article', undefined, 'notification');
     const preview = node('div', undefined, 'notification-preview');
-    const heading = node('h2', record.presentation?.summary.replace(/^✅ /u, '') ?? 'PR activity', 'notification-header');
-    heading.id = `notification-${record.id}`; card.setAttribute('aria-labelledby', heading.id);
+    const heading = node('div', record.presentation?.summary.replace(/^✅ /u, '') ?? 'PR activity', 'notification-header');
     if (record.presentation?.summary === '✅ Approved') {
       const icon = node('span', undefined, 'event-icon event-approvers'); icon.append(reviewerIcon('approvers')); heading.prepend(icon);
     }
     const identity = prSummary(record.pr);
-    const state = identity.querySelector('.pr-state-icon')!; preview.append(state, heading);
-    preview.append(...identity.querySelector('.row-main')!.children);
+    const state = identity.querySelector('.pr-state-icon')!;
+    const title = identity.querySelector<HTMLElement>('.row-title')!;
+    title.id = `notification-${record.id}`; card.setAttribute('aria-labelledby', title.id);
+    const titleRow = node('div', undefined, 'notification-title');
+    titleRow.append(avatar(record.pr.snapshot.author, record.pr.snapshot.authorAvatar), title);
+    preview.append(state, titleRow, heading, identity.querySelector('.row-context')!);
     const body = node('div', undefined, 'notification-body');
     if (record.presentation) {
       for (const update of record.presentation.updates) {

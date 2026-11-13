@@ -56,8 +56,8 @@ test('desktop notifications put an 18px repository PNG before the repository nam
     assert.equal(await adapter.submit(intent, signal), 'sent');
   }
   assert.ok(messages.every(message => message.icon === 'git-open'), 'The main notification icon always conveys PR state');
-  assert.equal(messages[0]!.summary, intent.title);
-  assert.equal(messages[0]!.body, intent.body);
+  assert.equal(messages[0]!.summary, '');
+  assert.ok(messages[0]!.body.endsWith(intent.body));
   assert.doesNotMatch(messages[1]!.body, /<img\b/);
   assert.match(messages[1]!.body, /<br\/>acme\/widget #7 · alex<br\/>/);
   assert.doesNotMatch(messages[1]!.body, /\(open\)/);

@@ -228,8 +228,13 @@ export class DesktopAdapter implements Desktop {
             if (uri) image = `<img src="${escape(uri)}" alt="" width="18" height="18"/> `;
           }
           const repository = repositoryImage ? `<img src="${escape(pathToFileURL(repositoryImage).href)}" alt="" width="18" height="18"/> ` : '';
-          body = `${escape(shortened(pr.snapshot.title, 52))}<br/>${repository}${escape(githubLabel(pr.snapshot.repository, hiddenOwners))} #${pr.snapshot.number} · ${image}${loginLabel(pr.snapshot.author)}<br/>&#160;<br/>${body}`;
+          body = `${image}${escape(shortened(pr.snapshot.title, 52))}<br/><b>${escape(summary)}</b><br/>${repository}${escape(githubLabel(pr.snapshot.repository, hiddenOwners))} #${pr.snapshot.number} · ${loginLabel(pr.snapshot.author)}<br/>&#160;<br/>${body}`;
+          summary = '';
         }
+      } else if (pr) {
+        const activity = events.length && events.length === intent.events.length ? desktopActivity(events).summary : 'PR activity';
+        body = `${shortened(pr.snapshot.title, 52)}\n${activity}\n${githubLabel(pr.snapshot.repository, hiddenOwners)} #${pr.snapshot.number} · ${pr.snapshot.author}\n\n${body}`;
+        summary = '';
       }
       const id = await this.transport.notify({
         appName: 'Octopulse', replacesId: 0, icon: intent.kind === 'monitoring' ? 'dialog-warning' : `git-${state}`,

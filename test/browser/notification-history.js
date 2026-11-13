@@ -24,7 +24,8 @@ export async function notificationHistory(page, capture) {
   const first = page.locator('.notification').first();
   check(await first.evaluate(el => el.tagName === 'ARTICLE'), 'History entries are accessible articles, not dropdowns');
   check(await page.locator('.notification summary, .notification details').count() === 0, 'No history content requires expansion');
-  check(await first.getByRole('heading', { name: 'Approved', exact: true }).isVisible(), 'History shares the native activity heading');
+  check(await first.locator('.notification-header').innerText() === 'Approved', 'History shares the native activity summary');
+  check(await first.locator('.notification-title .avatar').getAttribute('aria-label') === 'alex', 'Author avatar leads the PR title');
   check(await first.locator('.notification-body').evaluate(el => { const copy = el.cloneNode(true); copy.querySelectorAll('.avatar').forEach(avatar => avatar.remove()); return copy.textContent.trim() === 'cam: Approved'; }), 'Native actor-led activity is rendered without duplicate action labels');
   check(await first.locator('.notification-body strong').textContent() === 'cam', 'Actor names lead activity lines');
   check(await first.evaluate(el => {
@@ -47,8 +48,8 @@ export async function notificationHistory(page, capture) {
   const arranged = () => first.evaluate(el => {
     const rect = selector => el.querySelector(selector).getBoundingClientRect();
     const heading = rect('.notification-header'), title = rect('.row-title'), context = rect('.row-context'), body = rect('.notification-body'), icon = rect('.pr-state-icon'), delivery = rect('.notification-delivery > :first-child');
-    return heading.bottom <= title.top && title.bottom <= context.top && context.bottom < body.top && icon.left > title.right
-      && (innerWidth > 700 ? delivery.left > body.right && Math.abs(delivery.top - heading.top) < 2 : delivery.top > body.bottom);
+    return title.bottom <= heading.top && heading.bottom <= context.top && context.bottom < body.top && icon.left > title.right
+      && (innerWidth > 700 ? delivery.left > body.right && Math.abs(delivery.top - rect('.notification-title').top) < 2 : delivery.top > body.bottom);
   });
   check(await arranged(), 'Native heading, PR context, body and trailing state icon precede the metadata column');
   check(Math.abs((await first.boundingBox()).x - (await page.locator('#page-title').boundingBox()).x) < 2, 'History content and its controls share a horizontal axis');
